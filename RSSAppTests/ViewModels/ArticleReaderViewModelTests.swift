@@ -1,65 +1,49 @@
 import Testing
 @testable import RSSApp
 
-@Suite("ArticleReaderViewModel")
+@Suite("ArticleSummaryViewModel — pre-extracted content")
 @MainActor
-struct ArticleReaderViewModelTests {
+struct ArticleSummaryPreExtractionTests {
 
-    @Test("initial state is loading")
-    func initialState() {
+    private static let sampleContent = ArticleContent(
+        title: "Test",
+        byline: "Author",
+        htmlContent: "<p>Body</p>",
+        textContent: "Body"
+    )
+
+    @Test("skips extraction when pre-extracted content is provided")
+    func skipsExtraction() {
+        let mock = MockArticleExtractionService()
         let article = TestFixtures.makeArticle()
-        let vm = ArticleReaderViewModel(article: article, extractor: MockArticleExtractionService())
-        guard case .loading = vm.state else {
-            Issue.record("Expected .loading, got \(vm.state)")
-            return
-        }
-    }
-
-    @Test("extractContent transitions to loaded on success")
-    func extractSuccess() async throws {
-        let content = ArticleContent(
-            title: "Test",
-            byline: "Author",
-            htmlContent: "<p>Body</p>",
-            textContent: "Body"
+        let vm = ArticleSummaryViewModel(
+            article: article,
+            preExtractedContent: Self.sampleContent,
+            extractor: mock
         )
-        let mock = MockArticleExtractionService(result: content)
-        let article = TestFixtures.makeArticle()
-        let vm = ArticleReaderViewModel(article: article, extractor: mock)
 
-        await vm.extractContent()
-
-        guard case .loaded(let loaded) = vm.state else {
-            Issue.record("Expected .loaded, got \(vm.state)")
-            return
-        }
-        #expect(loaded.title == "Test")
+        #expect(vm.extractedContent != nil)
+        #expect(vm.extractedContent?.title == "Test")
     }
 
-    @Test("extractContent transitions to failed on error")
-    func extractFailure() async {
-        let mock = MockArticleExtractionService(error: ArticleExtractionError.javascriptFailed)
+    @Test("extractedContent is nil when no pre-extracted content provided")
+    func noPreExtractedContent() {
         let article = TestFixtures.makeArticle()
-        let vm = ArticleReaderViewModel(article: article, extractor: mock)
+        let vm = ArticleSummaryViewModel(article: article, extractor: MockArticleExtractionService())
 
-        await vm.extractContent()
-
-        guard case .failed = vm.state else {
-            Issue.record("Expected .failed, got \(vm.state)")
-            return
-        }
+        #expect(vm.extractedContent == nil)
     }
 
-    @Test("extractContent transitions to failed when article has no link")
-    func extractNoLink() async {
-        let article = TestFixtures.makeArticle(link: nil)
-        let vm = ArticleReaderViewModel(article: article, extractor: MockArticleExtractionService())
+    @Test("extractedContent set from pre-extraction is available for discussion")
+    func preExtractedAvailableForDiscussion() {
+        let article = TestFixtures.makeArticle()
+        let vm = ArticleSummaryViewModel(
+            article: article,
+            preExtractedContent: Self.sampleContent,
+            extractor: MockArticleExtractionService()
+        )
 
-        await vm.extractContent()
-
-        guard case .failed = vm.state else {
-            Issue.record("Expected .failed, got \(vm.state)")
-            return
-        }
+        #expect(vm.extractedContent?.textContent == "Body")
+        #expect(vm.extractedContent?.byline == "Author")
     }
 }

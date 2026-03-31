@@ -3,19 +3,14 @@ import SwiftUI
 struct ArticleReaderView: View {
     let article: Article
 
-    @State private var viewModel: ArticleReaderViewModel
-    @State private var showDiscussion = false
+    @State private var showSummary = false
     @State private var showSettings = false
+    @State private var extractionState = ReaderExtractionState()
     @Environment(\.dismiss) private var dismiss
-
-    init(article: Article) {
-        self.article = article
-        self._viewModel = State(initialValue: ArticleReaderViewModel(article: article))
-    }
 
     var body: some View {
         NavigationStack {
-            content
+            articleContent
                 .navigationTitle(article.title)
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
@@ -31,59 +26,36 @@ struct ArticleReaderView: View {
                         .accessibilityLabel("Settings")
 
                         Button {
-                            showDiscussion = true
+                            showSummary = true
                         } label: {
-                            Image(systemName: "bubble.left.and.bubble.right")
+                            Image(systemName: "sparkles")
                         }
-                        .accessibilityLabel("Discuss with Claude")
-                        .disabled(!isContentReady)
+                        .accessibilityLabel("Summarize with AI")
+                        .disabled(article.link == nil)
                     }
                 }
                 .sheet(isPresented: $showSettings) {
                     APIKeySettingsView()
                 }
-                .sheet(isPresented: $showDiscussion) {
-                    if case .loaded(let articleContent) = viewModel.state {
-                        ArticleDiscussionView(article: article, content: articleContent)
-                    }
+                .sheet(isPresented: $showSummary) {
+                    ArticleSummaryView(article: article, preExtractedContent: extractionState.content)
                 }
-                .task { await viewModel.extractContent() }
         }
     }
 
-    // MARK: - Content states
+    // MARK: - Content
 
     @ViewBuilder
-    private var content: some View {
-        switch viewModel.state {
-        case .loading:
-            ProgressView("Loading article…")
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-        case .loaded(let articleContent):
-            ArticleReaderWebView(content: articleContent, baseURL: article.link)
+    private var articleContent: some View {
+        if let url = article.link {
+            ArticleReaderWebView(url: url, extractionState: extractionState)
                 .ignoresSafeArea(edges: .bottom)
-
-        case .failed(let message):
+        } else {
             ContentUnavailableView {
                 Label("Article Unavailable", systemImage: "exclamationmark.triangle")
             } description: {
-                Text(message)
-            } actions: {
-                if let link = article.link {
-                    Link("Open in Safari", destination: link)
-                        .buttonStyle(.bordered)
-                }
-                Button("Retry") {
-                    Task { await viewModel.extractContent() }
-                }
-                .buttonStyle(.bordered)
+                Text("This article has no URL.")
             }
         }
-    }
-
-    private var isContentReady: Bool {
-        if case .loaded = viewModel.state { return true }
-        return false
     }
 }

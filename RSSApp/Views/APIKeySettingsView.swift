@@ -12,7 +12,7 @@ struct APIKeySettingsView: View {
         NavigationStack {
             Form {
                 Section {
-                    SecureField("sk-ant-…", text: $keyInput)
+                    TextField("sk-ant-…", text: $keyInput)
                         .autocorrectionDisabled()
                         .textInputAutocapitalization(.never)
                 } header: {

@@ -1,126 +1,129 @@
+import os
 import SwiftUI
 import WebKit
 
+/// Shared state between the reader WebView and the summary sheet.
+/// The coordinator writes extracted content here; the parent view reads it.
+@MainActor
+@Observable
+final class ReaderExtractionState {
+    var content: ArticleContent?
+}
+
 struct ArticleReaderWebView: UIViewRepresentable {
-    let content: ArticleContent
-    let baseURL: URL?
+    let url: URL
+    let extractionState: ReaderExtractionState
+
+    private static let logger = Logger(
+        subsystem: "com.nicholas-lonsinger.rss-app",
+        category: "ArticleReaderWebView"
+    )
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(extractionState: extractionState)
+    }
 
     func makeUIView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
         config.mediaTypesRequiringUserActionForPlayback = .all
+
+        // Inject Readability.js so it's available when the page finishes loading.
+        if let scriptURL = Bundle.main.url(forResource: "readability", withExtension: "js"),
+           let readabilityJS = try? String(contentsOf: scriptURL, encoding: .utf8) {
+            let userScript = WKUserScript(
+                source: readabilityJS,
+                injectionTime: .atDocumentEnd,
+                forMainFrameOnly: true
+            )
+            config.userContentController.addUserScript(userScript)
+        } else {
+            Self.logger.fault("readability.js not found in app bundle")
+            assertionFailure("readability.js not found in app bundle")
+        }
+
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.scrollView.showsHorizontalScrollIndicator = false
+        webView.navigationDelegate = context.coordinator
+        webView.load(URLRequest(url: url))
         return webView
     }
 
     func updateUIView(_ webView: WKWebView, context: Context) {
-        webView.loadHTMLString(readerHTML, baseURL: baseURL)
+        // URL is constant for the lifetime of this view — no reload needed.
     }
 
-    // MARK: - Private
+    // MARK: - Coordinator
 
-    private var readerHTML: String {
+    final class Coordinator: NSObject, WKNavigationDelegate {
+        private static let logger = Logger(
+            subsystem: "com.nicholas-lonsinger.rss-app",
+            category: "ArticleReaderWebView.Coordinator"
+        )
+
+        private let extractionState: ReaderExtractionState
+
+        private static let extractionScript = """
+        (function() {
+            try {
+                var article = new Readability(document.cloneNode(true)).parse();
+                if (!article) return null;
+                return JSON.stringify({
+                    title: article.title || '',
+                    byline: article.byline || '',
+                    content: article.content || '',
+                    textContent: article.textContent || ''
+                });
+            } catch(e) {
+                return null;
+            }
+        })();
         """
-        <!DOCTYPE html>
-        <html>
-        <head>
-        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5">
-        <style>
-        :root {
-            --text: #1c1c1e;
-            --bg: #ffffff;
-            --secondary: #6e6e73;
-            --accent: #007aff;
-            --code-bg: #f2f2f7;
-            --border: #d1d1d6;
+
+        init(extractionState: ReaderExtractionState) {
+            self.extractionState = extractionState
         }
-        @media (prefers-color-scheme: dark) {
-            :root {
-                --text: #f2f2f7;
-                --bg: #1c1c1e;
-                --secondary: #8e8e93;
-                --code-bg: #2c2c2e;
-                --border: #3a3a3c;
+
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            Self.logger.debug("Page finished loading, running Readability extraction")
+            Task { @MainActor in
+                await self.runExtraction(on: webView)
             }
         }
-        * { box-sizing: border-box; }
-        body {
-            font-family: -apple-system, 'SF Pro Text', Georgia, serif;
-            font-size: 18px;
-            line-height: 1.65;
-            max-width: 680px;
-            margin: 0 auto;
-            padding: 20px 16px 60px;
-            color: var(--text);
-            background: var(--bg);
-            -webkit-text-size-adjust: 100%;
-            word-break: break-word;
+
+        @MainActor
+        private func runExtraction(on webView: WKWebView) async {
+            do {
+                let result = try await webView.evaluateJavaScript(Self.extractionScript)
+
+                guard let jsonString = result as? String,
+                      let data = jsonString.data(using: .utf8) else {
+                    Self.logger.warning("Readability returned nil or non-string result")
+                    return
+                }
+
+                let decoded = try JSONDecoder().decode(ReadabilityResult.self, from: data)
+                let content = ArticleContent(
+                    title: decoded.title,
+                    byline: decoded.byline.isEmpty ? nil : decoded.byline,
+                    htmlContent: decoded.content,
+                    textContent: decoded.textContent
+                )
+                extractionState.content = content
+                Self.logger.notice(
+                    "Pre-extraction complete (\(content.textContent.count, privacy: .public) chars)"
+                )
+            } catch {
+                Self.logger.warning("Pre-extraction failed: \(error, privacy: .public)")
+            }
         }
-        h1, h2, h3, h4, h5, h6 {
-            font-family: -apple-system, 'SF Pro Display', sans-serif;
-            font-weight: 600;
-            line-height: 1.3;
-            margin-top: 1.5em;
-        }
-        h1 { font-size: 1.5em; }
-        h2 { font-size: 1.3em; }
-        h3 { font-size: 1.1em; }
-        p { margin: 0 0 1em; }
-        img, video, iframe {
-            max-width: 100%;
-            height: auto;
-            border-radius: 8px;
-            display: block;
-            margin: 1em auto;
-        }
-        a { color: var(--accent); text-decoration: none; }
-        a:hover { text-decoration: underline; }
-        pre {
-            background: var(--code-bg);
-            border-radius: 8px;
-            padding: 12px;
-            overflow-x: auto;
-            font-size: 14px;
-        }
-        code {
-            font-family: 'SF Mono', Menlo, Consolas, monospace;
-            font-size: 0.9em;
-            background: var(--code-bg);
-            padding: 2px 5px;
-            border-radius: 4px;
-        }
-        pre code { background: none; padding: 0; }
-        blockquote {
-            margin: 1em 0;
-            padding-left: 16px;
-            border-left: 3px solid var(--border);
-            color: var(--secondary);
-        }
-        figure { margin: 1em 0; }
-        figcaption {
-            font-size: 0.85em;
-            color: var(--secondary);
-            text-align: center;
-            margin-top: 4px;
-        }
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 0.9em;
-            margin: 1em 0;
-        }
-        th, td {
-            border: 1px solid var(--border);
-            padding: 8px 12px;
-            text-align: left;
-        }
-        th { background: var(--code-bg); font-weight: 600; }
-        </style>
-        </head>
-        <body>
-        \(content.htmlContent)
-        </body>
-        </html>
-        """
     }
+}
+
+// MARK: - Decodable result
+
+private struct ReadabilityResult: Decodable {
+    let title: String
+    let byline: String
+    let content: String
+    let textContent: String
 }
