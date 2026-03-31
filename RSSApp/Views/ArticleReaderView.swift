@@ -31,7 +31,7 @@ struct ArticleReaderView: View {
                             Image(systemName: "sparkles")
                         }
                         .accessibilityLabel("Summarize with AI")
-                        .disabled(article.link == nil)
+                        .disabled(extractionState.content == nil)
                     }
                 }
                 .sheet(isPresented: $showSettings) {

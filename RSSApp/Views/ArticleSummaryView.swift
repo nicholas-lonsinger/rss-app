@@ -30,7 +30,7 @@ struct ArticleSummaryView: View {
                             Image(systemName: "bubble.left.and.bubble.right")
                         }
                         .accessibilityLabel("Discuss with Claude")
-                        .disabled(viewModel.extractedContent == nil)
+                        .disabled(!viewModel.isReady)
                     }
                 }
                 .sheet(isPresented: $showDiscussion) {

@@ -20,6 +20,11 @@ final class ArticleSummaryViewModel {
 
     var state: State = .idle
 
+    var isReady: Bool {
+        if case .ready = state { return true }
+        return false
+    }
+
     /// Set once extraction completes; used by the discussion sheet.
     private(set) var extractedContent: ArticleContent?
 
