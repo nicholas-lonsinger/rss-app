@@ -1,10 +1,12 @@
 import SwiftUI
 
 struct ContentView: View {
+    @State private var viewModel = FeedViewModel()
+
     var body: some View {
-        Text("RSS App")
-            .font(.largeTitle)
-            .fontWeight(.semibold)
+        NavigationStack {
+            ArticleListView(viewModel: viewModel)
+        }
     }
 }
 
