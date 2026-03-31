@@ -48,7 +48,7 @@ struct ArticleReaderView: View {
     @ViewBuilder
     private var articleContent: some View {
         if let url = article.link {
-            ArticleReaderWebView(url: url, extractionState: extractionState)
+            ArticleReaderWebView(url: url, extractionState: extractionState, fallbackHTML: article.articleDescription)
                 .ignoresSafeArea(edges: .bottom)
         } else {
             ContentUnavailableView {

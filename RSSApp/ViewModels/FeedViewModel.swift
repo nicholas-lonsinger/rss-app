@@ -25,11 +25,11 @@ final class FeedViewModel {
             return
         }
 
-        guard let url = URL(string: "https://appleinsider.com/rss/news/") else {
-            Self.logger.fault("Failed to create URL for hardcoded AppleInsider feed")
-            assertionFailure("Failed to create URL for hardcoded AppleInsider feed")
+        guard let url = URL(string: "https://electrek.co/feed/") else {
+            Self.logger.fault("Failed to create URL for hardcoded Electrek feed")
+            assertionFailure("Failed to create URL for hardcoded Electrek feed")
             // RATIONALE: "about:blank" is a well-known URI that always produces a valid URL.
-            // This fallback is unreachable in practice since the Ars Technica URL is a valid literal.
+            // This fallback is unreachable in practice since the Electrek URL is a valid literal.
             self.feedURL = URL(filePath: "/")
             return
         }
