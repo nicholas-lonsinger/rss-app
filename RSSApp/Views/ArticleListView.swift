@@ -2,6 +2,8 @@ import SwiftUI
 
 struct ArticleListView: View {
     let viewModel: FeedViewModel
+    @State private var selectedArticle: Article?
+    @State private var showSettings = false
 
     var body: some View {
         Group {
@@ -20,17 +22,34 @@ struct ArticleListView: View {
                 }
             } else {
                 List(viewModel.articles) { article in
-                    NavigationLink(value: article) {
+                    Button {
+                        selectedArticle = article
+                    } label: {
                         ArticleRowView(article: article)
                     }
+                    .buttonStyle(.plain)
+                    .disabled(article.link == nil)
                 }
                 .listStyle(.plain)
                 .refreshable { await viewModel.loadFeed() }
             }
         }
         .navigationTitle("Feed")
-        .navigationDestination(for: Article.self) { article in
-            ArticleDetailView(article: article)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    showSettings = true
+                } label: {
+                    Image(systemName: "gear")
+                }
+                .accessibilityLabel("Settings")
+            }
+        }
+        .fullScreenCover(item: $selectedArticle) { article in
+            ArticleReaderView(article: article)
+        }
+        .sheet(isPresented: $showSettings) {
+            APIKeySettingsView()
         }
         .task { await viewModel.loadFeed() }
     }
