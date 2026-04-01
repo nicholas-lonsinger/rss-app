@@ -100,7 +100,7 @@ struct ArticleReaderWebView: UIViewRepresentable {
 
             Self.logger.debug("Received early DOM serialization via message handler")
 
-            if let content = extractFromJSON(jsonString) {
+            if let content = try? DOMSerializerConstants.extractContent(fromJSON: jsonString, using: contentExtractor) {
                 extractionState.content = content
                 earlyExtractionSucceeded = true
                 Self.logger.notice(
@@ -176,24 +176,9 @@ struct ArticleReaderWebView: UIViewRepresentable {
                     return nil
                 }
 
-                return extractFromJSON(jsonString)
+                return try DOMSerializerConstants.extractContent(fromJSON: jsonString, using: contentExtractor)
             } catch {
-                Self.logger.warning("serializeDOM() failed: \(error, privacy: .public)")
-                return nil
-            }
-        }
-
-        /// Decodes serialized DOM JSON and runs the Swift content extractor.
-        private func extractFromJSON(_ jsonString: String) -> ArticleContent? {
-            // RATIONALE: Swift String.data(using: .utf8) never returns nil for valid String values.
-            // This guard satisfies the compiler; the else branch is unreachable.
-            guard let data = jsonString.data(using: .utf8) else { return nil }
-
-            do {
-                let dom = try JSONDecoder().decode(SerializedDOM.self, from: data)
-                return contentExtractor.extract(from: dom)
-            } catch {
-                Self.logger.warning("DOM JSON decoding failed: \(error, privacy: .public)")
+                Self.logger.warning("serializeDOM() / DOM decode failed: \(error, privacy: .public)")
                 return nil
             }
         }

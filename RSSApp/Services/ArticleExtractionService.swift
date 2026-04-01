@@ -167,16 +167,17 @@ private final class ExtractionCoordinator: NSObject, WKNavigationDelegate, @unch
 
             guard let self else { return }
 
-            guard let jsonString = result as? String,
-                  let data = jsonString.data(using: .utf8) else {
+            guard let jsonString = result as? String else {
                 Self.logger.warning("serializeDOM() returned nil or non-string result")
                 self.resumeAndCleanup(returning: nil)
                 return
             }
 
             do {
-                let dom = try JSONDecoder().decode(SerializedDOM.self, from: data)
-                let content = self.contentExtractor.extract(from: dom)
+                let content = try DOMSerializerConstants.extractContent(
+                    fromJSON: jsonString,
+                    using: self.contentExtractor
+                )
                 self.resumeAndCleanup(returning: content)
             } catch {
                 Self.logger.warning("DOM JSON decoding failed: \(error, privacy: .public)")
