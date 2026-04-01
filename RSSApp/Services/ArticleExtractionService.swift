@@ -193,14 +193,17 @@ private final class ExtractionCoordinator: NSObject, WKNavigationDelegate, @unch
         resumeAndCleanup(throwing: ArticleExtractionError.navigationFailed(error))
     }
 
-    // RATIONALE: Resume the continuation before cleanup so that the WKWebView and
-    // coordinator are still alive when the continuation fires. cleanup() nils selfRetain
-    // (the only strong reference), so calling it first could deallocate the coordinator
-    // before the awaiting code observes the result.
+    // RATIONALE: Resume the continuation before cleanup for clean semantic ordering —
+    // the logical operation (delivering the result) completes before resource teardown.
+    // This also ensures the WKWebView is still in the view hierarchy during resume,
+    // in case WKWebView internals reference it synchronously.
 
     /// Resumes the continuation with a value, then cleans up.
     fileprivate func resumeAndCleanup(returning content: ArticleContent?) {
-        guard let continuation else { return }
+        guard let continuation else {
+            Self.logger.debug("resumeAndCleanup(returning:) called but continuation already consumed")
+            return
+        }
         self.continuation = nil
         continuation.resume(returning: content)
         cleanup()
@@ -208,7 +211,10 @@ private final class ExtractionCoordinator: NSObject, WKNavigationDelegate, @unch
 
     /// Resumes the continuation with an error, then cleans up.
     private func resumeAndCleanup(throwing error: Error) {
-        guard let continuation else { return }
+        guard let continuation else {
+            Self.logger.debug("resumeAndCleanup(throwing:) called but continuation already consumed")
+            return
+        }
         self.continuation = nil
         continuation.resume(throwing: error)
         cleanup()
