@@ -73,18 +73,7 @@ final class FeedListViewModel {
     // MARK: - OPML Import/Export
 
     func importOPML(from url: URL) {
-        let accessing = url.startAccessingSecurityScopedResource()
-        defer { if accessing { url.stopAccessingSecurityScopedResource() } }
-
-        let data: Data
-        do {
-            data = try Data(contentsOf: url)
-        } catch {
-            errorMessage = "Unable to read the selected file."
-            Self.logger.error("Failed to read OPML file: \(error, privacy: .public)")
-            return
-        }
-
+        guard let data = readSecurityScopedData(from: url) else { return }
         importOPML(from: data)
     }
 
@@ -154,18 +143,7 @@ final class FeedListViewModel {
     // MARK: - OPML Import with Refresh
 
     func importOPMLAndRefresh(from url: URL) async {
-        let accessing = url.startAccessingSecurityScopedResource()
-        defer { if accessing { url.stopAccessingSecurityScopedResource() } }
-
-        let data: Data
-        do {
-            data = try Data(contentsOf: url)
-        } catch {
-            errorMessage = "Unable to read the selected file."
-            Self.logger.error("Failed to read OPML file: \(error, privacy: .public)")
-            return
-        }
-
+        guard let data = readSecurityScopedData(from: url) else { return }
         await importOPMLAndRefresh(from: data)
     }
 
@@ -173,6 +151,21 @@ final class FeedListViewModel {
         importOPML(from: data)
         guard let result = opmlImportResult, result.addedCount > 0 else { return }
         await refreshAllFeeds()
+    }
+
+    // MARK: - Helpers
+
+    private func readSecurityScopedData(from url: URL) -> Data? {
+        let accessing = url.startAccessingSecurityScopedResource()
+        defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+
+        do {
+            return try Data(contentsOf: url)
+        } catch {
+            errorMessage = "Unable to read the selected file."
+            Self.logger.error("Failed to read OPML file: \(error, privacy: .public)")
+            return nil
+        }
     }
 
     // MARK: - Feed Metadata Refresh
@@ -192,7 +185,6 @@ final class FeedListViewModel {
             returning: [(UUID, RSSFeed?)].self
         ) { group in
             var collected: [(UUID, RSSFeed?)] = []
-            var inFlight = 0
             var iterator = feedsToRefresh.makeIterator()
 
             func enqueueNext(_ group: inout TaskGroup<(UUID, RSSFeed?)>, _ iterator: inout IndexingIterator<[SubscribedFeed]>) -> Bool {
@@ -208,25 +200,18 @@ final class FeedListViewModel {
                 return true
             }
 
-            // Seed initial batch
-            while inFlight < maxConcurrency {
+            for _ in 0..<maxConcurrency {
                 guard enqueueNext(&group, &iterator) else { break }
-                inFlight += 1
             }
 
-            // Collect results and enqueue more
             for await result in group {
                 collected.append(result)
-                inFlight -= 1
-                if enqueueNext(&group, &iterator) {
-                    inFlight += 1
-                }
+                _ = enqueueNext(&group, &iterator)
             }
 
             return collected
         }
 
-        // Apply results
         var updatedFeeds = feeds
         var failureCount = 0
         for (id, rssFeed) in results {
@@ -242,14 +227,16 @@ final class FeedListViewModel {
             }
         }
 
-        feeds = updatedFeeds
-        do {
-            try feedStorage.saveFeeds(updatedFeeds)
-            Self.logger.notice("Refresh complete: \(updatedFeeds.count - failureCount, privacy: .public) updated, \(failureCount, privacy: .public) failed")
-        } catch {
-            errorMessage = "Unable to save updated feeds."
-            Self.logger.error("Failed to persist refreshed feeds: \(error, privacy: .public)")
+        if updatedFeeds != feeds {
+            feeds = updatedFeeds
+            do {
+                try feedStorage.saveFeeds(updatedFeeds)
+            } catch {
+                errorMessage = "Unable to save updated feeds."
+                Self.logger.error("Failed to persist refreshed feeds: \(error, privacy: .public)")
+            }
         }
+        Self.logger.notice("Refresh complete: \(updatedFeeds.count - failureCount, privacy: .public) updated, \(failureCount, privacy: .public) failed")
 
         if failureCount > 0 {
             errorMessage = "Some feeds could not be updated."
