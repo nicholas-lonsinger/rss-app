@@ -29,7 +29,7 @@ Requires **iOS 26**, **Xcode 26**, and **Swift 6**. iPhone only (no iPad target)
 
 RSS App is a pure SwiftUI iOS app using the `@main` App lifecycle. It targets iPhone and uses Swift 6 strict concurrency.
 
-**Data flow:** `RSSAppApp` → `ContentView` → `FeedListView` (`NavigationStack` root, `FeedListViewModel` + `FeedStorageService`) → tap feed → `ArticleListView` (`FeedViewModel` per feed) → tap article → `ArticleReaderView`. `FeedFetchingService` fetches RSS XML via `URLSession`, `RSSParsingService` parses it with `XMLParser` into `Article` models. Subscribed feeds are persisted in `UserDefaults` via `FeedStorageService`.
+**Data flow:** `RSSAppApp` → `ContentView` → `FeedListView` (`NavigationStack` root, `FeedListViewModel` + `FeedStorageService` + `OPMLService`) → tap feed → `ArticleListView` (`FeedViewModel` per feed) → tap article → `ArticleReaderView`. `FeedFetchingService` fetches RSS XML via `URLSession`, `RSSParsingService` parses it with `XMLParser` into `Article` models. Subscribed feeds are persisted in `UserDefaults` via `FeedStorageService`. OPML import/export via `OPMLService` allows bulk feed exchange through the standard OPML format.
 
 **Concurrency model:** The codebase uses Swift 6 strict concurrency. Use `@MainActor` for any UI-related state. Services that perform I/O should be `Sendable` structs or actors.
 
