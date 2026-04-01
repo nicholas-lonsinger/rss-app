@@ -149,14 +149,23 @@ private final class ExtractionCoordinator: NSObject, WKNavigationDelegate, @unch
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        webView.evaluateJavaScript(DOMSerializerConstants.serializerCall) { [weak self] result, error in
-            guard let self else { return }
-
-            if let error {
+        Task { @MainActor [weak self] in
+            // Access webView through self rather than capturing the delegate parameter,
+            // and avoid promoting self to strong across the await. This allows the
+            // coordinator and WKWebView to be released if the timeout fires while
+            // evaluateJavaScript is still pending.
+            let result: Any
+            do {
+                guard let webView = self?.webView else { return }
+                result = try await webView.evaluateJavaScript(DOMSerializerConstants.serializerCall)
+            } catch {
+                guard let self else { return }
                 Self.logger.warning("serializeDOM() error: \(error, privacy: .public)")
                 self.resumeAndCleanup(returning: nil)
                 return
             }
+
+            guard let self else { return }
 
             guard let jsonString = result as? String,
                   let data = jsonString.data(using: .utf8) else {
@@ -190,20 +199,31 @@ private final class ExtractionCoordinator: NSObject, WKNavigationDelegate, @unch
         resumeAndCleanup(throwing: ArticleExtractionError.navigationFailed(error))
     }
 
+    // RATIONALE: Resume the continuation before cleanup for clean semantic ordering —
+    // the logical operation (delivering the result) completes before resource teardown.
+    // This also ensures the WKWebView is still in the view hierarchy during resume,
+    // in case WKWebView internals reference it synchronously.
+
     /// Resumes the continuation with a value, then cleans up.
     fileprivate func resumeAndCleanup(returning content: ArticleContent?) {
-        guard let continuation else { return }
+        guard let continuation else {
+            Self.logger.debug("resumeAndCleanup(returning:) called but continuation already consumed")
+            return
+        }
         self.continuation = nil
-        cleanup()
         continuation.resume(returning: content)
+        cleanup()
     }
 
     /// Resumes the continuation with an error, then cleans up.
     private func resumeAndCleanup(throwing error: Error) {
-        guard let continuation else { return }
+        guard let continuation else {
+            Self.logger.debug("resumeAndCleanup(throwing:) called but continuation already consumed")
+            return
+        }
         self.continuation = nil
-        cleanup()
         continuation.resume(throwing: error)
+        cleanup()
     }
 
     private func cleanup() {
