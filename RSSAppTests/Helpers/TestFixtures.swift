@@ -112,6 +112,55 @@ enum TestFixtures {
         </rss>
         """
 
+    // MARK: - Sample Atom XML
+
+    static let sampleAtomXML = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <feed xmlns="http://www.w3.org/2005/Atom">
+            <title type="text">Atom Test Feed</title>
+            <subtitle type="text">A test Atom feed description</subtitle>
+            <link rel="alternate" type="text/html" href="https://example.com" />
+            <link rel="self" type="application/atom+xml" href="https://example.com/atom.xml" />
+            <id>https://example.com/atom.xml</id>
+            <updated>2026-04-01T12:00:00+00:00</updated>
+            <entry>
+                <author><name>Alice</name></author>
+                <title type="html"><![CDATA[First Atom Entry]]></title>
+                <link rel="alternate" type="text/html" href="https://example.com/entry-1" />
+                <id>entry-1-id</id>
+                <published>2026-04-01T10:00:00-04:00</published>
+                <updated>2026-04-01T11:00:00-04:00</updated>
+                <summary type="html"><![CDATA[<p>Short summary of first entry</p>]]></summary>
+                <content type="html"><![CDATA[<p>Full content of the <b>first</b> entry with more detail.</p><img src="https://example.com/img1.jpg">]]></content>
+            </entry>
+            <entry>
+                <author><name>Bob</name></author>
+                <title type="html"><![CDATA[Second Atom Entry]]></title>
+                <link rel="alternate" type="text/html" href="https://example.com/entry-2" />
+                <id>entry-2-id</id>
+                <published>2026-03-31T08:30:00+00:00</published>
+                <summary type="html"><![CDATA[Summary only, no content element.]]></summary>
+            </entry>
+        </feed>
+        """
+
+    static let atomNoContentXML = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <feed xmlns="http://www.w3.org/2005/Atom">
+            <title>Minimal Atom</title>
+            <link rel="alternate" href="https://example.com" />
+            <id>https://example.com/feed</id>
+            <updated>2026-04-01T00:00:00Z</updated>
+            <entry>
+                <title>Summary Only</title>
+                <link rel="alternate" href="https://example.com/summary-only" />
+                <id>summary-only-id</id>
+                <updated>2026-04-01T00:00:00Z</updated>
+                <summary>Plain text summary with no HTML</summary>
+            </entry>
+        </feed>
+        """
+
     // MARK: - Sample OPML XML
 
     static let sampleOPML = """

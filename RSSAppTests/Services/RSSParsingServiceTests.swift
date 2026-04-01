@@ -211,6 +211,99 @@ struct RSSParsingServiceTests {
         #expect(feed.articles[0].title == "Untitled")
     }
 
+    // MARK: - Atom Feed Parsing
+
+    @Test("Parses valid Atom feed with correct channel info")
+    func parsesAtomChannelInfo() throws {
+        let data = Data(TestFixtures.sampleAtomXML.utf8)
+        let feed = try service.parse(data)
+
+        #expect(feed.title == "Atom Test Feed")
+        #expect(feed.link?.absoluteString == "https://example.com")
+        #expect(feed.feedDescription == "A test Atom feed description")
+    }
+
+    @Test("Parses correct number of Atom entries")
+    func parsesAtomEntryCount() throws {
+        let data = Data(TestFixtures.sampleAtomXML.utf8)
+        let feed = try service.parse(data)
+
+        #expect(feed.articles.count == 2)
+    }
+
+    @Test("Parses Atom entry title, link, and ID")
+    func parsesAtomEntryBasicFields() throws {
+        let data = Data(TestFixtures.sampleAtomXML.utf8)
+        let feed = try service.parse(data)
+        let entry = feed.articles[0]
+
+        #expect(entry.title == "First Atom Entry")
+        #expect(entry.link?.absoluteString == "https://example.com/entry-1")
+        #expect(entry.id == "entry-1-id")
+    }
+
+    @Test("Parses Atom published date with timezone offset")
+    func parsesAtomPublishedDate() throws {
+        let data = Data(TestFixtures.sampleAtomXML.utf8)
+        let feed = try service.parse(data)
+
+        #expect(feed.articles[0].publishedDate != nil)
+        #expect(feed.articles[1].publishedDate != nil)
+    }
+
+    @Test("Atom content element overrides summary")
+    func atomContentOverridesSummary() throws {
+        let data = Data(TestFixtures.sampleAtomXML.utf8)
+        let feed = try service.parse(data)
+        let entry = feed.articles[0]
+
+        #expect(entry.articleDescription.contains("Full content"))
+        #expect(!entry.articleDescription.contains("Short summary"))
+    }
+
+    @Test("Atom summary used when no content element")
+    func atomSummaryUsedWithoutContent() throws {
+        let data = Data(TestFixtures.sampleAtomXML.utf8)
+        let feed = try service.parse(data)
+        let entry = feed.articles[1]
+
+        #expect(entry.articleDescription.contains("Summary only"))
+    }
+
+    @Test("Atom entry extracts thumbnail from content HTML")
+    func atomThumbnailFromContent() throws {
+        let data = Data(TestFixtures.sampleAtomXML.utf8)
+        let feed = try service.parse(data)
+
+        #expect(feed.articles[0].thumbnailURL?.absoluteString == "https://example.com/img1.jpg")
+    }
+
+    @Test("Atom feed uses alternate link, not self link")
+    func atomAlternateLinkOnly() throws {
+        let data = Data(TestFixtures.sampleAtomXML.utf8)
+        let feed = try service.parse(data)
+
+        #expect(feed.link?.absoluteString == "https://example.com")
+    }
+
+    @Test("Atom feed with no subtitle has empty description")
+    func atomNoSubtitle() throws {
+        let data = Data(TestFixtures.atomNoContentXML.utf8)
+        let feed = try service.parse(data)
+
+        #expect(feed.feedDescription.isEmpty)
+    }
+
+    @Test("Atom entry with plain text summary generates snippet")
+    func atomPlainTextSnippet() throws {
+        let data = Data(TestFixtures.atomNoContentXML.utf8)
+        let feed = try service.parse(data)
+
+        #expect(feed.articles[0].snippet == "Plain text summary with no HTML")
+    }
+
+    // MARK: - Snippet Truncation
+
     @Test("Truncates long snippets with ellipsis")
     func longSnippetTruncation() throws {
         let longText = String(repeating: "A", count: 300)
