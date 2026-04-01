@@ -346,4 +346,167 @@ struct FeedListViewModelTests {
         #expect(viewModel.opmlExportURL == nil)
         #expect(viewModel.errorMessage != nil)
     }
+
+    // MARK: - Refresh
+
+    @Test("refreshAllFeeds updates metadata from fetched feeds")
+    @MainActor
+    func refreshAllFeedsUpdatesMetadata() async {
+        let url1 = URL(string: "https://one.com/feed")!
+        let url2 = URL(string: "https://two.com/feed")!
+        let feed1 = TestFixtures.makeSubscribedFeed(title: "Old One", url: url1, feedDescription: "")
+        let feed2 = TestFixtures.makeSubscribedFeed(title: "Old Two", url: url2, feedDescription: "")
+
+        let mockStorage = MockFeedStorageService()
+        mockStorage.feeds = [feed1, feed2]
+        let mockFetching = MockFeedFetchingService()
+        mockFetching.feedsByURL = [
+            url1: TestFixtures.makeFeed(title: "New One", feedDescription: "Desc One"),
+            url2: TestFixtures.makeFeed(title: "New Two", feedDescription: "Desc Two"),
+        ]
+
+        let viewModel = FeedListViewModel(feedStorage: mockStorage, feedFetching: mockFetching)
+        viewModel.loadFeeds()
+        await viewModel.refreshAllFeeds()
+
+        #expect(viewModel.feeds[0].title == "New One")
+        #expect(viewModel.feeds[0].feedDescription == "Desc One")
+        #expect(viewModel.feeds[0].id == feed1.id)
+        #expect(viewModel.feeds[0].addedDate == feed1.addedDate)
+        #expect(viewModel.feeds[1].title == "New Two")
+        #expect(viewModel.feeds[1].feedDescription == "Desc Two")
+        #expect(viewModel.errorMessage == nil)
+    }
+
+    @Test("refreshAllFeeds preserves feed when fetch fails")
+    @MainActor
+    func refreshAllFeedsPreservesOnFailure() async {
+        let url = URL(string: "https://fail.com/feed")!
+        let feed = TestFixtures.makeSubscribedFeed(title: "Original", url: url, feedDescription: "Original Desc")
+
+        let mockStorage = MockFeedStorageService()
+        mockStorage.feeds = [feed]
+        let mockFetching = MockFeedFetchingService()
+        mockFetching.errorsByURL = [url: FeedFetchingError.invalidResponse(statusCode: 500)]
+
+        let viewModel = FeedListViewModel(feedStorage: mockStorage, feedFetching: mockFetching)
+        viewModel.loadFeeds()
+        await viewModel.refreshAllFeeds()
+
+        #expect(viewModel.feeds[0].title == "Original")
+        #expect(viewModel.feeds[0].feedDescription == "Original Desc")
+        #expect(viewModel.errorMessage == "Some feeds could not be updated.")
+    }
+
+    @Test("refreshAllFeeds handles partial failures")
+    @MainActor
+    func refreshAllFeedsPartialFailure() async {
+        let url1 = URL(string: "https://ok.com/feed")!
+        let url2 = URL(string: "https://fail.com/feed")!
+        let feed1 = TestFixtures.makeSubscribedFeed(title: "Will Update", url: url1, feedDescription: "")
+        let feed2 = TestFixtures.makeSubscribedFeed(title: "Will Fail", url: url2, feedDescription: "Old")
+
+        let mockStorage = MockFeedStorageService()
+        mockStorage.feeds = [feed1, feed2]
+        let mockFetching = MockFeedFetchingService()
+        mockFetching.feedsByURL = [
+            url1: TestFixtures.makeFeed(title: "Updated", feedDescription: "New Desc"),
+        ]
+        mockFetching.errorsByURL = [url2: FeedFetchingError.invalidResponse(statusCode: 404)]
+
+        let viewModel = FeedListViewModel(feedStorage: mockStorage, feedFetching: mockFetching)
+        viewModel.loadFeeds()
+        await viewModel.refreshAllFeeds()
+
+        #expect(viewModel.feeds[0].title == "Updated")
+        #expect(viewModel.feeds[0].feedDescription == "New Desc")
+        #expect(viewModel.feeds[1].title == "Will Fail")
+        #expect(viewModel.feeds[1].feedDescription == "Old")
+        #expect(viewModel.errorMessage == "Some feeds could not be updated.")
+    }
+
+    @Test("refreshAllFeeds saves updated feeds to storage")
+    @MainActor
+    func refreshAllFeedsSavesToStorage() async {
+        let url = URL(string: "https://example.com/feed")!
+        let feed = TestFixtures.makeSubscribedFeed(title: "Old", url: url, feedDescription: "")
+
+        let mockStorage = MockFeedStorageService()
+        mockStorage.feeds = [feed]
+        let mockFetching = MockFeedFetchingService()
+        mockFetching.feedsByURL = [url: TestFixtures.makeFeed(title: "New", feedDescription: "Fresh")]
+
+        let viewModel = FeedListViewModel(feedStorage: mockStorage, feedFetching: mockFetching)
+        viewModel.loadFeeds()
+        await viewModel.refreshAllFeeds()
+
+        #expect(mockStorage.feeds[0].title == "New")
+        #expect(mockStorage.feeds[0].feedDescription == "Fresh")
+    }
+
+    @Test("refreshAllFeeds is no-op when feeds is empty")
+    @MainActor
+    func refreshAllFeedsEmptyNoOp() async {
+        let mockStorage = MockFeedStorageService()
+        let mockFetching = MockFeedFetchingService()
+
+        let viewModel = FeedListViewModel(feedStorage: mockStorage, feedFetching: mockFetching)
+        viewModel.loadFeeds()
+        await viewModel.refreshAllFeeds()
+
+        #expect(viewModel.feeds.isEmpty)
+        #expect(viewModel.isRefreshing == false)
+        #expect(viewModel.errorMessage == nil)
+    }
+
+    @Test("isRefreshing is false after refresh completes")
+    @MainActor
+    func isRefreshingFalseAfterComplete() async {
+        let url = URL(string: "https://example.com/feed")!
+        let feed = TestFixtures.makeSubscribedFeed(url: url)
+
+        let mockStorage = MockFeedStorageService()
+        mockStorage.feeds = [feed]
+        let mockFetching = MockFeedFetchingService()
+        mockFetching.feedsByURL = [url: TestFixtures.makeFeed()]
+
+        let viewModel = FeedListViewModel(feedStorage: mockStorage, feedFetching: mockFetching)
+        viewModel.loadFeeds()
+        await viewModel.refreshAllFeeds()
+
+        #expect(viewModel.isRefreshing == false)
+    }
+
+    @Test("importOPMLAndRefresh adds feeds then refreshes metadata")
+    @MainActor
+    func importOPMLAndRefreshIntegration() async {
+        let url1 = URL(string: "https://one.com/feed")!
+        let url2 = URL(string: "https://two.com/feed")!
+
+        let mockStorage = MockFeedStorageService()
+        let mockOPML = MockOPMLService()
+        mockOPML.entriesToReturn = [
+            TestFixtures.makeOPMLFeedEntry(title: "OPML One", feedURL: url1, description: ""),
+            TestFixtures.makeOPMLFeedEntry(title: "OPML Two", feedURL: url2, description: ""),
+        ]
+        let mockFetching = MockFeedFetchingService()
+        mockFetching.feedsByURL = [
+            url1: TestFixtures.makeFeed(title: "Real One", feedDescription: "Real Desc One"),
+            url2: TestFixtures.makeFeed(title: "Real Two", feedDescription: "Real Desc Two"),
+        ]
+
+        let viewModel = FeedListViewModel(
+            feedStorage: mockStorage,
+            opmlService: mockOPML,
+            feedFetching: mockFetching
+        )
+        await viewModel.importOPMLAndRefresh(from: Data())
+
+        #expect(viewModel.feeds.count == 2)
+        #expect(viewModel.feeds[0].title == "Real One")
+        #expect(viewModel.feeds[0].feedDescription == "Real Desc One")
+        #expect(viewModel.feeds[1].title == "Real Two")
+        #expect(viewModel.feeds[1].feedDescription == "Real Desc Two")
+        #expect(viewModel.opmlImportResult?.addedCount == 2)
+    }
 }

@@ -77,7 +77,8 @@ RSSAppTests/
 │   └── MockOPMLService.swift               # OPMLServing mock with injectable entries/data/errors
 ├── Models/
 │   ├── ArticleTests.swift              # Article creation, identity, hashable
-│   └── DOMNodeTests.swift              # DOMNode accessors, text/element queries, tree traversal
+│   ├── DOMNodeTests.swift              # DOMNode accessors, text/element queries, tree traversal
+│   └── SubscribedFeedTests.swift       # updatingMetadata preserves identity, does not mutate
 ├── Services/
 │   ├── CandidateScorerTests.swift      # Content node identification, scoring, pruning
 │   ├── ClaudeAPIServiceTests.swift     # Request encoding, SSE parsing, error handling
@@ -163,7 +164,7 @@ RSSAppTests/
 
 All view models are `@MainActor @Observable`.
 
-`FeedListViewModel` manages the subscribed feed list. Loads feeds from `FeedStoring`, supports removal by object or `IndexSet`, and OPML import/export via `OPMLServing`. `importOPML(from:)` parses OPML data, deduplicates against existing feeds and within the file, and merges new feeds. `exportOPML()` generates OPML data for sharing. Accepts `FeedStoring` and `OPMLServing` dependencies for testability.
+`FeedListViewModel` manages the subscribed feed list. Loads feeds from `FeedStoring`, supports removal by object or `IndexSet`, and OPML import/export via `OPMLServing`. `importOPML(from:)` parses OPML data, deduplicates against existing feeds and within the file, and merges new feeds. `importOPMLAndRefresh(from:)` extends import by fetching each feed's RSS XML to populate metadata (title, description) that OPML files typically omit. `exportOPML()` generates OPML data for sharing. `refreshAllFeeds()` re-fetches RSS metadata for all subscribed feeds concurrently (max 6 in-flight), updating stored titles and descriptions; partial failures leave unrefreshed feeds unchanged. Accepts `FeedStoring`, `OPMLServing`, and `FeedFetching` dependencies for testability.
 
 `AddFeedViewModel` handles the add-feed flow: URL input, validation (scheme/host check, duplicate detection), fetching the feed to extract its title, and persisting via `FeedStoring`. Accepts both `FeedFetching` and `FeedStoring` dependencies for testability.
 
@@ -179,7 +180,7 @@ All view models are `@MainActor @Observable`.
 
 `ContentView` hosts `FeedListView` as the root view.
 
-`FeedListView` is the `NavigationStack` root. It shows the list of subscribed feeds using `FeedRowView` rows with `NavigationLink(value:)`. Empty state shows a `ContentUnavailableView` prompting the user to add a feed. Toolbar has add (+) and a menu (ellipsis.circle) with import feeds, export feeds, and settings options. Uses `.navigationDestination(for: SubscribedFeed.self)` to push `ArticleListView` with a `FeedViewModel` for the selected feed. Supports swipe-to-delete via `.onDelete`. OPML import uses `.fileImporter` accepting `.opml`/`.xml` files; export uses `ActivityShareView` to share a generated `.opml` file.
+`FeedListView` is the `NavigationStack` root. It shows the list of subscribed feeds using `FeedRowView` rows with `NavigationLink(value:)`. Empty state shows a `ContentUnavailableView` prompting the user to add a feed. Toolbar has add (+) and a menu (ellipsis.circle) with import feeds, export feeds, and settings options. Uses `.navigationDestination(for: SubscribedFeed.self)` to push `ArticleListView` with a `FeedViewModel` for the selected feed. Supports swipe-to-delete via `.onDelete` and pull-to-refresh via `.refreshable` to update feed metadata. OPML import uses `.fileImporter` accepting `.opml`/`.xml` files and automatically refreshes feed metadata after import; export uses `ActivityShareView` to share a generated `.opml` file.
 
 `ActivityShareView` is a `UIViewControllerRepresentable` wrapping `UIActivityViewController` for sharing exported OPML files.
 
@@ -209,8 +210,9 @@ RSSAppApp (@main)
         └── ContentView
             └── FeedListView
                 ├── @State FeedListViewModel
-                │   └── FeedStorageService (FeedStoring protocol)
-                │       └── UserDefaults → [SubscribedFeed]
+                │   ├── FeedStorageService (FeedStoring protocol)
+                │   │   └── UserDefaults → [SubscribedFeed]
+                │   └── FeedFetchingService (FeedFetching protocol) ← pull-to-refresh / post-import metadata refresh
                 ├── NavigationStack
                 │   ├── Empty → ContentUnavailableView + "Add Feed" button
                 │   └── List → FeedRowView (title, description)
@@ -299,6 +301,7 @@ RSSAppApp (@main)
 |-----------|-----------|----------|
 | ContentView | RSSAppTests.swift | Verifies view instantiation |
 | Article | ArticleTests.swift | Creation, nil optionals, Identifiable, Hashable, equality |
+| SubscribedFeed | SubscribedFeedTests.swift | updatingMetadata preserves identity fields, does not mutate original |
 | DOMNode | DOMNodeTests.swift | Text/element accessors, tag name queries, tree traversal, visibility |
 | HTMLUtilities | HTMLUtilitiesTests.swift | Tag stripping, entity decoding (amp, lt, gt, quot, apos, nbsp), whitespace collapse, image extraction (double/single quotes, multiple images, no images) |
 | RSSParsingService | RSSParsingServiceTests.swift | Channel info, article count, basic fields, pubDate, snippets, raw description, thumbnail sources (media:thumbnail, media:content, enclosure, img fallback), thumbnail priority, ID derivation (guid, link), empty channel, malformed XML, empty data, missing fields, empty title, long snippet truncation |
@@ -315,5 +318,5 @@ RSSAppApp (@main)
 | FeedViewModel | FeedViewModelTests.swift | Load success/failure, error clearing on retry, article replacement on refresh, isLoading state |
 | FeedStorageService | FeedStorageServiceTests.swift | Save/load roundtrip, add, remove, empty state, overwrite |
 | OPMLService | OPMLServiceTests.swift | Parse flat/nested/empty OPML, folder flattening, missing attributes, title fallbacks, malformed XML, no body, round-trip generation, XML escaping, structure validation |
-| FeedListViewModel | FeedListViewModelTests.swift | Load from storage, remove by object, remove by IndexSet, empty state, OPML import (add new, skip duplicates, skip intra-file duplicates, result counts, save to storage, rollback on failure, parse error), OPML export (sets data, error on failure) |
+| FeedListViewModel | FeedListViewModelTests.swift | Load from storage, remove by object, remove by IndexSet, empty state, OPML import (add new, skip duplicates, skip intra-file duplicates, result counts, save to storage, rollback on failure, parse error), OPML export (sets data, error on failure), refresh (update metadata, partial failure, save to storage, empty no-op, isRefreshing state), import+refresh integration |
 | AddFeedViewModel | AddFeedViewModelTests.swift | Success, scheme prepend, invalid URL, duplicate detection, network error, error clearing |

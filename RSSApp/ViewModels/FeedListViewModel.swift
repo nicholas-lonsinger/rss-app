@@ -11,16 +11,23 @@ final class FeedListViewModel {
     )
 
     private(set) var feeds: [SubscribedFeed] = []
+    private(set) var isRefreshing = false
     var errorMessage: String?
     var opmlImportResult: OPMLImportResult?
     var opmlExportURL: URL?
 
     private let feedStorage: FeedStoring
     private let opmlService: OPMLServing
+    private let feedFetching: FeedFetching
 
-    init(feedStorage: FeedStoring = FeedStorageService(), opmlService: OPMLServing = OPMLService()) {
+    init(
+        feedStorage: FeedStoring = FeedStorageService(),
+        opmlService: OPMLServing = OPMLService(),
+        feedFetching: FeedFetching = FeedFetchingService()
+    ) {
         self.feedStorage = feedStorage
         self.opmlService = opmlService
+        self.feedFetching = feedFetching
     }
 
     func loadFeeds() {
@@ -141,6 +148,111 @@ final class FeedListViewModel {
         } catch {
             errorMessage = "Unable to export feeds."
             Self.logger.error("OPML export failed: \(error, privacy: .public)")
+        }
+    }
+
+    // MARK: - OPML Import with Refresh
+
+    func importOPMLAndRefresh(from url: URL) async {
+        let accessing = url.startAccessingSecurityScopedResource()
+        defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+
+        let data: Data
+        do {
+            data = try Data(contentsOf: url)
+        } catch {
+            errorMessage = "Unable to read the selected file."
+            Self.logger.error("Failed to read OPML file: \(error, privacy: .public)")
+            return
+        }
+
+        await importOPMLAndRefresh(from: data)
+    }
+
+    func importOPMLAndRefresh(from data: Data) async {
+        importOPML(from: data)
+        guard let result = opmlImportResult, result.addedCount > 0 else { return }
+        await refreshAllFeeds()
+    }
+
+    // MARK: - Feed Metadata Refresh
+
+    func refreshAllFeeds() async {
+        Self.logger.debug("refreshAllFeeds() called for \(self.feeds.count, privacy: .public) feeds")
+        guard !feeds.isEmpty else { return }
+        isRefreshing = true
+        defer { isRefreshing = false }
+
+        let feedsToRefresh = feeds
+        let feedFetching = self.feedFetching
+        let maxConcurrency = 6
+
+        let results: [(UUID, RSSFeed?)] = await withTaskGroup(
+            of: (UUID, RSSFeed?).self,
+            returning: [(UUID, RSSFeed?)].self
+        ) { group in
+            var collected: [(UUID, RSSFeed?)] = []
+            var inFlight = 0
+            var iterator = feedsToRefresh.makeIterator()
+
+            func enqueueNext(_ group: inout TaskGroup<(UUID, RSSFeed?)>, _ iterator: inout IndexingIterator<[SubscribedFeed]>) -> Bool {
+                guard let feed = iterator.next() else { return false }
+                group.addTask {
+                    do {
+                        let rssFeed = try await feedFetching.fetchFeed(from: feed.url)
+                        return (feed.id, rssFeed)
+                    } catch {
+                        return (feed.id, nil)
+                    }
+                }
+                return true
+            }
+
+            // Seed initial batch
+            while inFlight < maxConcurrency {
+                guard enqueueNext(&group, &iterator) else { break }
+                inFlight += 1
+            }
+
+            // Collect results and enqueue more
+            for await result in group {
+                collected.append(result)
+                inFlight -= 1
+                if enqueueNext(&group, &iterator) {
+                    inFlight += 1
+                }
+            }
+
+            return collected
+        }
+
+        // Apply results
+        var updatedFeeds = feeds
+        var failureCount = 0
+        for (id, rssFeed) in results {
+            guard let rssFeed else {
+                failureCount += 1
+                continue
+            }
+            if let index = updatedFeeds.firstIndex(where: { $0.id == id }) {
+                updatedFeeds[index] = updatedFeeds[index].updatingMetadata(
+                    title: rssFeed.title,
+                    feedDescription: rssFeed.feedDescription
+                )
+            }
+        }
+
+        feeds = updatedFeeds
+        do {
+            try feedStorage.saveFeeds(updatedFeeds)
+            Self.logger.notice("Refresh complete: \(updatedFeeds.count - failureCount, privacy: .public) updated, \(failureCount, privacy: .public) failed")
+        } catch {
+            errorMessage = "Unable to save updated feeds."
+            Self.logger.error("Failed to persist refreshed feeds: \(error, privacy: .public)")
+        }
+
+        if failureCount > 0 {
+            errorMessage = "Some feeds could not be updated."
         }
     }
 }
