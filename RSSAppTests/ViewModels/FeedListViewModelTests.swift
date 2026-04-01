@@ -98,6 +98,7 @@ struct FeedListViewModelTests {
         #expect(viewModel.feeds.count == 1)
         #expect(viewModel.feeds[0].title == "Second")
         #expect(mockStorage.feeds.count == 1)
+        #expect(mockStorage.feeds[0].title == "Second")
     }
 
     @Test("removeFeed rolls back on save failure")
