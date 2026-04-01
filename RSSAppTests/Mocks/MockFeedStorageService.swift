@@ -3,20 +3,15 @@ import Foundation
 
 final class MockFeedStorageService: FeedStoring, @unchecked Sendable {
     var feeds: [SubscribedFeed] = []
+    var errorToThrow: (any Error)?
 
-    func loadFeeds() -> [SubscribedFeed] {
-        feeds
+    func loadFeeds() throws -> [SubscribedFeed] {
+        if let error = errorToThrow { throw error }
+        return feeds
     }
 
-    func saveFeeds(_ newFeeds: [SubscribedFeed]) {
+    func saveFeeds(_ newFeeds: [SubscribedFeed]) throws {
+        if let error = errorToThrow { throw error }
         feeds = newFeeds
-    }
-
-    func addFeed(_ feed: SubscribedFeed) {
-        feeds.append(feed)
-    }
-
-    func removeFeed(withID id: UUID) {
-        feeds.removeAll { $0.id == id }
     }
 }

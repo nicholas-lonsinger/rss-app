@@ -39,21 +39,20 @@ struct FeedListView: View {
             }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    HStack(spacing: 12) {
-                        Button {
-                            showAddFeed = true
-                        } label: {
-                            Image(systemName: "plus")
-                        }
-                        .accessibilityLabel("Add Feed")
-
-                        Button {
-                            showSettings = true
-                        } label: {
-                            Image(systemName: "gear")
-                        }
-                        .accessibilityLabel("Settings")
+                    Button {
+                        showAddFeed = true
+                    } label: {
+                        Image(systemName: "plus")
                     }
+                    .accessibilityLabel("Add Feed")
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        showSettings = true
+                    } label: {
+                        Image(systemName: "gear")
+                    }
+                    .accessibilityLabel("Settings")
                 }
             }
             .sheet(isPresented: $showAddFeed, onDismiss: {

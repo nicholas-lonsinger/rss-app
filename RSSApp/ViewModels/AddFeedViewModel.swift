@@ -36,13 +36,24 @@ final class AddFeedViewModel {
             trimmed = "https://" + trimmed
         }
 
-        guard let url = URL(string: trimmed), url.scheme != nil, url.host != nil else {
+        guard let url = URL(string: trimmed),
+              let scheme = url.scheme?.lowercased(),
+              ["http", "https"].contains(scheme),
+              url.host != nil else {
             errorMessage = "Invalid URL. Please enter a valid feed address."
             Self.logger.info("Invalid URL input: '\(trimmed, privacy: .public)'")
             return
         }
 
-        var existingFeeds = feedStorage.loadFeeds()
+        var existingFeeds: [SubscribedFeed]
+        do {
+            existingFeeds = try feedStorage.loadFeeds()
+        } catch {
+            errorMessage = "Unable to load existing feeds. Please try again."
+            Self.logger.error("Failed to load feeds for duplicate check: \(error, privacy: .public)")
+            return
+        }
+
         if existingFeeds.contains(where: { $0.url == url }) {
             errorMessage = "You are already subscribed to this feed."
             Self.logger.info("Duplicate feed URL: '\(url, privacy: .public)'")
@@ -62,7 +73,7 @@ final class AddFeedViewModel {
                 addedDate: Date()
             )
             existingFeeds.append(subscribedFeed)
-            feedStorage.saveFeeds(existingFeeds)
+            try feedStorage.saveFeeds(existingFeeds)
             addedFeed = subscribedFeed
             Self.logger.notice("Added feed '\(rssFeed.title, privacy: .public)' from \(url, privacy: .public)")
         } catch {

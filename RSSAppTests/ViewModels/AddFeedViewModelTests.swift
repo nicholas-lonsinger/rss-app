@@ -27,6 +27,25 @@ struct AddFeedViewModelTests {
         #expect(mockStorage.feeds.count == 1)
     }
 
+    @Test("addFeed preserves existing feeds in storage")
+    @MainActor
+    func addFeedPreservesExisting() async {
+        let mockFetching = MockFeedFetchingService()
+        mockFetching.feedToReturn = TestFixtures.makeFeed(title: "New Feed")
+        let mockStorage = MockFeedStorageService()
+        mockStorage.feeds = [
+            TestFixtures.makeSubscribedFeed(title: "Existing Feed", url: URL(string: "https://existing.com/feed")!),
+        ]
+
+        let viewModel = AddFeedViewModel(feedFetching: mockFetching, feedStorage: mockStorage)
+        viewModel.urlInput = "https://example.com/feed"
+        await viewModel.addFeed()
+
+        #expect(mockStorage.feeds.count == 2)
+        #expect(mockStorage.feeds[0].title == "Existing Feed")
+        #expect(mockStorage.feeds[1].title == "New Feed")
+    }
+
     @Test("addFeed prepends https when scheme missing")
     @MainActor
     func addFeedPrependsScheme() async {
@@ -40,6 +59,21 @@ struct AddFeedViewModelTests {
 
         #expect(viewModel.addedFeed != nil)
         #expect(viewModel.addedFeed?.url == URL(string: "https://example.com/feed"))
+    }
+
+    @Test("addFeed rejects non-http schemes")
+    @MainActor
+    func addFeedRejectsNonHTTP() async {
+        let mockFetching = MockFeedFetchingService()
+        let mockStorage = MockFeedStorageService()
+
+        let viewModel = AddFeedViewModel(feedFetching: mockFetching, feedStorage: mockStorage)
+        viewModel.urlInput = "ftp://example.com/feed"
+        await viewModel.addFeed()
+
+        #expect(viewModel.addedFeed == nil)
+        #expect(viewModel.errorMessage != nil)
+        #expect(mockStorage.feeds.isEmpty)
     }
 
     @Test("addFeed sets error for invalid URL")
@@ -91,6 +125,21 @@ struct AddFeedViewModelTests {
         #expect(viewModel.errorMessage == "Could not load feed. Check the URL and try again.")
         #expect(viewModel.isValidating == false)
         #expect(mockStorage.feeds.isEmpty)
+    }
+
+    @Test("addFeed sets error on storage load failure")
+    @MainActor
+    func addFeedStorageLoadError() async {
+        let mockFetching = MockFeedFetchingService()
+        let mockStorage = MockFeedStorageService()
+        mockStorage.errorToThrow = NSError(domain: "test", code: 1)
+
+        let viewModel = AddFeedViewModel(feedFetching: mockFetching, feedStorage: mockStorage)
+        viewModel.urlInput = "https://example.com/feed"
+        await viewModel.addFeed()
+
+        #expect(viewModel.addedFeed == nil)
+        #expect(viewModel.errorMessage != nil)
     }
 
     @Test("addFeed clears previous error on retry")

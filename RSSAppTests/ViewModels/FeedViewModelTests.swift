@@ -92,4 +92,36 @@ struct FeedViewModelTests {
         await viewModel.loadFeed()
         #expect(viewModel.isLoading == false)
     }
+
+    @Test("feedTitle defaults to Feed")
+    @MainActor
+    func feedTitleDefault() {
+        let mock = MockFeedFetchingService()
+        let viewModel = FeedViewModel(feedFetching: mock, feedURL: URL(string: "https://example.com/feed")!)
+        #expect(viewModel.feedTitle == "Feed")
+    }
+
+    @Test("feedTitle updates on successful load")
+    @MainActor
+    func feedTitleUpdatesOnSuccess() async {
+        let mock = MockFeedFetchingService()
+        mock.feedToReturn = TestFixtures.makeFeed(title: "Electrek")
+
+        let viewModel = FeedViewModel(feedFetching: mock, feedURL: URL(string: "https://example.com/feed")!)
+        await viewModel.loadFeed()
+
+        #expect(viewModel.feedTitle == "Electrek")
+    }
+
+    @Test("feedTitle unchanged on failure")
+    @MainActor
+    func feedTitleUnchangedOnFailure() async {
+        let mock = MockFeedFetchingService()
+        mock.errorToThrow = FeedFetchingError.invalidResponse(statusCode: 500)
+
+        let viewModel = FeedViewModel(feedFetching: mock, feedURL: URL(string: "https://example.com/feed")!)
+        await viewModel.loadFeed()
+
+        #expect(viewModel.feedTitle == "Feed")
+    }
 }
