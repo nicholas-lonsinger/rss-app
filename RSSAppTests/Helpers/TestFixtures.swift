@@ -112,6 +112,55 @@ enum TestFixtures {
         </rss>
         """
 
+    // MARK: - Sample OPML XML
+
+    static let sampleOPML = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <opml version="2.0">
+          <head><title>Test Subscriptions</title></head>
+          <body>
+            <outline text="Feed One" type="rss" xmlUrl="https://one.com/feed" htmlUrl="https://one.com" description="First feed"/>
+            <outline text="Feed Two" type="rss" xmlUrl="https://two.com/feed" description="Second feed"/>
+            <outline text="Feed Three" type="rss" xmlUrl="https://three.com/feed"/>
+          </body>
+        </opml>
+        """
+
+    static let nestedOPML = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <opml version="2.0">
+          <head><title>Nested Subscriptions</title></head>
+          <body>
+            <outline text="Tech" title="Tech">
+              <outline text="Ars Technica" type="rss" xmlUrl="https://arstechnica.com/feed"/>
+              <outline text="The Verge" type="rss" xmlUrl="https://theverge.com/feed"/>
+            </outline>
+            <outline text="Top Level Feed" type="rss" xmlUrl="https://top.com/feed"/>
+          </body>
+        </opml>
+        """
+
+    static let emptyBodyOPML = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <opml version="2.0">
+          <head><title>Empty</title></head>
+          <body/>
+        </opml>
+        """
+
+    static let malformedOPML = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <opml version="2.0">
+          <head><title>Broken
+        """
+
+    static let noBodyOPML = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <opml version="2.0">
+          <head><title>No Body</title></head>
+        </opml>
+        """
+
     // MARK: - Factory Methods
 
     static func makeArticle(
@@ -161,6 +210,20 @@ enum TestFixtures {
             link: link,
             feedDescription: feedDescription,
             articles: articles
+        )
+    }
+
+    static func makeOPMLFeedEntry(
+        title: String = "Test Feed",
+        feedURL: URL = URL(string: "https://example.com/feed")!,
+        siteURL: URL? = URL(string: "https://example.com"),
+        description: String = "A test feed"
+    ) -> OPMLFeedEntry {
+        OPMLFeedEntry(
+            title: title,
+            feedURL: feedURL,
+            siteURL: siteURL,
+            description: description
         )
     }
 }
