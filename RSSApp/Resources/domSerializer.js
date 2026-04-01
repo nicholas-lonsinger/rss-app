@@ -57,11 +57,14 @@
             if (alt) obj.alt = alt;
         }
 
-        // Visibility — only flag hidden elements (visible is the default)
-        var style = window.getComputedStyle(node);
-        if (style.display === 'none' || style.visibility === 'hidden' ||
-            node.getAttribute('aria-hidden') === 'true') {
+        // Visibility — check cheap properties first to avoid expensive getComputedStyle.
+        if (node.getAttribute('aria-hidden') === 'true' || node.hidden) {
             obj.vis = false;
+        } else {
+            var style = window.getComputedStyle(node);
+            if (style.display === 'none' || style.visibility === 'hidden') {
+                obj.vis = false;
+            }
         }
 
         // Children

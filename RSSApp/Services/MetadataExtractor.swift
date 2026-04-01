@@ -63,7 +63,9 @@ enum MetadataExtractor {
     ///
     /// Many sites format titles as "Article Title - Site Name" or "Article Title | Site Name".
     private static func cleanDocumentTitle(_ title: String) -> String {
-        let separators: [Character] = ["|", "-", "–", "—", ":", "·"]
+        // RATIONALE: Colon is excluded because many article titles use colons as content
+        // (e.g., "Topic: A Subtitle"), which would cause truncation.
+        let separators: [Character] = ["|", "-", "–", "—", "·"]
         for sep in separators {
             let parts = title.split(separator: sep, maxSplits: 1)
             if parts.count == 2 {
@@ -111,13 +113,15 @@ enum MetadataExtractor {
     }
 
     /// Searches for a DOM node whose class or id matches byline patterns.
+    /// Limits matches to nodes with < 100 characters to avoid matching large containers.
     private static func findByline(in node: DOMNode) -> DOMNode? {
         let matchString = (node.className + " " + node.identifier).lowercased()
-        for pattern in bylinePatterns {
-            if matchString.contains(pattern) {
-                return node
-            }
+        let isMatch = bylinePatterns.contains { matchString.contains($0) }
+
+        if isMatch && node.textLength < 100 {
+            return node
         }
+
         for child in node.children {
             if let found = findByline(in: child) { return found }
         }

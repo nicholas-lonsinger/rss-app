@@ -17,14 +17,17 @@ struct ContentAssemblerTests {
         #expect(text.contains("Second paragraph."))
     }
 
-    @Test func collapsesWhitespace() {
+    @Test func preservesParagraphBreaks() {
         let node = DOMNodeFactory.makeBody([
             DOMNodeFactory.makeParagraph("Hello"),
             DOMNodeFactory.makeParagraph("World"),
         ])
         let (_, text) = ContentAssembler.assemble(from: node)
-        // Block elements inject \n\n which collapseWhitespace normalizes to spaces
-        #expect(!text.contains("\n"))
+        // Block elements inject paragraph breaks that are preserved
+        #expect(text.contains("Hello"))
+        #expect(text.contains("World"))
+        // But excessive newlines are collapsed to double
+        #expect(!text.contains("\n\n\n"))
     }
 
     // MARK: - HTML Escaping

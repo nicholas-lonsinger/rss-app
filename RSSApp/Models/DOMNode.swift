@@ -73,11 +73,21 @@ extension DOMNode {
 
 extension DOMNode {
     /// Recursively collects all text content from this node and its descendants.
+    /// Uses a single string buffer to avoid O(N^2) intermediate allocations.
     var textContent: String {
+        var result = ""
+        appendText(to: &result)
+        return result
+    }
+
+    private func appendText(to result: inout String) {
         if isText {
-            return txt ?? ""
+            result.append(txt ?? "")
+        } else {
+            for child in children {
+                child.appendText(to: &result)
+            }
         }
-        return children.map(\.textContent).joined()
     }
 
     /// Total character count of the recursive text content.

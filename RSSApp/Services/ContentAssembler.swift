@@ -6,7 +6,7 @@ import os
 /// The assembler walks the candidate node's tree and produces:
 /// - `htmlContent`: semantic HTML preserving structure (`<p>`, `<h2>`, `<blockquote>`,
 ///   `<img>`, `<a>`, etc.) but stripping non-content attributes
-/// - `textContent`: plain text with whitespace normalized to single spaces
+/// - `textContent`: plain text with paragraph breaks preserved and whitespace normalized
 enum ContentAssembler {
 
     private static let logger = Logger(
@@ -141,9 +141,12 @@ enum ContentAssembler {
              .replacingOccurrences(of: ">", with: "&gt;")
     }
 
-    /// Collapses multiple whitespace characters into single spaces and trims.
+    /// Normalizes whitespace while preserving paragraph structure.
+    /// Collapses horizontal whitespace to single spaces and limits consecutive
+    /// newlines to double (paragraph breaks), keeping text readable for AI context.
     private static func collapseWhitespace(_ text: String) -> String {
-        text.replacing(/\s+/, with: " ")
+        text.replacing(/[ \t]+/, with: " ")
+            .replacing(/\n{3,}/, with: "\n\n")
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
