@@ -100,14 +100,18 @@ struct ArticleReaderWebView: UIViewRepresentable {
 
             Self.logger.debug("Received early DOM serialization via message handler")
 
-            if let content = try? DOMSerializerConstants.extractContent(fromJSON: jsonString, using: contentExtractor) {
-                extractionState.content = content
-                earlyExtractionSucceeded = true
-                Self.logger.notice(
-                    "Early extraction succeeded (\(content.textContent.count, privacy: .public) chars)"
-                )
-            } else {
-                Self.logger.debug("Early extraction produced no content — will retry on didFinish")
+            do {
+                if let content = try DOMSerializerConstants.extractContent(fromJSON: jsonString, using: contentExtractor) {
+                    extractionState.content = content
+                    earlyExtractionSucceeded = true
+                    Self.logger.notice(
+                        "Early extraction succeeded (\(content.textContent.count, privacy: .public) chars)"
+                    )
+                } else {
+                    Self.logger.debug("Early extraction produced no content — will retry on didFinish")
+                }
+            } catch {
+                Self.logger.warning("Early DOM decode failed: \(error, privacy: .public)")
             }
         }
 
