@@ -13,7 +13,7 @@ final class ReaderExtractionState {
 struct ArticleReaderWebView: UIViewRepresentable {
     let url: URL
     let extractionState: ReaderExtractionState
-    /// Raw RSS description HTML used as fallback when Readability extraction fails.
+    /// Raw RSS description HTML used as fallback when all extraction strategies fail.
     let fallbackHTML: String
 
     private static let logger = Logger(
@@ -29,19 +29,26 @@ struct ArticleReaderWebView: UIViewRepresentable {
         let config = WKWebViewConfiguration()
         config.mediaTypesRequiringUserActionForPlayback = .all
 
-        // Inject Readability.js so it's available when the page finishes loading.
-        if let scriptURL = Bundle.main.url(forResource: "readability", withExtension: "js"),
-           let readabilityJS = try? String(contentsOf: scriptURL, encoding: .utf8) {
+        // Inject domSerializer.js at document end — fires after the document has loaded
+        // but before subresources (images, ads) finish loading. This enables early
+        // extraction since article content is usually in the initial HTML.
+        do {
+            guard let scriptURL = Bundle.main.url(forResource: "domSerializer", withExtension: "js") else {
+                throw ArticleExtractionError.serializerNotFound
+            }
+            let serializerJS = try String(contentsOf: scriptURL, encoding: .utf8)
             let userScript = WKUserScript(
-                source: readabilityJS,
+                source: serializerJS,
                 injectionTime: .atDocumentEnd,
                 forMainFrameOnly: true
             )
             config.userContentController.addUserScript(userScript)
-        } else {
-            Self.logger.fault("readability.js not found in app bundle")
-            assertionFailure("readability.js not found in app bundle")
+        } catch {
+            Self.logger.fault("domSerializer.js not available: \(error, privacy: .public)")
+            assertionFailure("domSerializer.js not available: \(error)")
         }
+
+        config.userContentController.add(context.coordinator, name: DOMSerializerConstants.messageHandlerName)
 
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.scrollView.showsHorizontalScrollIndicator = false
@@ -56,7 +63,7 @@ struct ArticleReaderWebView: UIViewRepresentable {
 
     // MARK: - Coordinator
 
-    final class Coordinator: NSObject, WKNavigationDelegate {
+    final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
         private static let logger = Logger(
             subsystem: "com.nicholas-lonsinger.rss-app",
             category: "ArticleReaderWebView.Coordinator"
@@ -64,62 +71,55 @@ struct ArticleReaderWebView: UIViewRepresentable {
 
         private let extractionState: ReaderExtractionState
         private let fallbackHTML: String
+        private let contentExtractor: any ContentExtracting
 
-        private static let extractionScript = """
-        (function() {
-            try {
-                var article = new Readability(document.cloneNode(true)).parse();
-                if (!article) return null;
-                return JSON.stringify({
-                    title: article.title || '',
-                    byline: article.byline || '',
-                    content: article.content || '',
-                    textContent: article.textContent || ''
-                });
-            } catch(e) {
-                return null;
-            }
-        })();
-        """
+        /// Tracks whether early extraction already succeeded, so `didFinish` can skip redundant work.
+        private var earlyExtractionSucceeded = false
 
-        /// Fallback extraction that targets common article selectors, then document body.
-        private static let domFallbackScript = """
-        (function() {
-            var selectors = [
-                'article', '.entry-content', '.post-content', '.article-content',
-                '.article-body', '[role="article"]', 'main', '#content'
-            ];
-            for (var i = 0; i < selectors.length; i++) {
-                var el = document.querySelector(selectors[i]);
-                if (el && el.innerText && el.innerText.trim().length > 200) {
-                    return JSON.stringify({
-                        title: document.title || '',
-                        byline: '',
-                        content: el.innerHTML,
-                        textContent: el.innerText.trim()
-                    });
-                }
-            }
-            var body = document.body;
-            if (body && body.innerText && body.innerText.trim().length > 200) {
-                return JSON.stringify({
-                    title: document.title || '',
-                    byline: '',
-                    content: body.innerHTML,
-                    textContent: body.innerText.trim()
-                });
-            }
-            return null;
-        })();
-        """
-
-        init(extractionState: ReaderExtractionState, fallbackHTML: String) {
+        init(
+            extractionState: ReaderExtractionState,
+            fallbackHTML: String,
+            contentExtractor: (any ContentExtracting)? = nil
+        ) {
             self.extractionState = extractionState
             self.fallbackHTML = fallbackHTML
+            self.contentExtractor = contentExtractor ?? ContentExtractor()
         }
 
+        // MARK: - WKScriptMessageHandler (early extraction)
+
+        func userContentController(
+            _ userContentController: WKUserContentController,
+            didReceive message: WKScriptMessage
+        ) {
+            guard message.name == DOMSerializerConstants.messageHandlerName else { return }
+            guard let jsonString = message.body as? String else {
+                Self.logger.warning("Message handler received non-string body: \(type(of: message.body))")
+                return
+            }
+
+            Self.logger.debug("Received early DOM serialization via message handler")
+
+            if let content = extractFromJSON(jsonString) {
+                extractionState.content = content
+                earlyExtractionSucceeded = true
+                Self.logger.notice(
+                    "Early extraction succeeded (\(content.textContent.count, privacy: .public) chars)"
+                )
+            } else {
+                Self.logger.debug("Early extraction produced no content — will retry on didFinish")
+            }
+        }
+
+        // MARK: - WKNavigationDelegate
+
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-            Self.logger.debug("Page finished loading, running Readability extraction")
+            guard !earlyExtractionSucceeded else {
+                Self.logger.debug("Skipping didFinish extraction — early extraction already succeeded")
+                return
+            }
+
+            Self.logger.debug("Page finished loading, running DOM serialization")
             Task { @MainActor in
                 if let content = await self.attemptExtraction(on: webView) {
                     self.extractionState.content = content
@@ -128,17 +128,14 @@ struct ArticleReaderWebView: UIViewRepresentable {
 
                 // Some sites load content dynamically after the initial page load.
                 // Retry once after a short delay before falling back.
-                Self.logger.debug("First extraction attempt returned nil, retrying after delay")
-                try? await Task.sleep(for: .seconds(2))
-                if let content = await self.attemptExtraction(on: webView) {
-                    self.extractionState.content = content
+                Self.logger.debug("First didFinish extraction returned nil, retrying after delay")
+                do {
+                    try await Task.sleep(for: .seconds(2))
+                } catch {
+                    Self.logger.debug("Retry cancelled")
                     return
                 }
-
-                // Readability failed — try targeting common article CSS selectors,
-                // then fall back to document.body.innerText for full page content.
-                Self.logger.debug("Readability failed, attempting DOM selector fallback")
-                if let content = await self.attemptDOMFallback(on: webView) {
+                if let content = await self.attemptExtraction(on: webView) {
                     self.extractionState.content = content
                     return
                 }
@@ -166,85 +163,48 @@ struct ArticleReaderWebView: UIViewRepresentable {
             applyFallback()
         }
 
-        /// Attempts Readability extraction, returning `nil` if it fails or produces no result.
+        // MARK: - Extraction
+
+        /// Runs the DOM serializer via evaluateJavaScript and processes the result in Swift.
         @MainActor
         private func attemptExtraction(on webView: WKWebView) async -> ArticleContent? {
             do {
-                let result = try await webView.evaluateJavaScript(Self.extractionScript)
+                let result = try await webView.evaluateJavaScript(DOMSerializerConstants.serializerCall)
 
-                guard let jsonString = result as? String,
-                      let data = jsonString.data(using: .utf8) else {
-                    Self.logger.debug("Readability returned nil or non-string result")
+                guard let jsonString = result as? String else {
+                    Self.logger.warning("serializeDOM() returned nil or non-string result")
                     return nil
                 }
 
-                let decoded = try JSONDecoder().decode(ReadabilityResult.self, from: data)
-                let content = ArticleContent(
-                    title: decoded.title,
-                    byline: decoded.byline.isEmpty ? nil : decoded.byline,
-                    htmlContent: decoded.content,
-                    textContent: decoded.textContent
-                )
-                Self.logger.notice(
-                    "Pre-extraction complete (\(content.textContent.count, privacy: .public) chars)"
-                )
-                return content
+                return extractFromJSON(jsonString)
             } catch {
-                Self.logger.debug("Extraction attempt failed: \(error, privacy: .public)")
+                Self.logger.warning("serializeDOM() failed: \(error, privacy: .public)")
                 return nil
             }
         }
 
-        /// Extracts content using common article CSS selectors or document body.
-        @MainActor
-        private func attemptDOMFallback(on webView: WKWebView) async -> ArticleContent? {
+        /// Decodes serialized DOM JSON and runs the Swift content extractor.
+        private func extractFromJSON(_ jsonString: String) -> ArticleContent? {
+            // RATIONALE: Swift String.data(using: .utf8) never returns nil for valid String values.
+            // This guard satisfies the compiler; the else branch is unreachable.
+            guard let data = jsonString.data(using: .utf8) else { return nil }
+
             do {
-                let result = try await webView.evaluateJavaScript(Self.domFallbackScript)
-
-                guard let jsonString = result as? String,
-                      let data = jsonString.data(using: .utf8) else {
-                    Self.logger.debug("DOM fallback returned nil")
-                    return nil
-                }
-
-                let decoded = try JSONDecoder().decode(ReadabilityResult.self, from: data)
-                let content = ArticleContent(
-                    title: decoded.title,
-                    byline: decoded.byline.isEmpty ? nil : decoded.byline,
-                    htmlContent: decoded.content,
-                    textContent: decoded.textContent
-                )
-                Self.logger.notice(
-                    "DOM fallback extraction complete (\(content.textContent.count, privacy: .public) chars)"
-                )
-                return content
+                let dom = try JSONDecoder().decode(SerializedDOM.self, from: data)
+                return contentExtractor.extract(from: dom)
             } catch {
-                Self.logger.debug("DOM fallback failed: \(error, privacy: .public)")
+                Self.logger.warning("DOM JSON decoding failed: \(error, privacy: .public)")
                 return nil
             }
         }
 
         /// Falls back to the RSS article description when all extraction strategies fail.
         private func applyFallback() {
-            let fallbackText = HTMLUtilities.stripHTML(fallbackHTML)
-            extractionState.content = ArticleContent(
-                title: "",
-                byline: nil,
-                htmlContent: fallbackHTML,
-                textContent: fallbackText
-            )
+            let content = ArticleContent.rssFallback(html: fallbackHTML)
+            extractionState.content = content
             Self.logger.notice(
-                "Applied RSS fallback (\(fallbackText.count, privacy: .public) chars)"
+                "Applied RSS fallback (\(content.textContent.count, privacy: .public) chars)"
             )
         }
     }
-}
-
-// MARK: - Decodable result
-
-private struct ReadabilityResult: Decodable {
-    let title: String
-    let byline: String
-    let content: String
-    let textContent: String
 }

@@ -3,8 +3,18 @@ import Foundation
 struct ArticleContent: Sendable {
     let title: String
     let byline: String?
-    /// Cleaned HTML extracted by Readability — for display in the reader web view.
+    /// Cleaned HTML from the article content extractor — for display in the reader web view.
     let htmlContent: String
-    /// Plain-text version extracted by Readability — for AI discussion context.
+    /// Plain-text version from the article content extractor — for AI discussion context.
     let textContent: String
+
+    /// Creates fallback content from raw RSS description HTML when extraction fails.
+    static func rssFallback(html: String) -> ArticleContent {
+        ArticleContent(
+            title: "",
+            byline: nil,
+            htmlContent: html,
+            textContent: HTMLUtilities.stripHTML(html)
+        )
+    }
 }
