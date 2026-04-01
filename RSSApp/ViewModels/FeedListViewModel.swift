@@ -93,6 +93,7 @@ final class FeedListViewModel {
             return
         }
 
+        let previousFeeds = feeds
         var seenURLs = Set(feeds.map(\.url))
         var addedCount = 0
         var skippedCount = 0
@@ -118,13 +119,12 @@ final class FeedListViewModel {
             try feedStorage.saveFeeds(feeds)
             opmlImportResult = OPMLImportResult(
                 addedCount: addedCount,
-                skippedCount: skippedCount,
-                totalInFile: entries.count
+                skippedCount: skippedCount
             )
             errorMessage = nil
             Self.logger.notice("OPML import: added \(addedCount, privacy: .public), skipped \(skippedCount, privacy: .public)")
         } catch {
-            loadFeeds()
+            feeds = previousFeeds
             errorMessage = "Unable to save imported feeds."
             Self.logger.error("Failed to persist OPML import: \(error, privacy: .public)")
         }

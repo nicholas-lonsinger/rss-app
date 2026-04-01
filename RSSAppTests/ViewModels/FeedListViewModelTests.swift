@@ -286,8 +286,8 @@ struct FeedListViewModelTests {
         mockStorage.errorToThrow = NSError(domain: "test", code: 1)
         viewModel.importOPML(from: Data())
 
-        // Rollback reloads from storage, which will throw — so feeds become empty
-        // But the errorToThrow is set, so loadFeeds() will also fail
+        #expect(viewModel.feeds.count == 1)
+        #expect(viewModel.feeds[0].title == "Existing")
         #expect(viewModel.errorMessage != nil)
     }
 

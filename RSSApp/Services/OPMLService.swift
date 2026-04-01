@@ -4,6 +4,7 @@ import os
 enum OPMLError: Error, Sendable {
     case parsingFailed(description: String)
     case noBodyFound
+    case encodingFailed
 }
 
 protocol OPMLServing: Sendable {
@@ -79,7 +80,7 @@ struct OPMLService: OPMLServing {
         guard let data = xml.data(using: .utf8) else {
             Self.logger.fault("Failed to encode OPML XML string as UTF-8")
             assertionFailure("Failed to encode OPML XML string as UTF-8")
-            return Data()
+            throw OPMLError.encodingFailed
         }
 
         Self.logger.notice("Generated OPML with \(feeds.count, privacy: .public) feeds")
@@ -104,6 +105,11 @@ struct OPMLService: OPMLServing {
 // synchronously within a single parseOPML() call and never escapes that scope.
 private final class OPMLParserDelegate: NSObject, XMLParserDelegate, @unchecked Sendable {
 
+    private static let logger = Logger(
+        subsystem: "com.nicholas-lonsinger.rss-app",
+        category: "OPMLParserDelegate"
+    )
+
     var foundBody = false
     var entries: [OPMLFeedEntry] = []
 
@@ -122,8 +128,9 @@ private final class OPMLParserDelegate: NSObject, XMLParserDelegate, @unchecked 
 
         case "outline":
             guard foundBody else { return }
-            guard let xmlUrlString = attributeDict["xmlUrl"],
-                  let feedURL = URL(string: xmlUrlString) else {
+            guard let xmlUrlString = attributeDict["xmlUrl"] else { return }
+            guard let feedURL = URL(string: xmlUrlString) else {
+                Self.logger.warning("Skipped outline with unparseable xmlUrl: '\(xmlUrlString, privacy: .public)'")
                 return
             }
 

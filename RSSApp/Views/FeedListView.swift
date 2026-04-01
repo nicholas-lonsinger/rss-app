@@ -9,6 +9,7 @@ struct FeedListView: View {
     @State private var showExportShare = false
     @State private var showImportResult = false
 
+    // .opml is not a system-declared UTType on all iOS versions; .xml is the guaranteed fallback.
     private static let opmlContentTypes: [UTType] = {
         var types: [UTType] = [.xml]
         if let opmlType = UTType(filenameExtension: "opml") {
@@ -141,8 +142,9 @@ struct FeedListView: View {
 
     @ViewBuilder
     private var exportShareSheet: some View {
-        if let data = viewModel.opmlExportData {
-            ActivityShareView(items: [writeExportFile(data)])
+        if let data = viewModel.opmlExportData,
+           let fileURL = writeExportFile(data) {
+            ActivityShareView(items: [fileURL])
         }
     }
 
@@ -174,14 +176,15 @@ struct FeedListView: View {
         }
     }
 
-    private func writeExportFile(_ data: Data) -> URL {
+    private func writeExportFile(_ data: Data) -> URL? {
         let tempURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("RSS Subscriptions.opml")
         do {
             try data.write(to: tempURL)
+            return tempURL
         } catch {
             viewModel.errorMessage = "Unable to write export file."
+            return nil
         }
-        return tempURL
     }
 }
