@@ -14,7 +14,7 @@ struct FeedViewModelTests {
             TestFixtures.makeArticle(id: "2", title: "Article 2"),
         ])
 
-        let viewModel = FeedViewModel(feedFetching: mock)
+        let viewModel = FeedViewModel(feedFetching: mock, feedURL: URL(string: "https://example.com/feed")!)
         await viewModel.loadFeed()
 
         #expect(viewModel.articles.count == 2)
@@ -29,7 +29,7 @@ struct FeedViewModelTests {
         let mock = MockFeedFetchingService()
         mock.errorToThrow = FeedFetchingError.invalidResponse(statusCode: 500)
 
-        let viewModel = FeedViewModel(feedFetching: mock)
+        let viewModel = FeedViewModel(feedFetching: mock, feedURL: URL(string: "https://example.com/feed")!)
         await viewModel.loadFeed()
 
         #expect(viewModel.articles.isEmpty)
@@ -43,7 +43,7 @@ struct FeedViewModelTests {
         let mock = MockFeedFetchingService()
         mock.errorToThrow = FeedFetchingError.invalidResponse(statusCode: 500)
 
-        let viewModel = FeedViewModel(feedFetching: mock)
+        let viewModel = FeedViewModel(feedFetching: mock, feedURL: URL(string: "https://example.com/feed")!)
         await viewModel.loadFeed()
         #expect(viewModel.errorMessage != nil)
 
@@ -66,7 +66,7 @@ struct FeedViewModelTests {
             TestFixtures.makeArticle(id: "1"),
         ])
 
-        let viewModel = FeedViewModel(feedFetching: mock)
+        let viewModel = FeedViewModel(feedFetching: mock, feedURL: URL(string: "https://example.com/feed")!)
         await viewModel.loadFeed()
         #expect(viewModel.articles.count == 1)
 
@@ -86,7 +86,7 @@ struct FeedViewModelTests {
         let mock = MockFeedFetchingService()
         mock.feedToReturn = TestFixtures.makeFeed()
 
-        let viewModel = FeedViewModel(feedFetching: mock)
+        let viewModel = FeedViewModel(feedFetching: mock, feedURL: URL(string: "https://example.com/feed")!)
         #expect(viewModel.isLoading == false)
 
         await viewModel.loadFeed()

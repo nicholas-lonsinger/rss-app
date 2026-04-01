@@ -134,6 +134,22 @@ enum TestFixtures {
         )
     }
 
+    static func makeSubscribedFeed(
+        id: UUID = UUID(),
+        title: String = "Test Feed",
+        url: URL = URL(string: "https://example.com/feed")!,
+        feedDescription: String = "A test feed",
+        addedDate: Date = Date(timeIntervalSince1970: 1_711_800_000)
+    ) -> SubscribedFeed {
+        SubscribedFeed(
+            id: id,
+            title: title,
+            url: url,
+            feedDescription: feedDescription,
+            addedDate: addedDate
+        )
+    }
+
     static func makeFeed(
         title: String = "Test Feed",
         link: URL? = URL(string: "https://example.com"),

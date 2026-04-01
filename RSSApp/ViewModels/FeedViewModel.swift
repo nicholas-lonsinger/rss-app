@@ -11,29 +11,16 @@ final class FeedViewModel {
     )
 
     var articles: [Article] = []
+    var feedTitle: String = "Feed"
     var isLoading = false
     var errorMessage: String?
 
     private let feedFetching: FeedFetching
     private let feedURL: URL
 
-    init(feedFetching: FeedFetching = FeedFetchingService(), feedURL: URL? = nil) {
+    init(feedFetching: FeedFetching = FeedFetchingService(), feedURL: URL) {
         self.feedFetching = feedFetching
-
-        if let feedURL {
-            self.feedURL = feedURL
-            return
-        }
-
-        guard let url = URL(string: "https://electrek.co/feed/") else {
-            Self.logger.fault("Failed to create URL for hardcoded Electrek feed")
-            assertionFailure("Failed to create URL for hardcoded Electrek feed")
-            // RATIONALE: "about:blank" is a well-known URI that always produces a valid URL.
-            // This fallback is unreachable in practice since the Electrek URL is a valid literal.
-            self.feedURL = URL(filePath: "/")
-            return
-        }
-        self.feedURL = url
+        self.feedURL = feedURL
     }
 
     func loadFeed() async {
@@ -44,6 +31,7 @@ final class FeedViewModel {
 
         do {
             let feed = try await feedFetching.fetchFeed(from: feedURL)
+            feedTitle = feed.title
             articles = feed.articles
             Self.logger.notice("Feed loaded: \(feed.articles.count, privacy: .public) articles")
         } catch {
