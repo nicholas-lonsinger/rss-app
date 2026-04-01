@@ -173,6 +173,7 @@ final class FeedListViewModel {
     func refreshAllFeeds() async {
         Self.logger.debug("refreshAllFeeds() called for \(self.feeds.count, privacy: .public) feeds")
         guard !feeds.isEmpty, !isRefreshing else { return }
+        errorMessage = nil
         isRefreshing = true
         defer { isRefreshing = false }
 
@@ -223,13 +224,14 @@ final class FeedListViewModel {
         }
 
         var updatedFeeds = feeds
+        let idToIndex = Dictionary(uniqueKeysWithValues: updatedFeeds.enumerated().map { ($1.id, $0) })
         var failureCount = 0
         for (id, rssFeed) in results {
             guard let rssFeed else {
                 failureCount += 1
                 continue
             }
-            if let index = updatedFeeds.firstIndex(where: { $0.id == id }) {
+            if let index = idToIndex[id] {
                 updatedFeeds[index] = updatedFeeds[index].updatingMetadata(
                     title: rssFeed.title,
                     feedDescription: rssFeed.feedDescription
