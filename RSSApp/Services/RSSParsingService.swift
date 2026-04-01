@@ -166,7 +166,7 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
                 // Only set from text content (RSS style) if non-empty.
                 // Also guards against overwriting the href already set in didStartElement
                 // for Atom feeds, since Atom <link> elements produce no text content.
-                if !textBuffer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                if itemLink.isEmpty, !textBuffer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     itemLink = textBuffer
                 }
             case "description":
@@ -307,12 +307,25 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
         // Fallback: DateFormatter's Z specifier matches -0400 (RFC 822) but not the
         // colon-separated -04:00 form required by RFC 3339/Atom. ISO8601DateFormatter
         // with .withInternetDateTime handles the colon form (e.g., "2026-04-01T15:06:21-04:00").
-        let iso8601Formatter = ISO8601DateFormatter()
-        iso8601Formatter.formatOptions = [.withInternetDateTime]
-        if let date = iso8601Formatter.date(from: trimmed) {
+        if let date = ISO8601Formatters.standard.date(from: trimmed) {
             return date
         }
-        iso8601Formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return iso8601Formatter.date(from: trimmed)
+        return ISO8601Formatters.fractional.date(from: trimmed)
+    }
+
+    // RATIONALE: nonisolated(unsafe) is safe because these formatters are initialized
+    // once via static let and never mutated after initialization — only date(from:) is called.
+    private enum ISO8601Formatters {
+        nonisolated(unsafe) static let standard: ISO8601DateFormatter = {
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime]
+            return formatter
+        }()
+
+        nonisolated(unsafe) static let fractional: ISO8601DateFormatter = {
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            return formatter
+        }()
     }
 }
