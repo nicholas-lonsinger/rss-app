@@ -116,4 +116,23 @@ struct FeedListViewModelTests {
         #expect(viewModel.feeds.count == 1)
         #expect(viewModel.errorMessage != nil)
     }
+
+    @Test("removeFeed at IndexSet rolls back on save failure")
+    @MainActor
+    func removeFeedAtIndexSetSaveFailure() {
+        let feed1 = TestFixtures.makeSubscribedFeed(title: "First")
+        let feed2 = TestFixtures.makeSubscribedFeed(title: "Second")
+        let mockStorage = MockFeedStorageService()
+        mockStorage.feeds = [feed1, feed2]
+
+        let viewModel = FeedListViewModel(feedStorage: mockStorage)
+        viewModel.loadFeeds()
+
+        mockStorage.errorToThrow = NSError(domain: "test", code: 1)
+        viewModel.removeFeed(at: IndexSet(integer: 0))
+
+        #expect(viewModel.feeds.count == 2)
+        #expect(viewModel.feeds[0].title == "First")
+        #expect(viewModel.errorMessage != nil)
+    }
 }

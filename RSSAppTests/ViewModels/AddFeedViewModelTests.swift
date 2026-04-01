@@ -175,6 +175,18 @@ struct AddFeedViewModelTests {
         #expect(viewModel.canSubmit == true)
     }
 
+    @Test("canSubmit returns false while validating")
+    @MainActor
+    func canSubmitWhileValidating() {
+        let viewModel = AddFeedViewModel(
+            feedFetching: MockFeedFetchingService(),
+            feedStorage: MockFeedStorageService()
+        )
+        viewModel.urlInput = "https://example.com/feed"
+        viewModel.isValidating = true
+        #expect(viewModel.canSubmit == false)
+    }
+
     @Test("addFeed detects duplicate when input omits scheme")
     @MainActor
     func addFeedDuplicateWithSchemeNormalization() async {
