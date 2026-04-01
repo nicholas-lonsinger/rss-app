@@ -149,22 +149,31 @@ private final class ExtractionCoordinator: NSObject, WKNavigationDelegate, @unch
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        Task { @MainActor in
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+
+            let result: Any
             do {
-                let result = try await webView.evaluateJavaScript(DOMSerializerConstants.serializerCall)
+                result = try await webView.evaluateJavaScript(DOMSerializerConstants.serializerCall)
+            } catch {
+                Self.logger.warning("serializeDOM() error: \(error, privacy: .public)")
+                self.resumeAndCleanup(returning: nil)
+                return
+            }
 
-                guard let jsonString = result as? String,
-                      let data = jsonString.data(using: .utf8) else {
-                    Self.logger.warning("serializeDOM() returned nil or non-string result")
-                    self.resumeAndCleanup(returning: nil)
-                    return
-                }
+            guard let jsonString = result as? String,
+                  let data = jsonString.data(using: .utf8) else {
+                Self.logger.warning("serializeDOM() returned nil or non-string result")
+                self.resumeAndCleanup(returning: nil)
+                return
+            }
 
+            do {
                 let dom = try JSONDecoder().decode(SerializedDOM.self, from: data)
                 let content = self.contentExtractor.extract(from: dom)
                 self.resumeAndCleanup(returning: content)
             } catch {
-                Self.logger.warning("serializeDOM() error: \(error, privacy: .public)")
+                Self.logger.warning("DOM JSON decoding failed: \(error, privacy: .public)")
                 self.resumeAndCleanup(returning: nil)
             }
         }
@@ -183,6 +192,11 @@ private final class ExtractionCoordinator: NSObject, WKNavigationDelegate, @unch
         Self.logger.warning("Provisional navigation failed: \(error, privacy: .public)")
         resumeAndCleanup(throwing: ArticleExtractionError.navigationFailed(error))
     }
+
+    // RATIONALE: Resume the continuation before cleanup so that the WKWebView and
+    // coordinator are still alive when the continuation fires. cleanup() nils selfRetain
+    // (the only strong reference), so calling it first could deallocate the coordinator
+    // before the awaiting code observes the result.
 
     /// Resumes the continuation with a value, then cleans up.
     fileprivate func resumeAndCleanup(returning content: ArticleContent?) {
