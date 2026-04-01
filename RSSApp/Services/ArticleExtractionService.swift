@@ -12,6 +12,8 @@ enum ArticleExtractionError: Error, Sendable {
     case serializerNotFound
     case missingArticleURL
     case navigationFailed(Error)
+    case timeout
+    case noKeyWindow
 }
 
 @MainActor
@@ -40,6 +42,11 @@ final class ArticleExtractionService: ArticleExtracting {
             throw ArticleExtractionError.serializerNotFound
         }
 
+        // RATIONALE: Intentional graceful degradation — native extraction failures
+        // (timeout, no key window, JS errors, decode failures) all fall through to the
+        // RSS description fallback. Users see lower-fidelity content rather than an error
+        // screen, which is the preferred UX since the article is still readable in the
+        // web view behind the summary sheet.
         do {
             if let content = try await loadAndExtract(url: url, serializerJS: serializerJS) {
                 Self.logger.notice("Native extraction succeeded for \(url.absoluteString, privacy: .public)")
@@ -94,11 +101,12 @@ final class ArticleExtractionService: ArticleExtracting {
                 .flatMap { $0.windows }
                 .first { $0.isKeyWindow }
 
-            if let keyWindow {
-                keyWindow.addSubview(webView)
-            } else {
-                Self.logger.warning("No key window available — WKWebView delegate callbacks may not fire")
+            guard let keyWindow else {
+                Self.logger.warning("No key window available — fast-failing extraction")
+                coordinator.resumeAndCleanup(throwing: ArticleExtractionError.noKeyWindow)
+                return
             }
+            keyWindow.addSubview(webView)
 
             // 30-second request timeout — if the server is unreachable or stalls,
             // the navigation delegate failure callback resumes the continuation.
@@ -111,7 +119,7 @@ final class ArticleExtractionService: ArticleExtracting {
                 try? await Task.sleep(for: .seconds(35))
                 guard let coordinator, coordinator.continuation != nil else { return }
                 Self.logger.warning("Extraction timed out for \(url.absoluteString, privacy: .public)")
-                coordinator.resumeAndCleanup(returning: nil)
+                coordinator.resumeAndCleanup(throwing: ArticleExtractionError.timeout)
             }
         }
     }
@@ -217,7 +225,7 @@ private final class ExtractionCoordinator: NSObject, WKNavigationDelegate, @unch
     }
 
     /// Resumes the continuation with an error, then cleans up.
-    private func resumeAndCleanup(throwing error: Error) {
+    fileprivate func resumeAndCleanup(throwing error: Error) {
         guard let continuation else {
             Self.logger.debug("resumeAndCleanup(throwing:) called but continuation already consumed")
             return
