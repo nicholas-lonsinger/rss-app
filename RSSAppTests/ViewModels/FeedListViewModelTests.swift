@@ -395,7 +395,7 @@ struct FeedListViewModelTests {
 
         #expect(viewModel.feeds[0].title == "Original")
         #expect(viewModel.feeds[0].feedDescription == "Original Desc")
-        #expect(viewModel.errorMessage == "Some feeds could not be updated.")
+        #expect(viewModel.errorMessage == "1 of 1 feed(s) could not be updated.")
     }
 
     @Test("refreshAllFeeds handles partial failures")
@@ -422,7 +422,7 @@ struct FeedListViewModelTests {
         #expect(viewModel.feeds[0].feedDescription == "New Desc")
         #expect(viewModel.feeds[1].title == "Will Fail")
         #expect(viewModel.feeds[1].feedDescription == "Old")
-        #expect(viewModel.errorMessage == "Some feeds could not be updated.")
+        #expect(viewModel.errorMessage == "1 of 2 feed(s) could not be updated.")
     }
 
     @Test("refreshAllFeeds saves updated feeds to storage")
@@ -475,6 +475,50 @@ struct FeedListViewModelTests {
         await viewModel.refreshAllFeeds()
 
         #expect(viewModel.isRefreshing == false)
+    }
+
+    @Test("refreshAllFeeds rolls back on save failure")
+    @MainActor
+    func refreshAllFeedsRollsBackOnSaveFailure() async {
+        let url = URL(string: "https://example.com/feed")!
+        let feed = TestFixtures.makeSubscribedFeed(title: "Old", url: url, feedDescription: "Old Desc")
+
+        let mockStorage = MockFeedStorageService()
+        mockStorage.feeds = [feed]
+        let mockFetching = MockFeedFetchingService()
+        mockFetching.feedsByURL = [url: TestFixtures.makeFeed(title: "New", feedDescription: "New Desc")]
+
+        let viewModel = FeedListViewModel(feedStorage: mockStorage, feedFetching: mockFetching)
+        viewModel.loadFeeds()
+
+        mockStorage.errorToThrow = NSError(domain: "test", code: 1)
+        await viewModel.refreshAllFeeds()
+
+        #expect(viewModel.feeds[0].title == "Old")
+        #expect(viewModel.feeds[0].feedDescription == "Old Desc")
+        #expect(viewModel.errorMessage == "Unable to save updated feeds.")
+    }
+
+    @Test("refreshAllFeeds skips save when metadata unchanged")
+    @MainActor
+    func refreshAllFeedsSkipsSaveWhenUnchanged() async {
+        let url = URL(string: "https://example.com/feed")!
+        let feed = TestFixtures.makeSubscribedFeed(title: "Same", url: url, feedDescription: "Same Desc")
+
+        let mockStorage = MockFeedStorageService()
+        mockStorage.feeds = [feed]
+        let mockFetching = MockFeedFetchingService()
+        mockFetching.feedsByURL = [url: TestFixtures.makeFeed(title: "Same", feedDescription: "Same Desc")]
+
+        let viewModel = FeedListViewModel(feedStorage: mockStorage, feedFetching: mockFetching)
+        viewModel.loadFeeds()
+
+        // If saveFeeds were called, this error would trigger — proving it was skipped
+        mockStorage.errorToThrow = NSError(domain: "test", code: 1)
+        await viewModel.refreshAllFeeds()
+
+        #expect(viewModel.feeds[0].title == "Same")
+        #expect(viewModel.errorMessage == nil)
     }
 
     @Test("importOPMLAndRefresh adds feeds then refreshes metadata")

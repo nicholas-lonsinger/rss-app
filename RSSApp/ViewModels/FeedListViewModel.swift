@@ -172,28 +172,34 @@ final class FeedListViewModel {
 
     func refreshAllFeeds() async {
         Self.logger.debug("refreshAllFeeds() called for \(self.feeds.count, privacy: .public) feeds")
-        guard !feeds.isEmpty else { return }
+        guard !feeds.isEmpty, !isRefreshing else { return }
         isRefreshing = true
         defer { isRefreshing = false }
 
         let feedsToRefresh = feeds
         let feedFetching = self.feedFetching
+        let logger = Self.logger
         let maxConcurrency = 6
 
-        let results: [(UUID, RSSFeed?)] = await withTaskGroup(
+        let results: [(UUID, RSSFeed?)]
+        do {
+            results = try await withThrowingTaskGroup(
             of: (UUID, RSSFeed?).self,
             returning: [(UUID, RSSFeed?)].self
         ) { group in
             var collected: [(UUID, RSSFeed?)] = []
             var iterator = feedsToRefresh.makeIterator()
 
-            func enqueueNext(_ group: inout TaskGroup<(UUID, RSSFeed?)>, _ iterator: inout IndexingIterator<[SubscribedFeed]>) -> Bool {
+            func enqueueNext(_ group: inout ThrowingTaskGroup<(UUID, RSSFeed?), any Error>, _ iterator: inout IndexingIterator<[SubscribedFeed]>) -> Bool {
                 guard let feed = iterator.next() else { return false }
                 group.addTask {
                     do {
                         let rssFeed = try await feedFetching.fetchFeed(from: feed.url)
                         return (feed.id, rssFeed)
+                    } catch is CancellationError {
+                        throw CancellationError()
                     } catch {
+                        logger.warning("Failed to refresh '\(feed.title, privacy: .public)' (\(feed.url.absoluteString, privacy: .public)): \(error, privacy: .public)")
                         return (feed.id, nil)
                     }
                 }
@@ -204,12 +210,16 @@ final class FeedListViewModel {
                 guard enqueueNext(&group, &iterator) else { break }
             }
 
-            for await result in group {
+            for try await result in group {
                 collected.append(result)
                 _ = enqueueNext(&group, &iterator)
             }
 
             return collected
+        }
+        } catch {
+            Self.logger.debug("refreshAllFeeds() cancelled")
+            return
         }
 
         var updatedFeeds = feeds
@@ -228,18 +238,21 @@ final class FeedListViewModel {
         }
 
         if updatedFeeds != feeds {
+            let previousFeeds = feeds
             feeds = updatedFeeds
             do {
                 try feedStorage.saveFeeds(updatedFeeds)
             } catch {
+                feeds = previousFeeds
                 errorMessage = "Unable to save updated feeds."
                 Self.logger.error("Failed to persist refreshed feeds: \(error, privacy: .public)")
+                return
             }
         }
         Self.logger.notice("Refresh complete: \(updatedFeeds.count - failureCount, privacy: .public) updated, \(failureCount, privacy: .public) failed")
 
         if failureCount > 0 {
-            errorMessage = "Some feeds could not be updated."
+            errorMessage = "\(failureCount) of \(feedsToRefresh.count) feed(s) could not be updated."
         }
     }
 }
