@@ -150,16 +150,22 @@ private final class ExtractionCoordinator: NSObject, WKNavigationDelegate, @unch
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         Task { @MainActor [weak self] in
-            guard let self else { return }
-
+            // Access webView through self rather than capturing the delegate parameter,
+            // and avoid promoting self to strong across the await. This allows the
+            // coordinator and WKWebView to be released if the timeout fires while
+            // evaluateJavaScript is still pending.
             let result: Any
             do {
+                guard let webView = self?.webView else { return }
                 result = try await webView.evaluateJavaScript(DOMSerializerConstants.serializerCall)
             } catch {
+                guard let self else { return }
                 Self.logger.warning("serializeDOM() error: \(error, privacy: .public)")
                 self.resumeAndCleanup(returning: nil)
                 return
             }
+
+            guard let self else { return }
 
             guard let jsonString = result as? String,
                   let data = jsonString.data(using: .utf8) else {
