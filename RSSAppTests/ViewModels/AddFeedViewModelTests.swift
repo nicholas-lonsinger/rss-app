@@ -142,6 +142,58 @@ struct AddFeedViewModelTests {
         #expect(viewModel.errorMessage != nil)
     }
 
+    @Test("canSubmit returns false for empty input")
+    @MainActor
+    func canSubmitEmpty() {
+        let viewModel = AddFeedViewModel(
+            feedFetching: MockFeedFetchingService(),
+            feedStorage: MockFeedStorageService()
+        )
+        viewModel.urlInput = ""
+        #expect(viewModel.canSubmit == false)
+    }
+
+    @Test("canSubmit returns false for whitespace-only input")
+    @MainActor
+    func canSubmitWhitespace() {
+        let viewModel = AddFeedViewModel(
+            feedFetching: MockFeedFetchingService(),
+            feedStorage: MockFeedStorageService()
+        )
+        viewModel.urlInput = "   \n  "
+        #expect(viewModel.canSubmit == false)
+    }
+
+    @Test("canSubmit returns true for valid input")
+    @MainActor
+    func canSubmitValid() {
+        let viewModel = AddFeedViewModel(
+            feedFetching: MockFeedFetchingService(),
+            feedStorage: MockFeedStorageService()
+        )
+        viewModel.urlInput = "https://example.com/feed"
+        #expect(viewModel.canSubmit == true)
+    }
+
+    @Test("addFeed detects duplicate when input omits scheme")
+    @MainActor
+    func addFeedDuplicateWithSchemeNormalization() async {
+        let mockFetching = MockFeedFetchingService()
+        mockFetching.feedToReturn = TestFixtures.makeFeed()
+        let mockStorage = MockFeedStorageService()
+        mockStorage.feeds = [
+            TestFixtures.makeSubscribedFeed(url: URL(string: "https://example.com/feed")!),
+        ]
+
+        let viewModel = AddFeedViewModel(feedFetching: mockFetching, feedStorage: mockStorage)
+        viewModel.urlInput = "example.com/feed"
+        await viewModel.addFeed()
+
+        #expect(viewModel.addedFeed == nil)
+        #expect(viewModel.errorMessage == "You are already subscribed to this feed.")
+        #expect(mockStorage.feeds.count == 1)
+    }
+
     @Test("addFeed clears previous error on retry")
     @MainActor
     func addFeedClearsPreviousError() async {

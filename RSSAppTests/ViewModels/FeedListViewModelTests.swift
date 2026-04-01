@@ -82,6 +82,24 @@ struct FeedListViewModelTests {
         #expect(mockStorage.feeds.count == 2)
     }
 
+    @Test("removeFeed at multi-element IndexSet removes multiple feeds")
+    @MainActor
+    func removeFeedAtMultiElementIndexSet() {
+        let feed1 = TestFixtures.makeSubscribedFeed(title: "First")
+        let feed2 = TestFixtures.makeSubscribedFeed(title: "Second")
+        let feed3 = TestFixtures.makeSubscribedFeed(title: "Third")
+        let mockStorage = MockFeedStorageService()
+        mockStorage.feeds = [feed1, feed2, feed3]
+
+        let viewModel = FeedListViewModel(feedStorage: mockStorage)
+        viewModel.loadFeeds()
+        viewModel.removeFeed(at: IndexSet([0, 2]))
+
+        #expect(viewModel.feeds.count == 1)
+        #expect(viewModel.feeds[0].title == "Second")
+        #expect(mockStorage.feeds.count == 1)
+    }
+
     @Test("removeFeed rolls back on save failure")
     @MainActor
     func removeFeedSaveFailure() {
