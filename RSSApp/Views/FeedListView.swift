@@ -100,6 +100,9 @@ struct FeedListView: View {
                 }
             }
             .listStyle(.plain)
+            .refreshable {
+                await viewModel.refreshAllFeeds()
+            }
         }
     }
 
@@ -164,7 +167,9 @@ struct FeedListView: View {
     private func handleFileImport(_ result: Result<URL, any Error>) {
         switch result {
         case .success(let url):
-            viewModel.importOPML(from: url)
+            Task {
+                await viewModel.importOPMLAndRefresh(from: url)
+            }
         case .failure:
             viewModel.errorMessage = "Unable to open the file picker."
         }

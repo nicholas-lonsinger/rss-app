@@ -11,16 +11,23 @@ final class FeedListViewModel {
     )
 
     private(set) var feeds: [SubscribedFeed] = []
+    private(set) var isRefreshing = false
     var errorMessage: String?
     var opmlImportResult: OPMLImportResult?
     var opmlExportURL: URL?
 
     private let feedStorage: FeedStoring
     private let opmlService: OPMLServing
+    private let feedFetching: FeedFetching
 
-    init(feedStorage: FeedStoring = FeedStorageService(), opmlService: OPMLServing = OPMLService()) {
+    init(
+        feedStorage: FeedStoring = FeedStorageService(),
+        opmlService: OPMLServing = OPMLService(),
+        feedFetching: FeedFetching = FeedFetchingService()
+    ) {
         self.feedStorage = feedStorage
         self.opmlService = opmlService
+        self.feedFetching = feedFetching
     }
 
     func loadFeeds() {
@@ -66,18 +73,7 @@ final class FeedListViewModel {
     // MARK: - OPML Import/Export
 
     func importOPML(from url: URL) {
-        let accessing = url.startAccessingSecurityScopedResource()
-        defer { if accessing { url.stopAccessingSecurityScopedResource() } }
-
-        let data: Data
-        do {
-            data = try Data(contentsOf: url)
-        } catch {
-            errorMessage = "Unable to read the selected file."
-            Self.logger.error("Failed to read OPML file: \(error, privacy: .public)")
-            return
-        }
-
+        guard let data = readSecurityScopedData(from: url) else { return }
         importOPML(from: data)
     }
 
@@ -141,6 +137,124 @@ final class FeedListViewModel {
         } catch {
             errorMessage = "Unable to export feeds."
             Self.logger.error("OPML export failed: \(error, privacy: .public)")
+        }
+    }
+
+    // MARK: - OPML Import with Refresh
+
+    func importOPMLAndRefresh(from url: URL) async {
+        guard let data = readSecurityScopedData(from: url) else { return }
+        await importOPMLAndRefresh(from: data)
+    }
+
+    func importOPMLAndRefresh(from data: Data) async {
+        importOPML(from: data)
+        guard let result = opmlImportResult, result.addedCount > 0 else { return }
+        await refreshAllFeeds()
+    }
+
+    // MARK: - Helpers
+
+    private func readSecurityScopedData(from url: URL) -> Data? {
+        let accessing = url.startAccessingSecurityScopedResource()
+        defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+
+        do {
+            return try Data(contentsOf: url)
+        } catch {
+            errorMessage = "Unable to read the selected file."
+            Self.logger.error("Failed to read OPML file: \(error, privacy: .public)")
+            return nil
+        }
+    }
+
+    // MARK: - Feed Metadata Refresh
+
+    func refreshAllFeeds() async {
+        Self.logger.debug("refreshAllFeeds() called for \(self.feeds.count, privacy: .public) feeds")
+        guard !feeds.isEmpty, !isRefreshing else { return }
+        errorMessage = nil
+        isRefreshing = true
+        defer { isRefreshing = false }
+
+        let feedsToRefresh = feeds
+        let feedFetching = self.feedFetching
+        let logger = Self.logger
+        let maxConcurrency = 6
+
+        let results: [(UUID, RSSFeed?)]
+        do {
+            results = try await withThrowingTaskGroup(
+            of: (UUID, RSSFeed?).self,
+            returning: [(UUID, RSSFeed?)].self
+        ) { group in
+            var collected: [(UUID, RSSFeed?)] = []
+            var iterator = feedsToRefresh.makeIterator()
+
+            func enqueueNext(_ group: inout ThrowingTaskGroup<(UUID, RSSFeed?), any Error>, _ iterator: inout IndexingIterator<[SubscribedFeed]>) -> Bool {
+                guard let feed = iterator.next() else { return false }
+                group.addTask {
+                    do {
+                        let rssFeed = try await feedFetching.fetchFeed(from: feed.url)
+                        return (feed.id, rssFeed)
+                    } catch is CancellationError {
+                        throw CancellationError()
+                    } catch {
+                        logger.warning("Failed to refresh '\(feed.title, privacy: .public)' (\(feed.url.absoluteString, privacy: .public)): \(error, privacy: .public)")
+                        return (feed.id, nil)
+                    }
+                }
+                return true
+            }
+
+            for _ in 0..<maxConcurrency {
+                guard enqueueNext(&group, &iterator) else { break }
+            }
+
+            for try await result in group {
+                collected.append(result)
+                _ = enqueueNext(&group, &iterator)
+            }
+
+            return collected
+        }
+        } catch {
+            Self.logger.debug("refreshAllFeeds() cancelled")
+            return
+        }
+
+        var updatedFeeds = feeds
+        let idToIndex = Dictionary(uniqueKeysWithValues: updatedFeeds.enumerated().map { ($1.id, $0) })
+        var failureCount = 0
+        for (id, rssFeed) in results {
+            guard let rssFeed else {
+                failureCount += 1
+                continue
+            }
+            if let index = idToIndex[id] {
+                updatedFeeds[index] = updatedFeeds[index].updatingMetadata(
+                    title: rssFeed.title,
+                    feedDescription: rssFeed.feedDescription
+                )
+            }
+        }
+
+        if updatedFeeds != feeds {
+            let previousFeeds = feeds
+            feeds = updatedFeeds
+            do {
+                try feedStorage.saveFeeds(updatedFeeds)
+            } catch {
+                feeds = previousFeeds
+                errorMessage = "Unable to save updated feeds."
+                Self.logger.error("Failed to persist refreshed feeds: \(error, privacy: .public)")
+                return
+            }
+        }
+        Self.logger.notice("Refresh complete: \(updatedFeeds.count - failureCount, privacy: .public) updated, \(failureCount, privacy: .public) failed")
+
+        if failureCount > 0 {
+            errorMessage = "\(failureCount) of \(feedsToRefresh.count) feed(s) could not be updated."
         }
     }
 }
