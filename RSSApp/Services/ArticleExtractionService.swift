@@ -162,7 +162,7 @@ private final class ExtractionCoordinator: NSObject, WKNavigationDelegate, @unch
             // and avoid promoting self to strong across the await. This allows the
             // coordinator and WKWebView to be released if the timeout fires while
             // evaluateJavaScript is still pending.
-            let result: Any
+            let result: Any?
             do {
                 guard let webView = self?.webView else { return }
                 result = try await webView.evaluateJavaScript(DOMSerializerConstants.serializerCall)
