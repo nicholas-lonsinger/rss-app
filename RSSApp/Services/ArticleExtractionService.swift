@@ -149,28 +149,22 @@ private final class ExtractionCoordinator: NSObject, WKNavigationDelegate, @unch
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        webView.evaluateJavaScript(DOMSerializerConstants.serializerCall) { [weak self] result, error in
-            guard let self else { return }
-
-            if let error {
-                Self.logger.warning("serializeDOM() error: \(error, privacy: .public)")
-                self.resumeAndCleanup(returning: nil)
-                return
-            }
-
-            guard let jsonString = result as? String,
-                  let data = jsonString.data(using: .utf8) else {
-                Self.logger.warning("serializeDOM() returned nil or non-string result")
-                self.resumeAndCleanup(returning: nil)
-                return
-            }
-
+        Task { @MainActor in
             do {
+                let result = try await webView.evaluateJavaScript(DOMSerializerConstants.serializerCall)
+
+                guard let jsonString = result as? String,
+                      let data = jsonString.data(using: .utf8) else {
+                    Self.logger.warning("serializeDOM() returned nil or non-string result")
+                    self.resumeAndCleanup(returning: nil)
+                    return
+                }
+
                 let dom = try JSONDecoder().decode(SerializedDOM.self, from: data)
                 let content = self.contentExtractor.extract(from: dom)
                 self.resumeAndCleanup(returning: content)
             } catch {
-                Self.logger.warning("DOM JSON decoding failed: \(error, privacy: .public)")
+                Self.logger.warning("serializeDOM() error: \(error, privacy: .public)")
                 self.resumeAndCleanup(returning: nil)
             }
         }
@@ -194,16 +188,16 @@ private final class ExtractionCoordinator: NSObject, WKNavigationDelegate, @unch
     fileprivate func resumeAndCleanup(returning content: ArticleContent?) {
         guard let continuation else { return }
         self.continuation = nil
-        cleanup()
         continuation.resume(returning: content)
+        cleanup()
     }
 
     /// Resumes the continuation with an error, then cleans up.
     private func resumeAndCleanup(throwing error: Error) {
         guard let continuation else { return }
         self.continuation = nil
-        cleanup()
         continuation.resume(throwing: error)
+        cleanup()
     }
 
     private func cleanup() {
