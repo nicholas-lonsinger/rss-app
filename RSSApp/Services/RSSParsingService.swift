@@ -79,6 +79,10 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
     // Atom author nesting: <author><name>Text</name></author>
     private var isInsideAuthor = false
 
+    // Tracks whether the current <category> had a term attribute (Atom style)
+    // to prevent double-appending when text content also exists.
+    private var categoryHandledByAttribute = false
+
     // XHTML content reconstruction: when <content type="xhtml"> or <summary type="xhtml">
     // is encountered, inner XML elements must be serialized back to HTML rather than parsed
     // as feed structure. xhtmlDepth tracks nesting depth; xhtmlBuffer accumulates the HTML.
@@ -90,6 +94,11 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
         case content
         case summary
     }
+
+    private static let htmlVoidElements: Set<String> = [
+        "area", "base", "br", "col", "embed", "hr", "img",
+        "input", "link", "meta", "param", "source", "track", "wbr",
+    ]
 
     // MARK: - XMLParserDelegate
 
@@ -105,13 +114,19 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
         // XHTML reconstruction: serialize inner elements as HTML
         if xhtmlTarget != nil {
             xhtmlDepth += 1
-            // Skip the wrapper <div> at depth 1 — its content is the actual HTML
+            // RATIONALE: Atom spec requires <content type="xhtml"> to contain exactly one
+            // wrapper <div xmlns="http://www.w3.org/1999/xhtml">. We skip it at depth 1
+            // so only its inner content is captured.
             if xhtmlDepth > 1 {
                 xhtmlBuffer += "<\(elementName)"
                 for (key, value) in attributeDict where key != "xmlns" {
-                    xhtmlBuffer += " \(key)=\"\(Self.escapeAttribute(value))\""
+                    xhtmlBuffer += " \(key)=\"\(HTMLUtilities.escapeAttribute(value))\""
                 }
-                xhtmlBuffer += ">"
+                if Self.htmlVoidElements.contains(elementName) {
+                    xhtmlBuffer += " />"
+                } else {
+                    xhtmlBuffer += ">"
+                }
             }
             return
         }
@@ -191,7 +206,10 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
                 let trimmed = term.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !trimmed.isEmpty {
                     itemCategories.append(trimmed)
+                    categoryHandledByAttribute = true
                 }
+            } else {
+                categoryHandledByAttribute = false
             }
 
         case "content":
@@ -256,9 +274,9 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
                 textBuffer = ""
                 return
             }
-            xhtmlDepth -= 1
-            // Close tags for elements deeper than the wrapper <div> (depth > 0 after decrement)
-            if xhtmlDepth > 0 {
+            xhtmlDepth = max(0, xhtmlDepth - 1)
+            // Close tags for elements deeper than the wrapper <div>, skipping void elements
+            if xhtmlDepth > 0, !Self.htmlVoidElements.contains(elementName) {
                 xhtmlBuffer += "</\(elementName)>"
             }
             return
@@ -323,11 +341,14 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
                     if !text.isEmpty { itemAuthor = text }
                 }
             case "category":
-                // RSS <category>text</category>
-                let text = textBuffer.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !text.isEmpty {
-                    itemCategories.append(text)
+                // RSS <category>text</category> — skip if already handled via term attribute
+                if !categoryHandledByAttribute {
+                    let text = textBuffer.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !text.isEmpty {
+                        itemCategories.append(text)
+                    }
                 }
+                categoryHandledByAttribute = false
             case "item", "entry":
                 articles.append(buildArticle())
                 isInsideItem = false
@@ -347,13 +368,7 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
             case "subtitle":
                 // Atom feed subtitle; used as channel description when no RSS <description> was found
                 if channelDescription.isEmpty { channelDescription = textBuffer }
-            case "updated":
-                // Atom feed-level updated date
-                if channelUpdated == nil {
-                    channelUpdated = Self.parseDate(textBuffer)
-                }
-            case "lastBuildDate":
-                // RSS feed-level last build date
+            case "updated", "lastBuildDate":
                 if channelUpdated == nil {
                     channelUpdated = Self.parseDate(textBuffer)
                 }
@@ -418,16 +433,6 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
             author: authorTrimmed.isEmpty ? nil : authorTrimmed,
             categories: itemCategories
         )
-    }
-
-    // MARK: - Utilities
-
-    private static func escapeAttribute(_ value: String) -> String {
-        value
-            .replacingOccurrences(of: "&", with: "&amp;")
-            .replacingOccurrences(of: "\"", with: "&quot;")
-            .replacingOccurrences(of: "<", with: "&lt;")
-            .replacingOccurrences(of: ">", with: "&gt;")
     }
 
     // MARK: - Date Parsing

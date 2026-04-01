@@ -333,6 +333,18 @@ struct RSSParsingServiceTests {
         #expect(!entry.articleDescription.isEmpty)
     }
 
+    @Test("Atom XHTML void elements use self-closing tags")
+    func atomXHTMLVoidElements() throws {
+        let data = Data(TestFixtures.atomXHTMLContentXML.utf8)
+        let feed = try service.parse(data)
+        let entry = feed.articles[0]
+
+        #expect(entry.articleDescription.contains("<img "))
+        #expect(entry.articleDescription.contains(" />"))
+        #expect(!entry.articleDescription.contains("</img>"))
+        #expect(!entry.articleDescription.contains("</br>"))
+    }
+
     @Test("Atom XHTML content extracts thumbnail from img tag")
     func atomXHTMLThumbnail() throws {
         let data = Data(TestFixtures.atomXHTMLContentXML.utf8)
