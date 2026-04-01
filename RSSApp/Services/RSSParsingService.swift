@@ -102,7 +102,8 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
         case "link":
             // RATIONALE: Atom uses self-closing <link rel="alternate" href="URL"/> while
             // RSS uses <link>URL</link> text content. Extracting href here handles Atom;
-            // RSS <link> has no href attribute so this branch never fires for RSS feeds.
+            // RSS <link> elements carry no href attribute, so the guard below is a no-op
+            // for RSS feeds — assignment happens in didEndElement via text content instead.
             let rel = attributeDict["rel"] ?? "alternate"
             if rel == "alternate", let href = attributeDict["href"] {
                 if isInsideItem {
@@ -163,7 +164,8 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
                 itemTitle = textBuffer
             case "link":
                 // Only set from text content (RSS style) if non-empty.
-                // Atom links use href attribute, handled in didStartElement.
+                // Also guards against overwriting the href already set in didStartElement
+                // for Atom feeds, since Atom <link> elements produce no text content.
                 if !textBuffer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     itemLink = textBuffer
                 }
@@ -175,19 +177,20 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
                     itemDescription = textBuffer
                 }
             case "summary":
-                // Atom summary (equivalent to RSS description)
+                // Atom summary; used as description fallback if no RSS <description> was found
                 if itemDescription.isEmpty {
                     itemDescription = textBuffer
                 }
             case "content":
-                // Atom content (equivalent to RSS content:encoded); prefer over summary
+                // Atom content; treated like RSS content:encoded — overwrites description/summary
+                // if non-empty. Last non-empty value wins if both appear in the same entry.
                 if !textBuffer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     itemDescription = textBuffer
                 }
             case "guid":
                 itemGuid = textBuffer
             case "id":
-                // Atom entry ID (equivalent to RSS guid)
+                // Atom entry ID; used as guid fallback. RSS <guid> takes priority if present.
                 if itemGuid.isEmpty {
                     itemGuid = textBuffer
                 }
@@ -196,7 +199,7 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
             case "published":
                 itemPubDate = textBuffer
             case "updated":
-                // Atom updated date (fallback if no published date)
+                // Atom updated date; fallback when neither RSS <pubDate> nor Atom <published> was found
                 if itemPubDate.isEmpty {
                     itemPubDate = textBuffer
                 }
@@ -211,11 +214,13 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
             case "title":
                 if channelTitle.isEmpty { channelTitle = textBuffer }
             case "link":
-                if channelLink.isEmpty { channelLink = textBuffer }
+                if channelLink.isEmpty, !textBuffer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    channelLink = textBuffer
+                }
             case "description":
                 if channelDescription.isEmpty { channelDescription = textBuffer }
             case "subtitle":
-                // Atom feed subtitle (equivalent to RSS channel description)
+                // Atom feed subtitle; used as channel description when no RSS <description> was found
                 if channelDescription.isEmpty { channelDescription = textBuffer }
             default:
                 break
@@ -299,8 +304,9 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
             }
         }
 
-        // Fallback: ISO8601DateFormatter handles Atom dates with colon-separated
-        // timezone offsets (e.g., "2026-04-01T15:06:21-04:00")
+        // Fallback: DateFormatter's Z specifier matches -0400 (RFC 822) but not the
+        // colon-separated -04:00 form required by RFC 3339/Atom. ISO8601DateFormatter
+        // with .withInternetDateTime handles the colon form (e.g., "2026-04-01T15:06:21-04:00").
         let iso8601Formatter = ISO8601DateFormatter()
         iso8601Formatter.formatOptions = [.withInternetDateTime]
         if let date = iso8601Formatter.date(from: trimmed) {
