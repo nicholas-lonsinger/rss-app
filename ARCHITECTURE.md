@@ -43,7 +43,7 @@ RSSApp/
 │   ├── ArticleDiscussionView.swift     # Chat sheet — message bubbles + streaming input
 │   ├── ArticleListView.swift           # Feed article list with loading/error/content states
 │   ├── ArticleReaderView.swift         # Full-screen reader — WKWebView + discuss/settings toolbar
-│   ├── ArticleReaderWebView.swift      # UIViewRepresentable wrapping WKWebView with reader CSS
+│   ├── ArticleReaderWebView.swift      # UIViewRepresentable wrapping WKWebView with DOM serializer injection
 │   ├── ArticleRowView.swift            # Single article row — thumbnail, title, snippet, date
 │   ├── ArticleSummaryView.swift        # Extracted article summary sheet — extracted content + discuss
 │   ├── ContentView.swift               # Root view — hosts FeedListView
@@ -57,6 +57,8 @@ RSSApp/
 
 RSSAppTests/
 ├── RSSAppTests.swift                   # Root test suite (ContentView instantiation)
+├── Fixtures/
+│   └── simple-blog.html               # HTML test fixture for DOM serialization and pipeline tests
 ├── Helpers/
 │   ├── DOMNodeTestHelpers.swift        # DOMNodeFactory — convenience builders for test DOM trees
 │   ├── TestFixtures.swift              # Sample RSS XML, factory methods for Article/RSSFeed
@@ -91,7 +93,7 @@ RSSAppTests/
     └── FeedViewModelTests.swift            # Load success/failure, state transitions
 ```
 
-**Total: 36 source files + 1 resource, 28 test files.**
+**Total: 36 source files + 1 resource, 28 test source files + 1 fixture.**
 
 ## Component Map
 
@@ -111,7 +113,7 @@ RSSAppTests/
 
 `ChatMessage` represents a single turn in the discussion chat. `role` is `.user` or `.assistant`. `content` is mutable (`var`) to allow streaming chunks to be appended in place.
 
-`DOMNode.swift` defines `SerializedDOM` (top-level page representation with title, URL, lang, meta tags, and body tree) and `DOMNode` (recursive tree node with tag name, attributes, visibility flag, and children). Both are `Codable` and `Sendable`. `DOMNode` uses a class (reference type) for efficient tree operations during scoring.
+`DOMNode.swift` defines `SerializedDOM` (top-level page representation with title, URL, lang, meta tags, and body tree) and `DOMNode` (recursive tree node with tag name, attributes, visibility flag, and children). Both are `Codable` and `Sendable` value types. `CandidateScorer` internally wraps nodes in a reference-type `NodeWrapper` to add parent pointers during scoring.
 
 `RSSFeed` represents a parsed feed channel — title, link, description, and an array of `Article` values. Also `Sendable`.
 
@@ -175,7 +177,7 @@ All view models are `@MainActor @Observable`.
 
 `ArticleRowView` displays a 60×60 `AsyncImage` thumbnail, headline title, subheadline snippet, and caption-style relative date.
 
-`ArticleReaderView` is presented as a `fullScreenCover`. It hosts a `NavigationStack` with Done (dismiss), gear (settings), and chat bubble (discuss) toolbar buttons. Contains `ArticleReaderWebView` for displaying the article and supports presenting `ArticleSummaryView` and `ArticleDiscussionView` as sheets. The `ArticleReaderWebView` coordinator performs early extraction via a `WKScriptMessageHandler`, making pre-extracted content available for the summary and discussion flows.
+`ArticleReaderView` is presented as a `fullScreenCover`. It hosts a `NavigationStack` with Done (dismiss), gear (settings), and sparkles (summarize) toolbar buttons. Contains `ArticleReaderWebView` for displaying the article and supports presenting `ArticleSummaryView` (for extraction) and `APIKeySettingsView` (for API key configuration) as sheets. The discussion flow is reached from within `ArticleSummaryView`. The `ArticleReaderWebView` coordinator performs early extraction via a `WKScriptMessageHandler`, making pre-extracted content available for the summary and discussion flows.
 
 `ArticleReaderWebView` is a `UIViewRepresentable` wrapping `WKWebView`. It injects `domSerializer.js` at document end for early extraction, and its `Coordinator` handles both early extraction (via message handler) and fallback extraction (via `didFinish` delegate). Stores results in a shared `ReaderExtractionState` observable.
 
@@ -223,14 +225,15 @@ RSSAppApp (@main)
                 │                           │               ├── MetadataExtractor → title, byline
                 │                           │               ├── CandidateScorer → best content node
                 │                           │               └── ContentAssembler → htmlContent + textContent
-                │                           ├── summary button → sheet → ArticleSummaryView
-                │                           │   └── ArticleSummaryViewModel
-                │                           │       └── ArticleExtractionService (hidden WKWebView)
-                │                           │           └── Same native extraction pipeline
-                │                           └── discuss button → sheet → ArticleDiscussionView
-                │                               └── DiscussionViewModel
-                │                                   ├── KeychainService → Anthropic API key
-                │                                   └── ClaudeAPIService → URLSession SSE stream
+                │                           ├── sparkles button → sheet → ArticleSummaryView
+                │                           │   ├── ArticleSummaryViewModel
+                │                           │   │   └── ArticleExtractionService (hidden WKWebView)
+                │                           │   │       └── Same native extraction pipeline
+                │                           │   └── discuss button → sheet → ArticleDiscussionView
+                │                           │       └── DiscussionViewModel
+                │                           │           ├── KeychainService → Anthropic API key
+                │                           │           └── ClaudeAPIService → URLSession SSE stream
+                │                           └── gear button → sheet → APIKeySettingsView
                 ├── Sheet: AddFeedView
                 │   └── @State AddFeedViewModel
                 │       ├── FeedFetchingService → validate URL + fetch title
