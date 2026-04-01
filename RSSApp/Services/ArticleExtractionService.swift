@@ -9,7 +9,7 @@ protocol ArticleExtracting {
 }
 
 enum ArticleExtractionError: Error, Sendable {
-    case readabilityNotFound
+    case serializerNotFound
     case navigationFailed(Error)
     case javascriptFailed
 }
@@ -22,41 +22,31 @@ final class ArticleExtractionService: ArticleExtracting {
         category: "ArticleExtractionService"
     )
 
-    // Small extraction script — Readability.js is pre-injected as a WKUserScript.
-    private static let extractionScript = """
-    (function() {
-        try {
-            var article = new Readability(document.cloneNode(true)).parse();
-            if (!article) return null;
-            return JSON.stringify({
-                title: article.title || '',
-                byline: article.byline || '',
-                content: article.content || '',
-                textContent: article.textContent || ''
-            });
-        } catch(e) {
-            return null;
-        }
-    })();
-    """
+    private let contentExtractor: any ContentExtracting
+
+    init(contentExtractor: (any ContentExtracting)? = nil) {
+        self.contentExtractor = contentExtractor ?? ContentExtractor()
+    }
 
     func extract(from url: URL, fallbackHTML: String) async throws -> ArticleContent {
         Self.logger.debug("extract() called for \(url.absoluteString, privacy: .public)")
 
-        guard let scriptURL = Bundle.main.url(forResource: "readability", withExtension: "js"),
-              let readabilityJS = try? String(contentsOf: scriptURL, encoding: .utf8) else {
-            Self.logger.fault("readability.js not found in app bundle")
-            assertionFailure("readability.js not found in app bundle")
-            throw ArticleExtractionError.readabilityNotFound
+        guard let scriptURL = Bundle.main.url(forResource: "domSerializer", withExtension: "js"),
+              let serializerJS = try? String(contentsOf: scriptURL, encoding: .utf8) else {
+            Self.logger.fault("domSerializer.js not found in app bundle")
+            assertionFailure("domSerializer.js not found in app bundle")
+            throw ArticleExtractionError.serializerNotFound
         }
 
         do {
-            if let content = try await loadAndExtract(url: url, readabilityJS: readabilityJS) {
-                Self.logger.notice("Readability extraction succeeded for \(url.absoluteString, privacy: .public)")
+            if let content = try await loadAndExtract(url: url, serializerJS: serializerJS) {
+                Self.logger.notice("Native extraction succeeded for \(url.absoluteString, privacy: .public)")
                 return content
             }
         } catch {
-            Self.logger.warning("Extraction failed for \(url.absoluteString, privacy: .public): \(error, privacy: .public) — using RSS fallback")
+            Self.logger.warning(
+                "Extraction failed for \(url.absoluteString, privacy: .public): \(error, privacy: .public) — using RSS fallback"
+            )
         }
 
         // Fall back to RSS articleDescription
@@ -71,22 +61,20 @@ final class ArticleExtractionService: ArticleExtracting {
 
     // MARK: - Private
 
-    private func loadAndExtract(url: URL, readabilityJS: String) async throws -> ArticleContent? {
+    private func loadAndExtract(url: URL, serializerJS: String) async throws -> ArticleContent? {
         try await withCheckedThrowingContinuation { continuation in
             let config = WKWebViewConfiguration()
             config.mediaTypesRequiringUserActionForPlayback = .all
 
-            // Inject Readability.js at document-end so it is already defined
-            // by the time didFinishNavigation fires and we run the extraction script.
             let userScript = WKUserScript(
-                source: readabilityJS,
+                source: serializerJS,
                 injectionTime: .atDocumentEnd,
                 forMainFrameOnly: true
             )
             config.userContentController.addUserScript(userScript)
 
             let coordinator = ExtractionCoordinator(
-                script: Self.extractionScript,
+                contentExtractor: contentExtractor,
                 continuation: continuation
             )
 
@@ -122,7 +110,7 @@ private final class ExtractionCoordinator: NSObject, WKNavigationDelegate, @unch
         category: "ExtractionCoordinator"
     )
 
-    private let script: String
+    private let contentExtractor: any ContentExtracting
     private var continuation: CheckedContinuation<ArticleContent?, Error>?
     /// Strong reference keeps the WKWebView alive until extraction completes.
     var webView: WKWebView?
@@ -131,40 +119,44 @@ private final class ExtractionCoordinator: NSObject, WKNavigationDelegate, @unch
     // released in cleanup() once the continuation has been resumed.
     private var selfRetain: ExtractionCoordinator?
 
-    init(script: String, continuation: CheckedContinuation<ArticleContent?, Error>) {
-        self.script = script
+    init(
+        contentExtractor: any ContentExtracting,
+        continuation: CheckedContinuation<ArticleContent?, Error>
+    ) {
+        self.contentExtractor = contentExtractor
         self.continuation = continuation
         super.init()
         selfRetain = self
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        webView.evaluateJavaScript(script) { [weak self] result, error in
+        webView.evaluateJavaScript("serializeDOM()") { [weak self] result, error in
             guard let self else { return }
             self.cleanup()
 
             if let error {
-                Self.logger.warning("evaluateJavaScript error: \(error, privacy: .public)")
+                Self.logger.warning("serializeDOM() error: \(error, privacy: .public)")
                 self.continuation?.resume(returning: nil)
                 self.continuation = nil
                 return
             }
 
             guard let jsonString = result as? String,
-                  let data = jsonString.data(using: .utf8),
-                  let decoded = try? JSONDecoder().decode(ReadabilityResult.self, from: data) else {
+                  let data = jsonString.data(using: .utf8) else {
+                Self.logger.debug("serializeDOM() returned nil or non-string result")
                 self.continuation?.resume(returning: nil)
                 self.continuation = nil
                 return
             }
 
-            let content = ArticleContent(
-                title: decoded.title,
-                byline: decoded.byline.isEmpty ? nil : decoded.byline,
-                htmlContent: decoded.content,
-                textContent: decoded.textContent
-            )
-            self.continuation?.resume(returning: content)
+            do {
+                let dom = try JSONDecoder().decode(SerializedDOM.self, from: data)
+                let content = self.contentExtractor.extract(from: dom)
+                self.continuation?.resume(returning: content)
+            } catch {
+                Self.logger.debug("DOM JSON decoding failed: \(error, privacy: .public)")
+                self.continuation?.resume(returning: nil)
+            }
             self.continuation = nil
         }
     }
@@ -176,7 +168,11 @@ private final class ExtractionCoordinator: NSObject, WKNavigationDelegate, @unch
         continuation = nil
     }
 
-    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+    func webView(
+        _ webView: WKWebView,
+        didFailProvisionalNavigation navigation: WKNavigation!,
+        withError error: Error
+    ) {
         cleanup()
         Self.logger.warning("Provisional navigation failed: \(error, privacy: .public)")
         continuation?.resume(throwing: ArticleExtractionError.navigationFailed(error))
@@ -188,13 +184,4 @@ private final class ExtractionCoordinator: NSObject, WKNavigationDelegate, @unch
         webView = nil
         selfRetain = nil  // break self-retain cycle; coordinator deallocates after this returns
     }
-}
-
-// MARK: - Decodable result
-
-private struct ReadabilityResult: Decodable {
-    let title: String
-    let byline: String
-    let content: String
-    let textContent: String
 }

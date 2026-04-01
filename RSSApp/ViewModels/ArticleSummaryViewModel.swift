@@ -59,7 +59,7 @@ final class ArticleSummaryViewModel {
 
     private func extractArticle() async throws -> ArticleContent {
         guard let url = article.link else {
-            throw ArticleExtractionError.readabilityNotFound
+            throw ArticleExtractionError.serializerNotFound
         }
         state = .extracting
         Self.logger.debug("Extracting article: '\(self.article.title, privacy: .public)'")
