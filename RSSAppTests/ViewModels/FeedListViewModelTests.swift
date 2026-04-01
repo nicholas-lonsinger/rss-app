@@ -312,9 +312,9 @@ struct FeedListViewModelTests {
 
     // MARK: - OPML Export
 
-    @Test("exportOPML sets export data")
+    @Test("exportOPML sets export URL")
     @MainActor
-    func exportOPMLSetsData() {
+    func exportOPMLSetsURL() {
         let mockStorage = MockFeedStorageService()
         mockStorage.feeds = [
             TestFixtures.makeSubscribedFeed(title: "Feed A"),
@@ -327,7 +327,7 @@ struct FeedListViewModelTests {
         viewModel.loadFeeds()
         viewModel.exportOPML()
 
-        #expect(viewModel.opmlExportData != nil)
+        #expect(viewModel.opmlExportURL != nil)
         #expect(viewModel.errorMessage == nil)
     }
 
@@ -343,7 +343,7 @@ struct FeedListViewModelTests {
         viewModel.loadFeeds()
         viewModel.exportOPML()
 
-        #expect(viewModel.opmlExportData == nil)
+        #expect(viewModel.opmlExportURL == nil)
         #expect(viewModel.errorMessage != nil)
     }
 }

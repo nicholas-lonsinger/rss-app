@@ -128,7 +128,8 @@ private final class OPMLParserDelegate: NSObject, XMLParserDelegate, @unchecked 
 
         case "outline":
             guard foundBody else { return }
-            guard let xmlUrlString = attributeDict["xmlUrl"] else { return }
+            guard let xmlUrlString = attributeDict["xmlUrl"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !xmlUrlString.isEmpty else { return }
             guard let feedURL = URL(string: xmlUrlString) else {
                 Self.logger.warning("Skipped outline with unparseable xmlUrl: '\(xmlUrlString, privacy: .public)'")
                 return

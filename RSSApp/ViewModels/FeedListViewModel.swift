@@ -13,7 +13,7 @@ final class FeedListViewModel {
     private(set) var feeds: [SubscribedFeed] = []
     var errorMessage: String?
     var opmlImportResult: OPMLImportResult?
-    var opmlExportData: Data?
+    var opmlExportURL: URL?
 
     private let feedStorage: FeedStoring
     private let opmlService: OPMLServing
@@ -93,8 +93,8 @@ final class FeedListViewModel {
             return
         }
 
-        let previousFeeds = feeds
-        var seenURLs = Set(feeds.map(\.url))
+        var updatedFeeds = feeds
+        var seenURLs = Set(updatedFeeds.map(\.url))
         var addedCount = 0
         var skippedCount = 0
 
@@ -104,7 +104,7 @@ final class FeedListViewModel {
                 Self.logger.debug("Skipped duplicate: \(entry.feedURL.absoluteString, privacy: .public)")
             } else {
                 seenURLs.insert(entry.feedURL)
-                feeds.append(SubscribedFeed(
+                updatedFeeds.append(SubscribedFeed(
                     id: UUID(),
                     title: entry.title,
                     url: entry.feedURL,
@@ -116,7 +116,8 @@ final class FeedListViewModel {
         }
 
         do {
-            try feedStorage.saveFeeds(feeds)
+            try feedStorage.saveFeeds(updatedFeeds)
+            feeds = updatedFeeds
             opmlImportResult = OPMLImportResult(
                 addedCount: addedCount,
                 skippedCount: skippedCount
@@ -124,7 +125,6 @@ final class FeedListViewModel {
             errorMessage = nil
             Self.logger.notice("OPML import: added \(addedCount, privacy: .public), skipped \(skippedCount, privacy: .public)")
         } catch {
-            feeds = previousFeeds
             errorMessage = "Unable to save imported feeds."
             Self.logger.error("Failed to persist OPML import: \(error, privacy: .public)")
         }
@@ -133,7 +133,11 @@ final class FeedListViewModel {
     func exportOPML() {
         Self.logger.debug("exportOPML() called")
         do {
-            opmlExportData = try opmlService.generateOPML(from: feeds)
+            let data = try opmlService.generateOPML(from: feeds)
+            let tempURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent("RSS Subscriptions.opml")
+            try data.write(to: tempURL)
+            opmlExportURL = tempURL
         } catch {
             errorMessage = "Unable to export feeds."
             Self.logger.error("OPML export failed: \(error, privacy: .public)")

@@ -35,9 +35,11 @@ struct FeedListView: View {
                     APIKeySettingsView()
                 }
                 .sheet(isPresented: $showExportShare, onDismiss: {
-                    viewModel.opmlExportData = nil
+                    viewModel.opmlExportURL = nil
                 }) {
-                    exportShareSheet
+                    if let url = viewModel.opmlExportURL {
+                        ActivityShareView(items: [url])
+                    }
                 }
                 .fileImporter(
                     isPresented: $showFileImporter,
@@ -55,7 +57,7 @@ struct FeedListView: View {
                 } message: {
                     Text(viewModel.errorMessage ?? "")
                 }
-                .onChange(of: viewModel.opmlExportData) { _, newValue in
+                .onChange(of: viewModel.opmlExportURL) { _, newValue in
                     if newValue != nil {
                         showExportShare = true
                     }
@@ -140,14 +142,6 @@ struct FeedListView: View {
         }
     }
 
-    @ViewBuilder
-    private var exportShareSheet: some View {
-        if let data = viewModel.opmlExportData,
-           let fileURL = writeExportFile(data) {
-            ActivityShareView(items: [fileURL])
-        }
-    }
-
     // MARK: - Helpers
 
     private var errorAlertBinding: Binding<Bool> {
@@ -173,18 +167,6 @@ struct FeedListView: View {
             viewModel.importOPML(from: url)
         case .failure:
             viewModel.errorMessage = "Unable to open the file picker."
-        }
-    }
-
-    private func writeExportFile(_ data: Data) -> URL? {
-        let tempURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("RSS Subscriptions.opml")
-        do {
-            try data.write(to: tempURL)
-            return tempURL
-        } catch {
-            viewModel.errorMessage = "Unable to write export file."
-            return nil
         }
     }
 }
