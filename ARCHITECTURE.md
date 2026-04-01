@@ -14,26 +14,33 @@ RSSApp/
 │   ├── Article.swift                   # Article (Identifiable, Hashable, Sendable)
 │   ├── ArticleContent.swift            # Extracted article data — htmlContent + textContent
 │   ├── ChatMessage.swift               # Chat message with role (user/assistant) and content
-│   └── RSSFeed.swift                   # Feed container with channel info and articles
+│   ├── RSSFeed.swift                   # Feed container with channel info and articles
+│   └── SubscribedFeed.swift            # Persistent feed subscription (Identifiable, Hashable, Codable, Sendable)
 ├── Services/                           # Business logic and networking
 │   ├── ArticleExtractionService.swift  # WKWebView + Readability.js content extraction
 │   ├── ClaudeAPIService.swift          # Claude API client — streaming SSE via URLSession
 │   ├── FeedFetchingService.swift       # FeedFetching protocol + URLSession implementation
+│   ├── FeedStorageService.swift        # FeedStoring protocol + UserDefaults persistence for subscribed feeds
 │   ├── HTMLUtilities.swift             # HTML tag stripping, entity decoding, image extraction
 │   ├── KeychainService.swift           # Keychain wrapper for secure API key storage
 │   └── RSSParsingService.swift         # XMLParser-based RSS 2.0 parser
 ├── ViewModels/                         # View state management
+│   ├── AddFeedViewModel.swift          # @Observable @MainActor — URL validation + feed subscription
 │   ├── ArticleReaderViewModel.swift    # @Observable @MainActor — extraction state machine
 │   ├── DiscussionViewModel.swift       # @Observable @MainActor — chat history + Claude streaming
+│   ├── FeedListViewModel.swift         # @Observable @MainActor — subscribed feed list management
 │   └── FeedViewModel.swift             # @Observable @MainActor — feed loading state
 ├── Views/                              # SwiftUI views
+│   ├── AddFeedView.swift               # Sheet for adding a new feed — URL input + validation
 │   ├── APIKeySettingsView.swift        # Keychain API key entry/removal UI
 │   ├── ArticleDiscussionView.swift     # Chat sheet — message bubbles + streaming input
 │   ├── ArticleListView.swift           # Feed article list with loading/error/content states
 │   ├── ArticleReaderView.swift         # Full-screen reader — WKWebView + discuss/settings toolbar
 │   ├── ArticleReaderWebView.swift      # UIViewRepresentable wrapping WKWebView with reader CSS
 │   ├── ArticleRowView.swift            # Single article row — thumbnail, title, snippet, date
-│   └── ContentView.swift               # Root view — NavigationStack with FeedViewModel
+│   ├── ContentView.swift               # Root view — hosts FeedListView
+│   ├── FeedListView.swift              # Subscribed feed list — NavigationStack root with add/remove
+│   └── FeedRowView.swift               # Single feed row — title + description
 └── Resources/
     ├── readability.js                  # Bundled Mozilla Readability.js (~91 KB)
     └── Assets.xcassets/                # App icons and image assets
@@ -48,21 +55,25 @@ RSSAppTests/
 │   ├── MockArticleExtractionService.swift  # ArticleExtracting mock with injectable content/errors
 │   ├── MockClaudeAPIService.swift          # ClaudeAPIServicing mock with injectable chunks/errors
 │   ├── MockFeedFetchingService.swift       # FeedFetching mock with injectable results/errors
+│   ├── MockFeedStorageService.swift        # FeedStoring mock with in-memory store
 │   └── MockKeychainService.swift           # KeychainServicing mock with in-memory store
 ├── Models/
 │   └── ArticleTests.swift              # Article creation, identity, hashable
 ├── Services/
 │   ├── ClaudeAPIServiceTests.swift     # Request encoding, SSE parsing, error handling
+│   ├── FeedStorageServiceTests.swift   # Save/load roundtrip, add/remove, empty state
 │   ├── HTMLUtilitiesTests.swift        # Tag stripping, entity decoding, image extraction
 │   ├── KeychainServiceTests.swift      # Save/load/delete/overwrite roundtrips
 │   └── RSSParsingServiceTests.swift    # Channel parsing, thumbnails, IDs, edge cases
 └── ViewModels/
+    ├── AddFeedViewModelTests.swift         # URL validation, duplicate detection, success/failure
     ├── ArticleReaderViewModelTests.swift   # State transitions: loading → loaded/failed
     ├── DiscussionViewModelTests.swift      # Message flow, streaming, no-key behavior
+    ├── FeedListViewModelTests.swift        # Load, remove by object, remove by IndexSet
     └── FeedViewModelTests.swift            # Load success/failure, state transitions
 ```
 
-**Total: 20 source files + 1 resource, 15 test files.**
+**Total: 26 source files + 1 resource, 19 test files.**
 
 ## Component Map
 
@@ -84,9 +95,11 @@ RSSAppTests/
 
 `RSSFeed` represents a parsed feed channel — title, link, description, and an array of `Article` values. Also `Sendable`.
 
+`SubscribedFeed` represents a persistent feed subscription — id, title, URL, description, and added date. Conforms to `Identifiable`, `Hashable`, `Codable` (for UserDefaults persistence), and `Sendable`.
+
 ### Services
 
-**Files:** `ArticleExtractionService.swift`, `ClaudeAPIService.swift`, `FeedFetchingService.swift`, `HTMLUtilities.swift`, `KeychainService.swift`, `RSSParsingService.swift`
+**Files:** `ArticleExtractionService.swift`, `ClaudeAPIService.swift`, `FeedFetchingService.swift`, `FeedStorageService.swift`, `HTMLUtilities.swift`, `KeychainService.swift`, `RSSParsingService.swift`
 
 `FeedFetching` is a protocol defining `fetchFeed(from:) async throws -> RSSFeed`. `FeedFetchingService` fetches data via `URLSession.shared` and delegates parsing to `RSSParsingService`.
 
@@ -100,13 +113,19 @@ RSSAppTests/
 
 `KeychainServicing` is a `Sendable` protocol. `KeychainService` wraps `Security` framework (`kSecClassGenericPassword`) to save, load, and delete the Anthropic API key. The key is stored encrypted by the OS and never touches any file accessible to git.
 
+`FeedStoring` is a `Sendable` protocol. `FeedStorageService` persists the user's subscribed feed list in `UserDefaults` using `Codable` encoding. Accepts a `UserDefaults` instance in its initializer (defaults to `.standard`) for test isolation.
+
 ### ViewModels
 
-**Files:** `ArticleReaderViewModel.swift`, `DiscussionViewModel.swift`, `FeedViewModel.swift`
+**Files:** `AddFeedViewModel.swift`, `ArticleReaderViewModel.swift`, `DiscussionViewModel.swift`, `FeedListViewModel.swift`, `FeedViewModel.swift`
 
 All view models are `@MainActor @Observable`.
 
-`FeedViewModel` holds the article list, loading state, and error state. Accepts a `FeedFetching` dependency for testability.
+`FeedListViewModel` manages the subscribed feed list. Loads feeds from `FeedStoring`, supports removal by object or `IndexSet`. Accepts a `FeedStoring` dependency for testability.
+
+`AddFeedViewModel` handles the add-feed flow: URL input, validation (scheme/host check, duplicate detection), fetching the feed to extract its title, and persisting via `FeedStoring`. Accepts both `FeedFetching` and `FeedStoring` dependencies for testability.
+
+`FeedViewModel` holds the article list, feed title, loading state, and error state. Requires a `feedURL` parameter. Accepts a `FeedFetching` dependency for testability.
 
 `ArticleReaderViewModel` drives the article reader. Its `State` enum (`loading` / `loaded(ArticleContent)` / `failed(String)`) reflects the extraction lifecycle. Accepts an `ArticleExtracting` dependency for testability.
 
@@ -114,11 +133,17 @@ All view models are `@MainActor @Observable`.
 
 ### Views
 
-**Files:** `APIKeySettingsView.swift`, `ArticleDiscussionView.swift`, `ArticleListView.swift`, `ArticleReaderView.swift`, `ArticleReaderWebView.swift`, `ArticleRowView.swift`, `ContentView.swift`
+**Files:** `AddFeedView.swift`, `APIKeySettingsView.swift`, `ArticleDiscussionView.swift`, `ArticleListView.swift`, `ArticleReaderView.swift`, `ArticleReaderWebView.swift`, `ArticleRowView.swift`, `ContentView.swift`, `FeedListView.swift`, `FeedRowView.swift`
 
-`ContentView` creates a `FeedViewModel` as `@State` and wraps `ArticleListView` in a `NavigationStack`.
+`ContentView` hosts `FeedListView` as the root view.
 
-`ArticleListView` shows loading / error / list states. Tapping a row sets `selectedArticle`, triggering a `.fullScreenCover` with `ArticleReaderView`. A gear toolbar button opens `APIKeySettingsView`.
+`FeedListView` is the `NavigationStack` root. It shows the list of subscribed feeds using `FeedRowView` rows with `NavigationLink(value:)`. Empty state shows a `ContentUnavailableView` prompting the user to add a feed. Toolbar has add (+) and settings (gear) buttons. Uses `.navigationDestination(for: SubscribedFeed.self)` to push `ArticleListView` with a `FeedViewModel` for the selected feed. Supports swipe-to-delete via `.onDelete`.
+
+`FeedRowView` displays a feed's title (`.headline`) and description (`.subheadline`, `.secondary`).
+
+`AddFeedView` is a sheet with a `Form` for entering a feed URL. Shows validation progress and error states. Auto-dismisses on successful addition.
+
+`ArticleListView` shows loading / error / list states. Uses `viewModel.feedTitle` as the navigation title. Tapping a row sets `selectedArticle`, triggering a `.fullScreenCover` with `ArticleReaderView`.
 
 `ArticleRowView` displays a 60×60 `AsyncImage` thumbnail, headline title, subheadline snippet, and caption-style relative date.
 
@@ -136,20 +161,33 @@ All view models are `@MainActor @Observable`.
 RSSAppApp (@main)
     └── WindowGroup
         └── ContentView
-            ├── @State FeedViewModel
-            │   ├── FeedFetchingService (FeedFetching protocol)
-            │   │   ├── URLSession.shared → HTTP fetch
-            │   │   └── RSSParsingService → XMLParser → [Article]
-            │   ├── articles: [Article]
-            │   ├── isLoading: Bool
-            │   └── errorMessage: String?
-            └── NavigationStack
-                └── ArticleListView
-                    ├── Loading → ProgressView
-                    ├── Error → ContentUnavailableView + Retry
-                    └── Content → List
-                        └── ArticleRowView (thumbnail, title, snippet, date)
-                            └── tap → fullScreenCover → ArticleReaderView
+            └── FeedListView
+                ├── @State FeedListViewModel
+                │   └── FeedStorageService (FeedStoring protocol)
+                │       └── UserDefaults → [SubscribedFeed]
+                ├── NavigationStack
+                │   ├── Empty → ContentUnavailableView + "Add Feed" button
+                │   └── List → FeedRowView (title, description)
+                │       └── NavigationLink(value: SubscribedFeed)
+                │           └── .navigationDestination → ArticleListView
+                │               ├── FeedViewModel(feedURL: feed.url)
+                │               │   ├── FeedFetchingService (FeedFetching protocol)
+                │               │   │   ├── URLSession.shared → HTTP fetch
+                │               │   │   └── RSSParsingService → XMLParser → [Article]
+                │               │   ├── articles: [Article]
+                │               │   ├── feedTitle: String
+                │               │   ├── isLoading: Bool
+                │               │   └── errorMessage: String?
+                │               ├── Loading → ProgressView
+                │               ├── Error → ContentUnavailableView + Retry
+                │               └── Content → List
+                │                   └── ArticleRowView (thumbnail, title, snippet, date)
+                │                       └── tap → fullScreenCover → ArticleReaderView
+                ├── Sheet: AddFeedView
+                │   └── @State AddFeedViewModel
+                │       ├── FeedFetchingService → validate URL + fetch title
+                │       └── FeedStorageService → persist subscription
+                └── Sheet: APIKeySettingsView
                                 ├── ArticleReaderViewModel
                                 │   └── ArticleExtractionService
                                 │       ├── hidden WKWebView → load article URL
@@ -182,6 +220,10 @@ RSSAppApp (@main)
 | Readability.js bundled in app | Mozilla's proven extraction algorithm; no server required; single 91 KB file |
 | Fallback to RSS `articleDescription` | Graceful degradation when Readability cannot parse a page |
 | Thumbnail priority: media:thumbnail → media:content → enclosure → img in HTML | Covers common RSS image patterns; ordered by specificity |
+| UserDefaults + Codable for feed persistence | Simplest option with no external deps; adequate for a small list of feeds |
+| `SubscribedFeed` separate from `RSSFeed` | `RSSFeed` is transient parsed XML data; `SubscribedFeed` is persistent subscription metadata |
+| Feed title fetched at add-time | Validates the URL is a real feed; better UX than requiring manual title entry |
+| `FeedViewModel` created per-navigation | Simple lifecycle; fresh fetch on each visit; no premature caching |
 
 ## Test Coverage
 
@@ -196,3 +238,6 @@ RSSAppApp (@main)
 | ArticleReaderViewModel | ArticleReaderViewModelTests.swift | Initial state is loading, success → loaded, error → failed, nil link → failed |
 | DiscussionViewModel | DiscussionViewModelTests.swift | hasAPIKey reflects keychain, send appends messages, chunks accumulate, input cleared, API error → error content, empty input ignored, no-key sets errorMessage |
 | FeedViewModel | FeedViewModelTests.swift | Load success, load failure, error clearing on retry, article replacement on refresh, isLoading state |
+| FeedStorageService | FeedStorageServiceTests.swift | Save/load roundtrip, add, remove, empty state, overwrite |
+| FeedListViewModel | FeedListViewModelTests.swift | Load from storage, remove by object, remove by IndexSet, empty state |
+| AddFeedViewModel | AddFeedViewModelTests.swift | Success, scheme prepend, invalid URL, duplicate detection, network error, error clearing |

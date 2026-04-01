@@ -3,7 +3,6 @@ import SwiftUI
 struct ArticleListView: View {
     let viewModel: FeedViewModel
     @State private var selectedArticle: Article?
-    @State private var showSettings = false
 
     var body: some View {
         Group {
@@ -34,22 +33,9 @@ struct ArticleListView: View {
                 .refreshable { await viewModel.loadFeed() }
             }
         }
-        .navigationTitle("Feed")
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    showSettings = true
-                } label: {
-                    Image(systemName: "gear")
-                }
-                .accessibilityLabel("Settings")
-            }
-        }
+        .navigationTitle(viewModel.feedTitle)
         .fullScreenCover(item: $selectedArticle) { article in
             ArticleReaderView(article: article)
-        }
-        .sheet(isPresented: $showSettings) {
-            APIKeySettingsView()
         }
         .task { await viewModel.loadFeed() }
     }
