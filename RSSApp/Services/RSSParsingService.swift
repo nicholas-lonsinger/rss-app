@@ -31,7 +31,7 @@ struct RSSParsingService: Sendable {
         }
 
         guard delegate.foundChannel else {
-            Self.logger.error("No <channel> element found in feed")
+            Self.logger.error("No <channel> (RSS) or <feed> (Atom) element found in feed")
             throw RSSParsingError.noChannelFound
         }
 
@@ -86,10 +86,10 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
         textBuffer = ""
 
         switch name {
-        case "channel":
+        case "channel", "feed":
             foundChannel = true
 
-        case "item":
+        case "item", "entry":
             isInsideItem = true
             itemTitle = ""
             itemLink = ""
@@ -98,6 +98,19 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
             itemPubDate = ""
             itemThumbnailURL = nil
             itemEnclosureURL = nil
+
+        case "link":
+            // RATIONALE: Atom uses self-closing <link rel="alternate" href="URL"/> while
+            // RSS uses <link>URL</link> text content. Extracting href here handles Atom;
+            // RSS <link> has no href attribute so this branch never fires for RSS feeds.
+            let rel = attributeDict["rel"] ?? "alternate"
+            if rel == "alternate", let href = attributeDict["href"] {
+                if isInsideItem {
+                    if itemLink.isEmpty { itemLink = href }
+                } else {
+                    if channelLink.isEmpty { channelLink = href }
+                }
+            }
 
         case "media:thumbnail":
             if isInsideItem, itemThumbnailURL == nil {
@@ -149,7 +162,11 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
             case "title":
                 itemTitle = textBuffer
             case "link":
-                itemLink = textBuffer
+                // Only set from text content (RSS style) if non-empty.
+                // Atom links use href attribute, handled in didStartElement.
+                if !textBuffer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    itemLink = textBuffer
+                }
             case "description":
                 itemDescription = textBuffer
             case "content:encoded":
@@ -157,11 +174,33 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
                 if !textBuffer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     itemDescription = textBuffer
                 }
+            case "summary":
+                // Atom summary (equivalent to RSS description)
+                if itemDescription.isEmpty {
+                    itemDescription = textBuffer
+                }
+            case "content":
+                // Atom content (equivalent to RSS content:encoded); prefer over summary
+                if !textBuffer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    itemDescription = textBuffer
+                }
             case "guid":
                 itemGuid = textBuffer
+            case "id":
+                // Atom entry ID (equivalent to RSS guid)
+                if itemGuid.isEmpty {
+                    itemGuid = textBuffer
+                }
             case "pubDate":
                 itemPubDate = textBuffer
-            case "item":
+            case "published":
+                itemPubDate = textBuffer
+            case "updated":
+                // Atom updated date (fallback if no published date)
+                if itemPubDate.isEmpty {
+                    itemPubDate = textBuffer
+                }
+            case "item", "entry":
                 articles.append(buildArticle())
                 isInsideItem = false
             default:
@@ -174,6 +213,9 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
             case "link":
                 if channelLink.isEmpty { channelLink = textBuffer }
             case "description":
+                if channelDescription.isEmpty { channelDescription = textBuffer }
+            case "subtitle":
+                // Atom feed subtitle (equivalent to RSS channel description)
                 if channelDescription.isEmpty { channelDescription = textBuffer }
             default:
                 break
@@ -257,6 +299,14 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
             }
         }
 
-        return nil
+        // Fallback: ISO8601DateFormatter handles Atom dates with colon-separated
+        // timezone offsets (e.g., "2026-04-01T15:06:21-04:00")
+        let iso8601Formatter = ISO8601DateFormatter()
+        iso8601Formatter.formatOptions = [.withInternetDateTime]
+        if let date = iso8601Formatter.date(from: trimmed) {
+            return date
+        }
+        iso8601Formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return iso8601Formatter.date(from: trimmed)
     }
 }
