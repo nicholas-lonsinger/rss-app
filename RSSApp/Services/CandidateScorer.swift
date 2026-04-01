@@ -5,11 +5,10 @@ import os
 ///
 /// The algorithm is adapted from Mozilla's Readability.js:
 /// 1. Prune nodes matching unlikely patterns (nav, sidebar, footer, ads)
-/// 2. Find scorable elements (`<p>`, `<pre>`, `<td>`, div-as-paragraph)
-/// 3. Score each and propagate scores to ancestors with decay
-/// 4. Weight by class/id signals and tag type
-/// 5. Penalize high link-density nodes
-/// 6. Select the top-scoring candidate
+/// 2. Find scorable elements (`<p>`, `<pre>`, `<td>`, `<section>`, `<h2>`-`<h6>`, div-as-paragraph)
+///    and propagate scores to ancestors with decay, weighted by tag type and class/id signals
+/// 3. Penalize high link-density nodes
+/// 4. Select the top-scoring candidate
 enum CandidateScorer {
 
     private static let logger = Logger(
@@ -95,6 +94,11 @@ enum CandidateScorer {
     }
 
     // MARK: - Pruning
+
+    // RATIONALE: These regex statics use `nonisolated(unsafe)` because `Regex` is not
+    // `Sendable`, but these are immutable after initialization and only read concurrently.
+    // `try!` is acceptable because the patterns are compile-time string literals validated
+    // by test coverage; invalid regex here is a developer error caught at first test run.
 
     /// Regex matching class/id values that are unlikely to contain article content.
     nonisolated(unsafe) private static let unlikelyPattern = try! Regex(
@@ -196,7 +200,6 @@ enum CandidateScorer {
         if scorableTags.contains(tag) {
             result.append(wrapper)
         } else if tag == "div" && !containsBlockChild(wrapper.node) {
-            // Div with only inline content — treat as paragraph.
             result.append(wrapper)
         }
 

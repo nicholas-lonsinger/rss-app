@@ -31,10 +31,12 @@ final class ArticleExtractionService: ArticleExtracting {
     func extract(from url: URL, fallbackHTML: String) async throws -> ArticleContent {
         Self.logger.debug("extract() called for \(url.absoluteString, privacy: .public)")
 
-        guard let scriptURL = Bundle.main.url(forResource: "domSerializer", withExtension: "js"),
-              let serializerJS = try? String(contentsOf: scriptURL, encoding: .utf8) else {
-            Self.logger.fault("domSerializer.js not found in app bundle")
-            assertionFailure("domSerializer.js not found in app bundle")
+        let serializerJS: String
+        do {
+            serializerJS = try loadSerializerJS()
+        } catch {
+            Self.logger.fault("domSerializer.js not available: \(error, privacy: .public)")
+            assertionFailure("domSerializer.js not available: \(error)")
             throw ArticleExtractionError.serializerNotFound
         }
 
@@ -43,6 +45,8 @@ final class ArticleExtractionService: ArticleExtracting {
                 Self.logger.notice("Native extraction succeeded for \(url.absoluteString, privacy: .public)")
                 return content
             }
+        } catch is CancellationError {
+            throw CancellationError()
         } catch {
             Self.logger.warning(
                 "Extraction failed for \(url.absoluteString, privacy: .public): \(error, privacy: .public) — using RSS fallback"
@@ -53,6 +57,13 @@ final class ArticleExtractionService: ArticleExtracting {
     }
 
     // MARK: - Private
+
+    private func loadSerializerJS() throws -> String {
+        guard let scriptURL = Bundle.main.url(forResource: "domSerializer", withExtension: "js") else {
+            throw ArticleExtractionError.serializerNotFound
+        }
+        return try String(contentsOf: scriptURL, encoding: .utf8)
+    }
 
     private func loadAndExtract(url: URL, serializerJS: String) async throws -> ArticleContent? {
         try await withCheckedThrowingContinuation { continuation in
@@ -82,11 +93,26 @@ final class ArticleExtractionService: ArticleExtracting {
                 .compactMap { $0 as? UIWindowScene }
                 .flatMap { $0.windows }
                 .first { $0.isKeyWindow }
-            keyWindow?.addSubview(webView)
 
-            // 30-second timeout ensures the continuation is always resumed
-            // even when the server is unreachable or extremely slow.
+            if let keyWindow {
+                keyWindow.addSubview(webView)
+            } else {
+                Self.logger.warning("No key window available — WKWebView delegate callbacks may not fire")
+            }
+
+            // 30-second request timeout — if the server is unreachable or stalls,
+            // the navigation delegate failure callback resumes the continuation.
             webView.load(URLRequest(url: url, timeoutInterval: 30))
+
+            // Safety timeout: if no delegate callback fires within 35 seconds
+            // (e.g., page hangs on subresources), resume the continuation to prevent
+            // an indefinite hang. The 35s gives the URLRequest timeout (30s) time to fire first.
+            Task { @MainActor [weak coordinator] in
+                try? await Task.sleep(for: .seconds(35))
+                guard let coordinator, coordinator.continuation != nil else { return }
+                Self.logger.warning("Extraction timed out for \(url.absoluteString, privacy: .public)")
+                coordinator.resumeAndCleanup(returning: nil)
+            }
         }
     }
 }
@@ -104,12 +130,12 @@ private final class ExtractionCoordinator: NSObject, WKNavigationDelegate, @unch
     )
 
     private let contentExtractor: any ContentExtracting
-    private var continuation: CheckedContinuation<ArticleContent?, Error>?
+    fileprivate var continuation: CheckedContinuation<ArticleContent?, Error>?
     /// Strong reference keeps the WKWebView alive until extraction completes.
     var webView: WKWebView?
     // RATIONALE: WKWebView.navigationDelegate is weak. This self-reference prevents
     // the coordinator from being deallocated before navigation completes. It is
-    // released in cleanup() once the continuation has been resumed.
+    // released in resumeAndCleanup() once the continuation has been resumed.
     private var selfRetain: ExtractionCoordinator?
 
     init(
@@ -123,42 +149,36 @@ private final class ExtractionCoordinator: NSObject, WKNavigationDelegate, @unch
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        webView.evaluateJavaScript(ArticleReaderWebView.serializerCall) { [weak self] result, error in
+        webView.evaluateJavaScript(DOMSerializerConstants.serializerCall) { [weak self] result, error in
             guard let self else { return }
-            self.cleanup()
 
             if let error {
                 Self.logger.warning("serializeDOM() error: \(error, privacy: .public)")
-                self.continuation?.resume(returning: nil)
-                self.continuation = nil
+                self.resumeAndCleanup(returning: nil)
                 return
             }
 
             guard let jsonString = result as? String,
                   let data = jsonString.data(using: .utf8) else {
-                Self.logger.debug("serializeDOM() returned nil or non-string result")
-                self.continuation?.resume(returning: nil)
-                self.continuation = nil
+                Self.logger.warning("serializeDOM() returned nil or non-string result")
+                self.resumeAndCleanup(returning: nil)
                 return
             }
 
             do {
                 let dom = try JSONDecoder().decode(SerializedDOM.self, from: data)
                 let content = self.contentExtractor.extract(from: dom)
-                self.continuation?.resume(returning: content)
+                self.resumeAndCleanup(returning: content)
             } catch {
-                Self.logger.debug("DOM JSON decoding failed: \(error, privacy: .public)")
-                self.continuation?.resume(returning: nil)
+                Self.logger.warning("DOM JSON decoding failed: \(error, privacy: .public)")
+                self.resumeAndCleanup(returning: nil)
             }
-            self.continuation = nil
         }
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-        cleanup()
         Self.logger.warning("Navigation failed: \(error, privacy: .public)")
-        continuation?.resume(throwing: ArticleExtractionError.navigationFailed(error))
-        continuation = nil
+        resumeAndCleanup(throwing: ArticleExtractionError.navigationFailed(error))
     }
 
     func webView(
@@ -166,15 +186,29 @@ private final class ExtractionCoordinator: NSObject, WKNavigationDelegate, @unch
         didFailProvisionalNavigation navigation: WKNavigation!,
         withError error: Error
     ) {
-        cleanup()
         Self.logger.warning("Provisional navigation failed: \(error, privacy: .public)")
-        continuation?.resume(throwing: ArticleExtractionError.navigationFailed(error))
-        continuation = nil
+        resumeAndCleanup(throwing: ArticleExtractionError.navigationFailed(error))
+    }
+
+    /// Resumes the continuation with a value, then cleans up.
+    fileprivate func resumeAndCleanup(returning content: ArticleContent?) {
+        guard let continuation else { return }
+        self.continuation = nil
+        cleanup()
+        continuation.resume(returning: content)
+    }
+
+    /// Resumes the continuation with an error, then cleans up.
+    private func resumeAndCleanup(throwing error: Error) {
+        guard let continuation else { return }
+        self.continuation = nil
+        cleanup()
+        continuation.resume(throwing: error)
     }
 
     private func cleanup() {
         webView?.removeFromSuperview()
         webView = nil
-        selfRetain = nil  // break self-retain cycle; coordinator deallocates after this returns
+        selfRetain = nil
     }
 }

@@ -73,28 +73,27 @@ struct ContentExtractorTests {
 
     // MARK: - Boilerplate Stripping
 
-    @Test func excludesNavigationContent() {
+    @Test func excludesNavigationContent() throws {
         let dom = makeSimpleBlogDOM()
-        let content = extractor.extract(from: dom)
+        let content = try #require(extractor.extract(from: dom))
 
-        // Nav links like "Home", "About" should not appear in extracted text
-        #expect(content?.textContent.contains("Home") != true)
-        #expect(content?.textContent.contains("Archive") != true)
+        #expect(!content.textContent.contains("Home"))
+        #expect(!content.textContent.contains("Archive"))
     }
 
-    @Test func excludesFooterContent() {
+    @Test func excludesFooterContent() throws {
         let dom = makeSimpleBlogDOM()
-        let content = extractor.extract(from: dom)
+        let content = try #require(extractor.extract(from: dom))
 
-        #expect(content?.textContent.contains("All rights reserved") != true)
-        #expect(content?.textContent.contains("Privacy Policy") != true)
+        #expect(!content.textContent.contains("All rights reserved"))
+        #expect(!content.textContent.contains("Privacy Policy"))
     }
 
-    @Test func excludesSidebarContent() {
+    @Test func excludesSidebarContent() throws {
         let dom = makeSimpleBlogDOM()
-        let content = extractor.extract(from: dom)
+        let content = try #require(extractor.extract(from: dom))
 
-        #expect(content?.textContent.contains("Related Posts") != true)
+        #expect(!content.textContent.contains("Related Posts"))
     }
 
     // MARK: - Helpers

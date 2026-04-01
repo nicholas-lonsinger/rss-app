@@ -16,9 +16,6 @@ struct ArticleReaderWebView: UIViewRepresentable {
     /// Raw RSS description HTML used as fallback when all extraction strategies fail.
     let fallbackHTML: String
 
-    static let messageHandlerName = "domSerialized"
-    static let serializerCall = "serializeDOM()"
-
     private static let logger = Logger(
         subsystem: "com.nicholas-lonsinger.rss-app",
         category: "ArticleReaderWebView"
@@ -32,24 +29,26 @@ struct ArticleReaderWebView: UIViewRepresentable {
         let config = WKWebViewConfiguration()
         config.mediaTypesRequiringUserActionForPlayback = .all
 
-        // Inject domSerializer.js at document end — fires when the DOM is parsed
-        // but before subresources (images, ads) finish loading. This enables
-        // early extraction since article content is usually in the initial HTML.
-        if let scriptURL = Bundle.main.url(forResource: "domSerializer", withExtension: "js"),
-           let serializerJS = try? String(contentsOf: scriptURL, encoding: .utf8) {
+        // Inject domSerializer.js at document end — fires after the document has loaded
+        // but before subresources (images, ads) finish loading. This enables early
+        // extraction since article content is usually in the initial HTML.
+        do {
+            guard let scriptURL = Bundle.main.url(forResource: "domSerializer", withExtension: "js") else {
+                throw ArticleExtractionError.serializerNotFound
+            }
+            let serializerJS = try String(contentsOf: scriptURL, encoding: .utf8)
             let userScript = WKUserScript(
                 source: serializerJS,
                 injectionTime: .atDocumentEnd,
                 forMainFrameOnly: true
             )
             config.userContentController.addUserScript(userScript)
-        } else {
-            Self.logger.fault("domSerializer.js not found in app bundle")
-            assertionFailure("domSerializer.js not found in app bundle")
+        } catch {
+            Self.logger.fault("domSerializer.js not available: \(error, privacy: .public)")
+            assertionFailure("domSerializer.js not available: \(error)")
         }
 
-        // Register message handler for early extraction results from the user script.
-        config.userContentController.add(context.coordinator, name: Self.messageHandlerName)
+        config.userContentController.add(context.coordinator, name: DOMSerializerConstants.messageHandlerName)
 
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.scrollView.showsHorizontalScrollIndicator = false
@@ -93,8 +92,11 @@ struct ArticleReaderWebView: UIViewRepresentable {
             _ userContentController: WKUserContentController,
             didReceive message: WKScriptMessage
         ) {
-            guard message.name == ArticleReaderWebView.messageHandlerName,
-                  let jsonString = message.body as? String else { return }
+            guard message.name == DOMSerializerConstants.messageHandlerName else { return }
+            guard let jsonString = message.body as? String else {
+                Self.logger.warning("Message handler received non-string body: \(type(of: message.body))")
+                return
+            }
 
             Self.logger.debug("Received early DOM serialization via message handler")
 
@@ -127,7 +129,12 @@ struct ArticleReaderWebView: UIViewRepresentable {
                 // Some sites load content dynamically after the initial page load.
                 // Retry once after a short delay before falling back.
                 Self.logger.debug("First didFinish extraction returned nil, retrying after delay")
-                try? await Task.sleep(for: .seconds(2))
+                do {
+                    try await Task.sleep(for: .seconds(2))
+                } catch {
+                    Self.logger.debug("Retry cancelled")
+                    return
+                }
                 if let content = await self.attemptExtraction(on: webView) {
                     self.extractionState.content = content
                     return
@@ -162,29 +169,31 @@ struct ArticleReaderWebView: UIViewRepresentable {
         @MainActor
         private func attemptExtraction(on webView: WKWebView) async -> ArticleContent? {
             do {
-                let result = try await webView.evaluateJavaScript(ArticleReaderWebView.serializerCall)
+                let result = try await webView.evaluateJavaScript(DOMSerializerConstants.serializerCall)
 
                 guard let jsonString = result as? String else {
-                    Self.logger.debug("serializeDOM() returned nil or non-string result")
+                    Self.logger.warning("serializeDOM() returned nil or non-string result")
                     return nil
                 }
 
                 return extractFromJSON(jsonString)
             } catch {
-                Self.logger.debug("serializeDOM() failed: \(error, privacy: .public)")
+                Self.logger.warning("serializeDOM() failed: \(error, privacy: .public)")
                 return nil
             }
         }
 
         /// Decodes serialized DOM JSON and runs the Swift content extractor.
         private func extractFromJSON(_ jsonString: String) -> ArticleContent? {
+            // RATIONALE: Swift String.data(using: .utf8) never returns nil for valid String values.
+            // This guard satisfies the compiler; the else branch is unreachable.
             guard let data = jsonString.data(using: .utf8) else { return nil }
 
             do {
                 let dom = try JSONDecoder().decode(SerializedDOM.self, from: data)
                 return contentExtractor.extract(from: dom)
             } catch {
-                Self.logger.debug("DOM JSON decoding failed: \(error, privacy: .public)")
+                Self.logger.warning("DOM JSON decoding failed: \(error, privacy: .public)")
                 return nil
             }
         }

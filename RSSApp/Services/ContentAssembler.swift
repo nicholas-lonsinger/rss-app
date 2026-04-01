@@ -6,7 +6,7 @@ import os
 /// The assembler walks the candidate node's tree and produces:
 /// - `htmlContent`: semantic HTML preserving structure (`<p>`, `<h2>`, `<blockquote>`,
 ///   `<img>`, `<a>`, etc.) but stripping non-content attributes
-/// - `textContent`: concatenated plain text from text nodes
+/// - `textContent`: plain text with whitespace normalized to single spaces
 enum ContentAssembler {
 
     private static let logger = Logger(

@@ -167,4 +167,48 @@ struct DOMNodeTests {
         #expect(node.textContent == "content")
     }
 
+    // MARK: - findFirst
+
+    @Test func findFirstReturnsSelfWhenMatching() {
+        let node = DOMNodeFactory.makeParagraph("hello")
+        #expect(node.findFirst(where: { $0.tagName == "p" })?.tagName == "p")
+    }
+
+    @Test func findFirstFindsNestedNode() {
+        let inner = DOMNodeFactory.makeParagraph("deep")
+        let wrapper = DOMNode(
+            t: "div", id: nil, cls: nil, role: nil, href: nil, src: nil, alt: nil, txt: nil, vis: nil,
+            c: [DOMNode(t: "section", id: nil, cls: nil, role: nil, href: nil, src: nil, alt: nil, txt: nil, vis: nil, c: [inner])]
+        )
+        let found = wrapper.findFirst(where: { $0.tagName == "p" })
+        #expect(found != nil)
+        #expect(found?.textContent == "deep")
+    }
+
+    @Test func findFirstReturnsNilWhenNoMatch() {
+        let node = DOMNodeFactory.makeParagraph("text")
+        #expect(node.findFirst(where: { $0.tagName == "article" }) == nil)
+    }
+
+    @Test func findFirstReturnsDFSOrder() {
+        // Two paragraphs — should find the first one
+        let body = DOMNodeFactory.makeBody([
+            DOMNodeFactory.makeParagraph("first"),
+            DOMNodeFactory.makeParagraph("second"),
+        ])
+        let found = body.findFirst(where: { $0.tagName == "p" })
+        #expect(found?.textContent == "first")
+    }
+
+    // MARK: - rssFallback
+
+    @Test func rssFallbackPreservesHTMLAndStripsText() {
+        let html = "<p>Some <b>bold</b> text</p>"
+        let content = ArticleContent.rssFallback(html: html)
+        #expect(content.title == "")
+        #expect(content.byline == nil)
+        #expect(content.htmlContent == html)
+        #expect(content.textContent == "Some bold text")
+    }
+
 }
