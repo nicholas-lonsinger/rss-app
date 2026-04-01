@@ -40,13 +40,13 @@ enum MetadataExtractor {
         }
 
         // 3. First <h1> inside <article> (or first <h1> in the page)
-        if let articleNode = findFirst(in: dom.body, where: { $0.tagName == "article" }),
-           let h1 = findFirst(in: articleNode, where: { $0.tagName == "h1" }) {
+        if let articleNode = dom.body.findFirst(where: { $0.tagName == "article" }),
+           let h1 = articleNode.findFirst(where: { $0.tagName == "h1" }) {
             let text = h1.textContent.trimmingCharacters(in: .whitespacesAndNewlines)
             if !text.isEmpty { return text }
         }
 
-        if let h1 = findFirst(in: dom.body, where: { $0.tagName == "h1" }) {
+        if let h1 = dom.body.findFirst(where: { $0.tagName == "h1" }) {
             let text = h1.textContent.trimmingCharacters(in: .whitespacesAndNewlines)
             if !text.isEmpty { return text }
         }
@@ -138,13 +138,4 @@ enum MetadataExtractor {
         return cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    // MARK: - Tree Traversal
-
-    private static func findFirst(in node: DOMNode, where predicate: (DOMNode) -> Bool) -> DOMNode? {
-        if predicate(node) { return node }
-        for child in node.children {
-            if let found = findFirst(in: child, where: predicate) { return found }
-        }
-        return nil
-    }
 }

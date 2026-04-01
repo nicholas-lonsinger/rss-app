@@ -105,7 +105,7 @@ struct ContentExtractorTests {
 
         let nav = DOMNode(
             t: "nav", id: nil, cls: nil, role: "navigation", href: nil, src: nil, alt: nil, txt: nil, vis: nil,
-            c: [makeLink("Home"), makeLink("About"), makeLink("Archive")]
+            c: [DOMNodeFactory.makeLink("Home"), DOMNodeFactory.makeLink("About"), DOMNodeFactory.makeLink("Archive")]
         )
         let header = DOMNode(
             t: "header", id: nil, cls: nil, role: nil, href: nil, src: nil, alt: nil, txt: nil, vis: nil,
@@ -116,24 +116,24 @@ struct ContentExtractorTests {
             t: "div", id: nil, cls: "byline", role: nil, href: nil, src: nil, alt: nil, txt: nil, vis: nil,
             c: [
                 DOMNode(t: "span", id: nil, cls: "author", role: nil, href: nil, src: nil, alt: nil, txt: nil, vis: nil,
-                        c: [makeTextNode("By Jane Smith")]),
+                        c: [DOMNodeFactory.makeTextNode("By Jane Smith")]),
             ]
         )
 
         let article = DOMNode(
             t: "article", id: nil, cls: nil, role: nil, href: nil, src: nil, alt: nil, txt: nil, vis: nil,
             c: [
-                makeH1("Understanding Swift Concurrency"),
+                DOMNodeFactory.makeH1("Understanding Swift Concurrency"),
                 byline,
-                makeParagraph(longText),
-                makeParagraph("Before Swift concurrency, developers relied heavily on completion handlers, delegate patterns, and Grand Central Dispatch. While these tools were powerful, they often led to complex, hard-to-read code with subtle bugs."),
+                DOMNodeFactory.makeParagraph(longText),
+                DOMNodeFactory.makeParagraph("Before Swift concurrency, developers relied heavily on completion handlers, delegate patterns, and Grand Central Dispatch. While these tools were powerful, they often led to complex, hard-to-read code with subtle bugs."),
                 DOMNode(t: "h2", id: nil, cls: nil, role: nil, href: nil, src: nil, alt: nil, txt: nil, vis: nil,
-                        c: [makeTextNode("Async/Await")]),
-                makeParagraph("The async/await pattern is the foundation of Swift concurrency. An async function can suspend its execution at an await point, allowing the system to use that thread for other work."),
-                makeParagraph("Consider a typical network request. With completion handlers, you might write nested callbacks that are difficult to follow. With async/await, the same code reads linearly."),
+                        c: [DOMNodeFactory.makeTextNode("Async/Await")]),
+                DOMNodeFactory.makeParagraph("The async/await pattern is the foundation of Swift concurrency. An async function can suspend its execution at an await point, allowing the system to use that thread for other work."),
+                DOMNodeFactory.makeParagraph("Consider a typical network request. With completion handlers, you might write nested callbacks that are difficult to follow. With async/await, the same code reads linearly."),
                 DOMNode(t: "h2", id: nil, cls: nil, role: nil, href: nil, src: nil, alt: nil, txt: nil, vis: nil,
-                        c: [makeTextNode("Actors")]),
-                makeParagraph("Actors provide a way to protect mutable state from data races. An actor ensures that only one task can access its mutable state at a time, eliminating a whole class of concurrency bugs."),
+                        c: [DOMNodeFactory.makeTextNode("Actors")]),
+                DOMNodeFactory.makeParagraph("Actors provide a way to protect mutable state from data races. An actor ensures that only one task can access its mutable state at a time, eliminating a whole class of concurrency bugs."),
             ]
         )
 
@@ -141,11 +141,11 @@ struct ContentExtractorTests {
             t: "aside", id: nil, cls: "sidebar", role: nil, href: nil, src: nil, alt: nil, txt: nil, vis: nil,
             c: [
                 DOMNode(t: "h3", id: nil, cls: nil, role: nil, href: nil, src: nil, alt: nil, txt: nil, vis: nil,
-                        c: [makeTextNode("Related Posts")]),
+                        c: [DOMNodeFactory.makeTextNode("Related Posts")]),
                 DOMNode(t: "ul", id: nil, cls: nil, role: nil, href: nil, src: nil, alt: nil, txt: nil, vis: nil,
                         c: [
                             DOMNode(t: "li", id: nil, cls: nil, role: nil, href: nil, src: nil, alt: nil, txt: nil, vis: nil,
-                                    c: [makeLink("10 SwiftUI Tips")]),
+                                    c: [DOMNodeFactory.makeLink("10 SwiftUI Tips")]),
                         ]),
             ]
         )
@@ -153,9 +153,9 @@ struct ContentExtractorTests {
         let footer = DOMNode(
             t: "footer", id: nil, cls: "footer", role: nil, href: nil, src: nil, alt: nil, txt: nil, vis: nil,
             c: [
-                makeParagraph("© 2025 Tech Blog. All rights reserved."),
+                DOMNodeFactory.makeParagraph("© 2025 Tech Blog. All rights reserved."),
                 DOMNode(t: "nav", id: nil, cls: nil, role: nil, href: nil, src: nil, alt: nil, txt: nil, vis: nil,
-                        c: [makeLink("Privacy Policy"), makeLink("Terms of Service")]),
+                        c: [DOMNodeFactory.makeLink("Privacy Policy"), DOMNodeFactory.makeLink("Terms of Service")]),
             ]
         )
 
@@ -174,24 +174,6 @@ struct ContentExtractorTests {
         )
     }
 
-    private func makeH1(_ text: String) -> DOMNode {
-        DOMNode(t: "h1", id: nil, cls: nil, role: nil, href: nil, src: nil, alt: nil, txt: nil, vis: nil,
-                c: [makeTextNode(text)])
-    }
-
-    private func makeParagraph(_ text: String) -> DOMNode {
-        DOMNode(t: "p", id: nil, cls: nil, role: nil, href: nil, src: nil, alt: nil, txt: nil, vis: nil,
-                c: [makeTextNode(text)])
-    }
-
-    private func makeLink(_ text: String) -> DOMNode {
-        DOMNode(t: "a", id: nil, cls: nil, role: nil, href: "https://example.com", src: nil, alt: nil, txt: nil, vis: nil,
-                c: [makeTextNode(text)])
-    }
-
-    private func makeTextNode(_ text: String) -> DOMNode {
-        DOMNode(t: "#text", id: nil, cls: nil, role: nil, href: nil, src: nil, alt: nil, txt: text, vis: nil, c: nil)
-    }
 }
 
 // MARK: - Stub Site Extractor

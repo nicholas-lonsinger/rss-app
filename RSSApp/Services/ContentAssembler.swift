@@ -43,7 +43,6 @@ enum ContentAssembler {
     // MARK: - Recursive Assembly
 
     private static func assembleNode(_ node: DOMNode, html: inout String, text: inout String) {
-        // Text node — emit directly
         if node.isText {
             let content = node.txt ?? ""
             html.append(escapeHTML(content))
@@ -51,12 +50,10 @@ enum ContentAssembler {
             return
         }
 
-        // Skip hidden nodes
         guard node.isVisible else { return }
 
         let tag = node.tagName
 
-        // Self-closing tags
         if tag == "br" {
             html.append("<br>")
             text.append("\n")
@@ -72,7 +69,6 @@ enum ContentAssembler {
             return
         }
 
-        // Determine if this tag is preserved in output
         let preserve = preservedTags.contains(tag)
 
         if preserve {
@@ -81,13 +77,11 @@ enum ContentAssembler {
             html.append(">")
         }
 
-        // Block-level elements get text spacing
         let isBlock = isBlockElement(tag)
         if isBlock {
             text.append("\n\n")
         }
 
-        // Recurse into children
         for child in node.children {
             assembleNode(child, html: &html, text: &text)
         }
@@ -107,14 +101,6 @@ enum ContentAssembler {
     private static func appendAttributes(for node: DOMNode, tag: String, html: inout String) {
         if tag == "a", let href = node.href {
             html.append(" href=\"\(escapeAttribute(href))\"")
-        }
-        if tag == "img" {
-            if let src = node.src {
-                html.append(" src=\"\(escapeAttribute(src))\"")
-            }
-            if let alt = node.alt {
-                html.append(" alt=\"\(escapeAttribute(alt))\"")
-            }
         }
     }
 

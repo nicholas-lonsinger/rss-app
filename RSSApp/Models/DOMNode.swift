@@ -81,8 +81,10 @@ extension DOMNode {
     }
 
     /// Total character count of the recursive text content.
+    /// Counts directly without building the full string.
     var textLength: Int {
-        textContent.count
+        if isText { return (txt ?? "").count }
+        return children.reduce(0) { $0 + $1.textLength }
     }
 
     /// Ratio of text inside `<a>` descendants to total text.
@@ -97,11 +99,19 @@ extension DOMNode {
     }
 
     /// Number of commas in the recursive text content.
-    ///
-    /// Commas are a strong signal of prose content — sentences with clauses,
-    /// lists of items, etc. Readability uses this as a scoring boost.
+    /// Counts directly without building the full string.
     var commaCount: Int {
-        textContent.filter { $0 == "," }.count
+        if isText { return (txt ?? "").filter { $0 == "," }.count }
+        return children.reduce(0) { $0 + $1.commaCount }
+    }
+
+    /// Depth-first search for the first descendant node matching a predicate.
+    func findFirst(where predicate: (DOMNode) -> Bool) -> DOMNode? {
+        if predicate(self) { return self }
+        for child in children {
+            if let found = child.findFirst(where: predicate) { return found }
+        }
+        return nil
     }
 
     /// Total character count of text inside `<a>` descendant nodes.

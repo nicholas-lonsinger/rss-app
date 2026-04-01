@@ -39,8 +39,7 @@ enum CandidateScorer {
 
         // Initialize candidate scores for scorable ancestors.
         for scorable in scorables {
-            let textContent = scorable.node.textContent
-            guard textContent.count >= 25 else { continue }
+            guard scorable.node.textLength >= 25 else { continue }
 
             let contentScore = computeContentScore(for: scorable.node)
 
@@ -54,7 +53,12 @@ enum CandidateScorer {
                     scores[id] = initializeScore(for: current.node)
                 }
 
-                let divisor: Double = level == 0 ? 1.0 : level == 1 ? 2.0 : Double(level) * 3.0
+                let divisor: Double
+                switch level {
+                case 0: divisor = 1.0
+                case 1: divisor = 2.0
+                default: divisor = Double(level) * 3.0
+                }
                 scores[id, default: 0] += contentScore / divisor
 
                 ancestor = current.parent
@@ -121,13 +125,10 @@ enum CandidateScorer {
 
     /// Returns `true` if this node should be pruned from candidate consideration.
     private static func shouldPrune(_ node: DOMNode) -> Bool {
-        // Hidden nodes
         if !node.isVisible { return true }
 
-        // Unlikely roles
         if let role = node.role, unlikelyRoles.contains(role) { return true }
 
-        // Unlikely class/id pattern, unless rescued by okMaybe
         let matchString = node.className + " " + node.identifier
         guard !matchString.trimmingCharacters(in: .whitespaces).isEmpty else { return false }
 

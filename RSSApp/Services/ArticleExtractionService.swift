@@ -10,8 +10,8 @@ protocol ArticleExtracting {
 
 enum ArticleExtractionError: Error, Sendable {
     case serializerNotFound
+    case missingArticleURL
     case navigationFailed(Error)
-    case javascriptFailed
 }
 
 @MainActor
@@ -49,14 +49,7 @@ final class ArticleExtractionService: ArticleExtracting {
             )
         }
 
-        // Fall back to RSS articleDescription
-        let fallbackText = HTMLUtilities.stripHTML(fallbackHTML)
-        return ArticleContent(
-            title: "",
-            byline: nil,
-            htmlContent: fallbackHTML,
-            textContent: fallbackText
-        )
+        return ArticleContent.rssFallback(html: fallbackHTML)
     }
 
     // MARK: - Private
@@ -130,7 +123,7 @@ private final class ExtractionCoordinator: NSObject, WKNavigationDelegate, @unch
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        webView.evaluateJavaScript("serializeDOM()") { [weak self] result, error in
+        webView.evaluateJavaScript(ArticleReaderWebView.serializerCall) { [weak self] result, error in
             guard let self else { return }
             self.cleanup()
 

@@ -15,7 +15,7 @@ struct DOMNodeTests {
     }
 
     @Test func elementNodeIsNotText() {
-        let node = makeParagraph("content")
+        let node = DOMNodeFactory.makeParagraph("content")
         #expect(!node.isText)
         #expect(node.tagName == "p")
     }
@@ -46,12 +46,12 @@ struct DOMNodeTests {
     // MARK: - Text Content
 
     @Test func textContentFromTextNode() {
-        let node = makeTextNode("Hello, world!")
+        let node = DOMNodeFactory.makeTextNode("Hello, world!")
         #expect(node.textContent == "Hello, world!")
     }
 
     @Test func textContentFromElement() {
-        let node = makeParagraph("Hello, world!")
+        let node = DOMNodeFactory.makeParagraph("Hello, world!")
         #expect(node.textContent == "Hello, world!")
     }
 
@@ -60,8 +60,8 @@ struct DOMNodeTests {
         let div = DOMNode(
             t: "div", id: nil, cls: nil, role: nil, href: nil, src: nil, alt: nil, txt: nil, vis: nil,
             c: [
-                makeParagraph("Hello, "),
-                makeParagraph("world!"),
+                DOMNodeFactory.makeParagraph("Hello, "),
+                DOMNodeFactory.makeParagraph("world!"),
             ]
         )
         #expect(div.textContent == "Hello, world!")
@@ -73,28 +73,28 @@ struct DOMNodeTests {
     }
 
     @Test func textLength() {
-        let node = makeParagraph("12345")
+        let node = DOMNodeFactory.makeParagraph("12345")
         #expect(node.textLength == 5)
     }
 
     // MARK: - Link Density
 
     @Test func linkDensityWithNoLinks() {
-        let node = makeParagraph("No links here at all.")
+        let node = DOMNodeFactory.makeParagraph("No links here at all.")
         #expect(node.linkDensity == 0)
     }
 
     @Test func linkDensityWithAllLinks() {
         // <p><a>all link text</a></p>
-        let link = makeLink("all link text")
+        let link = DOMNodeFactory.makeLink("all link text")
         let p = DOMNode(t: "p", id: nil, cls: nil, role: nil, href: nil, src: nil, alt: nil, txt: nil, vis: nil, c: [link])
         #expect(p.linkDensity == 1.0)
     }
 
     @Test func linkDensityPartial() {
         // <p>Normal text <a>link</a></p> => link is 4 chars out of 16
-        let textNode = makeTextNode("Normal text ")
-        let link = makeLink("link")
+        let textNode = DOMNodeFactory.makeTextNode("Normal text ")
+        let link = DOMNodeFactory.makeLink("link")
         let p = DOMNode(t: "p", id: nil, cls: nil, role: nil, href: nil, src: nil, alt: nil, txt: nil, vis: nil, c: [textNode, link])
         let expected = 4.0 / 16.0
         #expect(abs(p.linkDensity - expected) < 0.001)
@@ -108,12 +108,12 @@ struct DOMNodeTests {
     // MARK: - Comma Count
 
     @Test func commaCountInProse() {
-        let node = makeParagraph("First, second, and third, too.")
+        let node = DOMNodeFactory.makeParagraph("First, second, and third, too.")
         #expect(node.commaCount == 3)
     }
 
     @Test func commaCountZero() {
-        let node = makeParagraph("No commas here")
+        let node = DOMNodeFactory.makeParagraph("No commas here")
         #expect(node.commaCount == 0)
     }
 
@@ -122,8 +122,8 @@ struct DOMNodeTests {
         let div = DOMNode(
             t: "div", id: nil, cls: nil, role: nil, href: nil, src: nil, alt: nil, txt: nil, vis: nil,
             c: [
-                makeParagraph("one, two"),
-                makeParagraph("three, four, five"),
+                DOMNodeFactory.makeParagraph("one, two"),
+                DOMNodeFactory.makeParagraph("three, four, five"),
             ]
         )
         #expect(div.commaCount == 3)
@@ -139,7 +139,7 @@ struct DOMNodeTests {
             meta: ["og:title": "Test"],
             body: DOMNode(
                 t: "body", id: nil, cls: nil, role: nil, href: nil, src: nil, alt: nil, txt: nil, vis: nil,
-                c: [makeParagraph("Hello")]
+                c: [DOMNodeFactory.makeParagraph("Hello")]
             )
         )
 
@@ -167,23 +167,4 @@ struct DOMNodeTests {
         #expect(node.textContent == "content")
     }
 
-    // MARK: - Helpers
-
-    private func makeTextNode(_ text: String) -> DOMNode {
-        DOMNode(t: "#text", id: nil, cls: nil, role: nil, href: nil, src: nil, alt: nil, txt: text, vis: nil, c: nil)
-    }
-
-    private func makeParagraph(_ text: String) -> DOMNode {
-        DOMNode(
-            t: "p", id: nil, cls: nil, role: nil, href: nil, src: nil, alt: nil, txt: nil, vis: nil,
-            c: [makeTextNode(text)]
-        )
-    }
-
-    private func makeLink(_ text: String) -> DOMNode {
-        DOMNode(
-            t: "a", id: nil, cls: nil, role: nil, href: "https://example.com", src: nil, alt: nil, txt: nil, vis: nil,
-            c: [makeTextNode(text)]
-        )
-    }
 }

@@ -13,7 +13,7 @@ struct CandidateScorerTests {
         //   <article><p>Long article text...</p></article>
         //   <footer><p>Copyright</p></footer>
         // </body>
-        let body = makeBody([
+        let body = DOMNodeFactory.makeBody([
             makeNav(),
             makeArticle(paragraphs: [longParagraph, longParagraph, longParagraph]),
             makeFooter(),
@@ -25,15 +25,15 @@ struct CandidateScorerTests {
     }
 
     @Test func prefersContentDivOverNavAndSidebar() {
-        let body = makeBody([
+        let body = DOMNodeFactory.makeBody([
             makeNav(),
             DOMNode(
                 t: "div", id: "content", cls: "main-content", role: nil, href: nil, src: nil, alt: nil, txt: nil, vis: nil,
-                c: [makeParagraph(longParagraph), makeParagraph(longParagraph)]
+                c: [DOMNodeFactory.makeParagraph(longParagraph), DOMNodeFactory.makeParagraph(longParagraph)]
             ),
             DOMNode(
                 t: "aside", id: nil, cls: "sidebar", role: nil, href: nil, src: nil, alt: nil, txt: nil, vis: nil,
-                c: [makeParagraph("Short sidebar text.")]
+                c: [DOMNodeFactory.makeParagraph("Short sidebar text.")]
             ),
         ])
 
@@ -50,7 +50,7 @@ struct CandidateScorerTests {
 
     @Test func returnsNilWhenNoScorableContent() {
         // Only short text — below the 25-char threshold
-        let body = makeBody([makeParagraph("Short.")])
+        let body = DOMNodeFactory.makeBody([DOMNodeFactory.makeParagraph("Short.")])
         let candidate = CandidateScorer.findTopCandidate(in: body)
         #expect(candidate == nil)
     }
@@ -60,11 +60,11 @@ struct CandidateScorerTests {
     @Test func prunesHiddenElements() {
         let hiddenDiv = DOMNode(
             t: "div", id: nil, cls: nil, role: nil, href: nil, src: nil, alt: nil, txt: nil, vis: false,
-            c: [makeParagraph(longParagraph)]
+            c: [DOMNodeFactory.makeParagraph(longParagraph)]
         )
         let visibleArticle = makeArticle(paragraphs: [longParagraph, longParagraph])
 
-        let body = makeBody([hiddenDiv, visibleArticle])
+        let body = DOMNodeFactory.makeBody([hiddenDiv, visibleArticle])
         let candidate = CandidateScorer.findTopCandidate(in: body)
 
         #expect(candidate != nil)
@@ -74,11 +74,11 @@ struct CandidateScorerTests {
     @Test func prunesNavigationRole() {
         let navRole = DOMNode(
             t: "div", id: nil, cls: nil, role: "navigation", href: nil, src: nil, alt: nil, txt: nil, vis: nil,
-            c: [makeParagraph(longParagraph)]
+            c: [DOMNodeFactory.makeParagraph(longParagraph)]
         )
         let article = makeArticle(paragraphs: [longParagraph, longParagraph])
 
-        let body = makeBody([navRole, article])
+        let body = DOMNodeFactory.makeBody([navRole, article])
         let candidate = CandidateScorer.findTopCandidate(in: body)
 
         #expect(candidate?.node.tagName == "article")
@@ -87,11 +87,11 @@ struct CandidateScorerTests {
     @Test func prunesSidebarClass() {
         let sidebar = DOMNode(
             t: "div", id: nil, cls: "sidebar", role: nil, href: nil, src: nil, alt: nil, txt: nil, vis: nil,
-            c: [makeParagraph(longParagraph)]
+            c: [DOMNodeFactory.makeParagraph(longParagraph)]
         )
         let article = makeArticle(paragraphs: [longParagraph, longParagraph])
 
-        let body = makeBody([sidebar, article])
+        let body = DOMNodeFactory.makeBody([sidebar, article])
         let candidate = CandidateScorer.findTopCandidate(in: body)
 
         #expect(candidate?.node.tagName == "article")
@@ -104,17 +104,17 @@ struct CandidateScorerTests {
         let linkHeavyDiv = DOMNode(
             t: "div", id: nil, cls: "entry-content", role: nil, href: nil, src: nil, alt: nil, txt: nil, vis: nil,
             c: [
-                makeLink("Link one text here is long enough"),
-                makeLink("Link two text here is long enough"),
-                makeLink("Link three text here is long enough"),
+                DOMNodeFactory.makeLink("Link one text here is long enough"),
+                DOMNodeFactory.makeLink("Link two text here is long enough"),
+                DOMNodeFactory.makeLink("Link three text here is long enough"),
             ]
         )
         let proseDiv = DOMNode(
             t: "div", id: nil, cls: "post-content", role: nil, href: nil, src: nil, alt: nil, txt: nil, vis: nil,
-            c: [makeParagraph(longParagraph), makeParagraph(longParagraph)]
+            c: [DOMNodeFactory.makeParagraph(longParagraph), DOMNodeFactory.makeParagraph(longParagraph)]
         )
 
-        let body = makeBody([linkHeavyDiv, proseDiv])
+        let body = DOMNodeFactory.makeBody([linkHeavyDiv, proseDiv])
         let candidate = CandidateScorer.findTopCandidate(in: body)
 
         #expect(candidate?.node.className == "post-content")
@@ -125,15 +125,15 @@ struct CandidateScorerTests {
     @Test func boostsPositiveClassNames() {
         let genericDiv = DOMNode(
             t: "div", id: nil, cls: nil, role: nil, href: nil, src: nil, alt: nil, txt: nil, vis: nil,
-            c: [makeParagraph(longParagraph)]
+            c: [DOMNodeFactory.makeParagraph(longParagraph)]
         )
         let contentDiv = DOMNode(
             t: "div", id: nil, cls: "entry-content", role: nil, href: nil, src: nil, alt: nil, txt: nil, vis: nil,
-            c: [makeParagraph(longParagraph)]
+            c: [DOMNodeFactory.makeParagraph(longParagraph)]
         )
 
         // Both have identical content, but entry-content gets a class bonus.
-        let body = makeBody([genericDiv, contentDiv])
+        let body = DOMNodeFactory.makeBody([genericDiv, contentDiv])
         let candidate = CandidateScorer.findTopCandidate(in: body)
 
         #expect(candidate?.node.className == "entry-content")
@@ -144,10 +144,10 @@ struct CandidateScorerTests {
         let article = makeArticle(paragraphs: [longParagraph])
         let div = DOMNode(
             t: "div", id: nil, cls: nil, role: nil, href: nil, src: nil, alt: nil, txt: nil, vis: nil,
-            c: [makeParagraph(longParagraph)]
+            c: [DOMNodeFactory.makeParagraph(longParagraph)]
         )
 
-        let body = makeBody([article, div])
+        let body = DOMNodeFactory.makeBody([article, div])
         let candidate = CandidateScorer.findTopCandidate(in: body)
 
         #expect(candidate?.node.tagName == "article")
@@ -159,14 +159,14 @@ struct CandidateScorerTests {
         // A div containing only text (no block children) should be treated as scorable.
         let inlineDiv = DOMNode(
             t: "div", id: nil, cls: "article-text", role: nil, href: nil, src: nil, alt: nil, txt: nil, vis: nil,
-            c: [makeTextNode(longParagraph)]
+            c: [DOMNodeFactory.makeTextNode(longParagraph)]
         )
         let wrapper = DOMNode(
             t: "div", id: nil, cls: "content", role: nil, href: nil, src: nil, alt: nil, txt: nil, vis: nil,
             c: [inlineDiv]
         )
 
-        let body = makeBody([wrapper])
+        let body = DOMNodeFactory.makeBody([wrapper])
         let candidate = CandidateScorer.findTopCandidate(in: body)
 
         #expect(candidate != nil)
@@ -176,46 +176,24 @@ struct CandidateScorerTests {
 
     private let longParagraph = "Swift concurrency represents a fundamental shift in how we write asynchronous code on Apple platforms. With the introduction of async/await, actors, and structured concurrency, developers now have powerful tools to write safe, efficient concurrent code that is both readable and maintainable."
 
-    private func makeBody(_ children: [DOMNode]) -> DOMNode {
-        DOMNode(t: "body", id: nil, cls: nil, role: nil, href: nil, src: nil, alt: nil, txt: nil, vis: nil, c: children)
-    }
-
     private func makeArticle(paragraphs: [String]) -> DOMNode {
         DOMNode(
             t: "article", id: nil, cls: nil, role: nil, href: nil, src: nil, alt: nil, txt: nil, vis: nil,
-            c: paragraphs.map { makeParagraph($0) }
+            c: paragraphs.map { DOMNodeFactory.makeParagraph($0) }
         )
     }
 
     private func makeNav() -> DOMNode {
         DOMNode(
             t: "nav", id: nil, cls: nil, role: "navigation", href: nil, src: nil, alt: nil, txt: nil, vis: nil,
-            c: [makeLink("Home"), makeLink("About"), makeLink("Contact")]
+            c: [DOMNodeFactory.makeLink("Home"), DOMNodeFactory.makeLink("About"), DOMNodeFactory.makeLink("Contact")]
         )
     }
 
     private func makeFooter() -> DOMNode {
         DOMNode(
             t: "footer", id: nil, cls: "footer", role: nil, href: nil, src: nil, alt: nil, txt: nil, vis: nil,
-            c: [makeParagraph("Copyright 2025")]
+            c: [DOMNodeFactory.makeParagraph("Copyright 2025")]
         )
-    }
-
-    private func makeParagraph(_ text: String) -> DOMNode {
-        DOMNode(
-            t: "p", id: nil, cls: nil, role: nil, href: nil, src: nil, alt: nil, txt: nil, vis: nil,
-            c: [makeTextNode(text)]
-        )
-    }
-
-    private func makeLink(_ text: String) -> DOMNode {
-        DOMNode(
-            t: "a", id: nil, cls: nil, role: nil, href: "https://example.com", src: nil, alt: nil, txt: nil, vis: nil,
-            c: [makeTextNode(text)]
-        )
-    }
-
-    private func makeTextNode(_ text: String) -> DOMNode {
-        DOMNode(t: "#text", id: nil, cls: nil, role: nil, href: nil, src: nil, alt: nil, txt: text, vis: nil, c: nil)
     }
 }

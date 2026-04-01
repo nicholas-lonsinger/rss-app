@@ -16,6 +16,9 @@ struct ArticleReaderWebView: UIViewRepresentable {
     /// Raw RSS description HTML used as fallback when all extraction strategies fail.
     let fallbackHTML: String
 
+    static let messageHandlerName = "domSerialized"
+    static let serializerCall = "serializeDOM()"
+
     private static let logger = Logger(
         subsystem: "com.nicholas-lonsinger.rss-app",
         category: "ArticleReaderWebView"
@@ -46,7 +49,7 @@ struct ArticleReaderWebView: UIViewRepresentable {
         }
 
         // Register message handler for early extraction results from the user script.
-        config.userContentController.add(context.coordinator, name: "domSerialized")
+        config.userContentController.add(context.coordinator, name: Self.messageHandlerName)
 
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.scrollView.showsHorizontalScrollIndicator = false
@@ -90,7 +93,7 @@ struct ArticleReaderWebView: UIViewRepresentable {
             _ userContentController: WKUserContentController,
             didReceive message: WKScriptMessage
         ) {
-            guard message.name == "domSerialized",
+            guard message.name == ArticleReaderWebView.messageHandlerName,
                   let jsonString = message.body as? String else { return }
 
             Self.logger.debug("Received early DOM serialization via message handler")
@@ -159,7 +162,7 @@ struct ArticleReaderWebView: UIViewRepresentable {
         @MainActor
         private func attemptExtraction(on webView: WKWebView) async -> ArticleContent? {
             do {
-                let result = try await webView.evaluateJavaScript("serializeDOM()")
+                let result = try await webView.evaluateJavaScript(ArticleReaderWebView.serializerCall)
 
                 guard let jsonString = result as? String else {
                     Self.logger.debug("serializeDOM() returned nil or non-string result")
@@ -188,15 +191,10 @@ struct ArticleReaderWebView: UIViewRepresentable {
 
         /// Falls back to the RSS article description when all extraction strategies fail.
         private func applyFallback() {
-            let fallbackText = HTMLUtilities.stripHTML(fallbackHTML)
-            extractionState.content = ArticleContent(
-                title: "",
-                byline: nil,
-                htmlContent: fallbackHTML,
-                textContent: fallbackText
-            )
+            let content = ArticleContent.rssFallback(html: fallbackHTML)
+            extractionState.content = content
             Self.logger.notice(
-                "Applied RSS fallback (\(fallbackText.count, privacy: .public) chars)"
+                "Applied RSS fallback (\(content.textContent.count, privacy: .public) chars)"
             )
         }
     }

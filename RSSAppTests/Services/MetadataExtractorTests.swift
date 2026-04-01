@@ -10,7 +10,7 @@ struct MetadataExtractorTests {
     @Test func extractsTitleFromOGMeta() {
         let dom = makeDOM(
             meta: ["og:title": "OG Title"],
-            bodyChildren: [makeH1("DOM Title")]
+            bodyChildren: [DOMNodeFactory.makeH1("DOM Title")]
         )
         let metadata = MetadataExtractor.extract(from: dom)
         #expect(metadata.title == "OG Title")
@@ -19,7 +19,7 @@ struct MetadataExtractorTests {
     @Test func extractsTitleFromTwitterMeta() {
         let dom = makeDOM(
             meta: ["twitter:title": "Twitter Title"],
-            bodyChildren: [makeH1("DOM Title")]
+            bodyChildren: [DOMNodeFactory.makeH1("DOM Title")]
         )
         let metadata = MetadataExtractor.extract(from: dom)
         #expect(metadata.title == "Twitter Title")
@@ -28,7 +28,7 @@ struct MetadataExtractorTests {
     @Test func extractsTitleFromH1InArticle() {
         let article = DOMNode(
             t: "article", id: nil, cls: nil, role: nil, href: nil, src: nil, alt: nil, txt: nil, vis: nil,
-            c: [makeH1("Article Heading")]
+            c: [DOMNodeFactory.makeH1("Article Heading")]
         )
         let dom = makeDOM(meta: nil, bodyChildren: [article])
         let metadata = MetadataExtractor.extract(from: dom)
@@ -36,7 +36,7 @@ struct MetadataExtractorTests {
     }
 
     @Test func extractsTitleFromFirstH1WhenNoArticleTag() {
-        let dom = makeDOM(meta: nil, bodyChildren: [makeH1("Page Heading")])
+        let dom = makeDOM(meta: nil, bodyChildren: [DOMNodeFactory.makeH1("Page Heading")])
         let metadata = MetadataExtractor.extract(from: dom)
         #expect(metadata.title == "Page Heading")
     }
@@ -94,7 +94,7 @@ struct MetadataExtractorTests {
     @Test func extractsBylineFromDOMBylineClass() {
         let bylineDiv = DOMNode(
             t: "div", id: nil, cls: "byline", role: nil, href: nil, src: nil, alt: nil, txt: nil, vis: nil,
-            c: [makeTextNode("By Alice Johnson")]
+            c: [DOMNodeFactory.makeTextNode("By Alice Johnson")]
         )
         let dom = makeDOM(meta: nil, bodyChildren: [bylineDiv])
         let metadata = MetadataExtractor.extract(from: dom)
@@ -104,7 +104,7 @@ struct MetadataExtractorTests {
     @Test func extractsBylineFromDOMAuthorClass() {
         let authorSpan = DOMNode(
             t: "span", id: nil, cls: "author", role: nil, href: nil, src: nil, alt: nil, txt: nil, vis: nil,
-            c: [makeTextNode("Written by Bob Lee")]
+            c: [DOMNodeFactory.makeTextNode("Written by Bob Lee")]
         )
         let dom = makeDOM(meta: nil, bodyChildren: [authorSpan])
         let metadata = MetadataExtractor.extract(from: dom)
@@ -112,7 +112,7 @@ struct MetadataExtractorTests {
     }
 
     @Test func returnsNilBylineWhenNoneFound() {
-        let dom = makeDOM(meta: nil, bodyChildren: [makeParagraph("Just content.")])
+        let dom = makeDOM(meta: nil, bodyChildren: [DOMNodeFactory.makeParagraph("Just content.")])
         let metadata = MetadataExtractor.extract(from: dom)
         #expect(metadata.byline == nil)
     }
@@ -120,7 +120,7 @@ struct MetadataExtractorTests {
     @Test func prefersMetaBylineOverDOM() {
         let bylineDiv = DOMNode(
             t: "div", id: nil, cls: "byline", role: nil, href: nil, src: nil, alt: nil, txt: nil, vis: nil,
-            c: [makeTextNode("DOM Author")]
+            c: [DOMNodeFactory.makeTextNode("DOM Author")]
         )
         let dom = makeDOM(meta: ["article:author": "Meta Author"], bodyChildren: [bylineDiv])
         let metadata = MetadataExtractor.extract(from: dom)
@@ -142,21 +142,4 @@ struct MetadataExtractorTests {
         )
     }
 
-    private func makeH1(_ text: String) -> DOMNode {
-        DOMNode(
-            t: "h1", id: nil, cls: nil, role: nil, href: nil, src: nil, alt: nil, txt: nil, vis: nil,
-            c: [makeTextNode(text)]
-        )
-    }
-
-    private func makeParagraph(_ text: String) -> DOMNode {
-        DOMNode(
-            t: "p", id: nil, cls: nil, role: nil, href: nil, src: nil, alt: nil, txt: nil, vis: nil,
-            c: [makeTextNode(text)]
-        )
-    }
-
-    private func makeTextNode(_ text: String) -> DOMNode {
-        DOMNode(t: "#text", id: nil, cls: nil, role: nil, href: nil, src: nil, alt: nil, txt: text, vis: nil, c: nil)
-    }
 }
