@@ -22,7 +22,7 @@ struct KeychainService: KeychainServicing {
 
     let service: String
 
-    init(service: String = Logger.appSubsystem) {
+    init(service: String = "com.nicholas-lonsinger.rss-app") {
         self.service = service
     }
 
