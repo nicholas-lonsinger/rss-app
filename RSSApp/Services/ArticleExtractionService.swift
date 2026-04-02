@@ -163,7 +163,7 @@ private final class ExtractionCoordinator: NSObject, WKNavigationDelegate, @unch
             // coordinator and WKWebView to be released if the timeout fires while
             // evaluateJavaScript is still pending.
             guard let webView = self?.webView else { return }
-            let result: Any
+            let result: Any?
             do {
                 result = try await webView.evaluateJavaScript(DOMSerializerConstants.serializerCall)
             } catch {
