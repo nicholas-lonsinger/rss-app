@@ -66,6 +66,11 @@ final class MockFeedPersistenceService: FeedPersisting {
         feed.lastModifiedHeader = lastModified
     }
 
+    func updateFeedIcon(_ feed: PersistentFeed, iconURL: URL?) throws {
+        if let error = errorToThrow { throw error }
+        feed.iconURL = iconURL
+    }
+
     func feedExists(url: URL) throws -> Bool {
         if let error = errorToThrow { throw error }
         return feeds.contains { $0.feedURL == url }

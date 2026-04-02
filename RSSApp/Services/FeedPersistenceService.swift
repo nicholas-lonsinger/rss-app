@@ -16,6 +16,7 @@ protocol FeedPersisting: Sendable {
     func updateFeedError(_ feed: PersistentFeed, error: String?) throws
     func updateFeedURL(_ feed: PersistentFeed, newURL: URL) throws
     func updateFeedCacheHeaders(_ feed: PersistentFeed, etag: String?, lastModified: String?) throws
+    func updateFeedIcon(_ feed: PersistentFeed, iconURL: URL?) throws
     func feedExists(url: URL) throws -> Bool
 
     // MARK: Article operations
@@ -102,6 +103,11 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
         feed.etag = etag
         feed.lastModifiedHeader = lastModified
         Self.logger.debug("Updated cache headers for '\(feed.title, privacy: .public)'")
+    }
+
+    func updateFeedIcon(_ feed: PersistentFeed, iconURL: URL?) throws {
+        feed.iconURL = iconURL
+        Self.logger.debug("Updated icon for '\(feed.title, privacy: .public)'")
     }
 
     func feedExists(url: URL) throws -> Bool {

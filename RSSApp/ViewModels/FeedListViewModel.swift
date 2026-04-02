@@ -20,15 +20,18 @@ final class FeedListViewModel {
     private let persistence: FeedPersisting
     private let opmlService: OPMLServing
     private let feedFetching: FeedFetching
+    private let feedIconService: FeedIconResolving
 
     init(
         persistence: FeedPersisting,
         opmlService: OPMLServing = OPMLService(),
-        feedFetching: FeedFetching = FeedFetchingService()
+        feedFetching: FeedFetching = FeedFetchingService(),
+        feedIconService: FeedIconResolving = FeedIconService()
     ) {
         self.persistence = persistence
         self.opmlService = opmlService
         self.feedFetching = feedFetching
+        self.feedIconService = feedIconService
     }
 
     func loadFeeds() {
@@ -59,10 +62,12 @@ final class FeedListViewModel {
 
     func removeFeed(_ feed: PersistentFeed) {
         let previousFeeds = feeds
-        feeds.removeAll { $0.id == feed.id }
+        let feedID = feed.id
+        feeds.removeAll { $0.id == feedID }
         do {
             try persistence.deleteFeed(feed)
-            unreadCounts.removeValue(forKey: feed.id)
+            unreadCounts.removeValue(forKey: feedID)
+            feedIconService.deleteCachedIcon(for: feedID)
             Self.logger.notice("Removed feed '\(feed.title, privacy: .public)'")
         } catch {
             feeds = previousFeeds
@@ -77,8 +82,10 @@ final class FeedListViewModel {
         feeds.remove(atOffsets: offsets)
         do {
             for feed in removed {
+                let feedID = feed.id
                 try persistence.deleteFeed(feed)
-                unreadCounts.removeValue(forKey: feed.id)
+                unreadCounts.removeValue(forKey: feedID)
+                feedIconService.deleteCachedIcon(for: feedID)
                 Self.logger.notice("Removed feed '\(feed.title, privacy: .public)'")
             }
         } catch {
@@ -276,6 +283,20 @@ final class FeedListViewModel {
                     try persistence.updateFeedMetadata(feed, title: fetchResult.feed.title, description: fetchResult.feed.feedDescription)
                     try persistence.upsertArticles(fetchResult.feed.articles, for: feed)
                     try persistence.updateFeedCacheHeaders(feed, etag: fetchResult.etag, lastModified: fetchResult.lastModified)
+
+                    // Resolve and cache icon if not already cached
+                    if feedIconService.cachedIconFileURL(for: feed.id) == nil {
+                        let iconURL = await feedIconService.resolveIconURL(
+                            feedSiteURL: fetchResult.feed.link,
+                            feedImageURL: fetchResult.feed.imageURL
+                        )
+                        if let iconURL {
+                            let cached = await feedIconService.cacheIcon(from: iconURL, feedID: feed.id)
+                            if cached {
+                                try? persistence.updateFeedIcon(feed, iconURL: iconURL)
+                            }
+                        }
+                    }
                 } catch {
                     failureCount += 1
                     Self.logger.error("Failed to persist refresh for '\(feed.title, privacy: .public)': \(error, privacy: .public)")

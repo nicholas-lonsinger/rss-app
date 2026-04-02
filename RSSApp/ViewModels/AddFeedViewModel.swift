@@ -21,10 +21,16 @@ final class AddFeedViewModel {
 
     private let feedFetching: FeedFetching
     private let persistence: FeedPersisting
+    private let feedIconService: FeedIconResolving
 
-    init(feedFetching: FeedFetching = FeedFetchingService(), persistence: FeedPersisting) {
+    init(
+        feedFetching: FeedFetching = FeedFetchingService(),
+        persistence: FeedPersisting,
+        feedIconService: FeedIconResolving = FeedIconService()
+    ) {
         self.feedFetching = feedFetching
         self.persistence = persistence
+        self.feedIconService = feedIconService
     }
 
     func addFeed() async {
@@ -67,6 +73,24 @@ final class AddFeedViewModel {
             try persistence.addFeed(newFeed)
             didAddFeed = true
             Self.logger.notice("Added feed '\(rssFeed.title, privacy: .public)' from \(url, privacy: .public)")
+
+            // Fire-and-forget icon resolution
+            let iconService = self.feedIconService
+            let feedID = newFeed.id
+            let siteURL = rssFeed.link
+            let feedImageURL = rssFeed.imageURL
+            let persistenceRef = self.persistence
+            Task {
+                guard let iconURL = await iconService.resolveIconURL(
+                    feedSiteURL: siteURL,
+                    feedImageURL: feedImageURL
+                ) else { return }
+                let cached = await iconService.cacheIcon(from: iconURL, feedID: feedID)
+                if cached {
+                    try? persistenceRef.updateFeedIcon(newFeed, iconURL: iconURL)
+                    try? persistenceRef.save()
+                }
+            }
         } catch {
             errorMessage = "Could not load feed. Check the URL and try again."
             Self.logger.error("Feed validation failed for \(url, privacy: .public): \(error, privacy: .public)")

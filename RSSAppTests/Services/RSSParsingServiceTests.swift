@@ -622,6 +622,50 @@ struct RSSParsingServiceTests {
 
     // MARK: - Snippet Truncation
 
+    // MARK: - Channel Image / Logo
+
+    @Test("RSS channel <image><url> is extracted as imageURL")
+    func rssChannelImage() throws {
+        let data = Data(TestFixtures.rssWithImageXML.utf8)
+        let feed = try service.parse(data)
+
+        #expect(feed.imageURL?.absoluteString == "https://example.com/logo.png")
+    }
+
+    @Test("Atom <logo> is extracted as imageURL")
+    func atomLogo() throws {
+        let data = Data(TestFixtures.atomWithLogoXML.utf8)
+        let feed = try service.parse(data)
+
+        #expect(feed.imageURL?.absoluteString == "https://example.com/atom-logo.png")
+    }
+
+    @Test("Atom <icon> is extracted as imageURL when no logo")
+    func atomIconFallback() throws {
+        let data = Data(TestFixtures.atomWithIconXML.utf8)
+        let feed = try service.parse(data)
+
+        #expect(feed.imageURL?.absoluteString == "https://example.com/favicon.ico")
+    }
+
+    @Test("Atom <logo> takes priority over <icon>")
+    func atomLogoPriorityOverIcon() throws {
+        let data = Data(TestFixtures.atomWithLogoAndIconXML.utf8)
+        let feed = try service.parse(data)
+
+        #expect(feed.imageURL?.absoluteString == "https://example.com/atom-logo.png")
+    }
+
+    @Test("Feed without channel image has nil imageURL")
+    func noChannelImage() throws {
+        let data = Data(TestFixtures.sampleRSSXML.utf8)
+        let feed = try service.parse(data)
+
+        #expect(feed.imageURL == nil)
+    }
+
+    // MARK: - Snippet Truncation
+
     @Test("Truncates long snippets with ellipsis")
     func longSnippetTruncation() throws {
         let longText = String(repeating: "A", count: 300)

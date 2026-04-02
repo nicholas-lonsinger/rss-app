@@ -5,7 +5,9 @@ struct FeedRowView: View {
     let unreadCount: Int
 
     var body: some View {
-        HStack {
+        HStack(spacing: 10) {
+            FeedIconView(feedID: feed.id)
+
             VStack(alignment: .leading, spacing: 4) {
                 Text(feed.title)
                     .font(.headline)

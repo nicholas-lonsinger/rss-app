@@ -21,6 +21,10 @@ final class PersistentFeed {
     var etag: String?
     var lastModifiedHeader: String?
 
+    // MARK: - Icon
+
+    var iconURL: URL?
+
     // MARK: - Error state
 
     var lastFetchError: String?
@@ -40,6 +44,7 @@ final class PersistentFeed {
         lastRefreshDate: Date? = nil,
         etag: String? = nil,
         lastModifiedHeader: String? = nil,
+        iconURL: URL? = nil,
         lastFetchError: String? = nil,
         lastFetchErrorDate: Date? = nil
     ) {
@@ -51,6 +56,7 @@ final class PersistentFeed {
         self.lastRefreshDate = lastRefreshDate
         self.etag = etag
         self.lastModifiedHeader = lastModifiedHeader
+        self.iconURL = iconURL
         self.lastFetchError = lastFetchError
         self.lastFetchErrorDate = lastFetchErrorDate
         self.articles = []

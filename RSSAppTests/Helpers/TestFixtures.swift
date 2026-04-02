@@ -339,6 +339,84 @@ enum TestFixtures {
         </rss>
         """
 
+    // MARK: - Channel Logo XML
+
+    static let rssWithImageXML = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <rss version="2.0">
+        <channel>
+            <title>Logo Feed</title>
+            <link>https://example.com</link>
+            <description>Feed with channel image</description>
+            <image>
+                <url>https://example.com/logo.png</url>
+                <title>Logo Feed</title>
+                <link>https://example.com</link>
+            </image>
+            <item>
+                <title>An Item</title>
+                <link>https://example.com/item</link>
+                <description>Just an item</description>
+            </item>
+        </channel>
+        </rss>
+        """
+
+    static let atomWithLogoXML = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <feed xmlns="http://www.w3.org/2005/Atom">
+            <title>Atom Logo Feed</title>
+            <link rel="alternate" href="https://example.com" />
+            <id>https://example.com/feed</id>
+            <updated>2026-04-01T00:00:00Z</updated>
+            <logo>https://example.com/atom-logo.png</logo>
+            <entry>
+                <title>An Entry</title>
+                <link rel="alternate" href="https://example.com/entry" />
+                <id>entry-id</id>
+                <published>2026-04-01T10:00:00Z</published>
+                <summary>An entry</summary>
+            </entry>
+        </feed>
+        """
+
+    static let atomWithIconXML = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <feed xmlns="http://www.w3.org/2005/Atom">
+            <title>Atom Icon Feed</title>
+            <link rel="alternate" href="https://example.com" />
+            <id>https://example.com/feed</id>
+            <updated>2026-04-01T00:00:00Z</updated>
+            <icon>https://example.com/favicon.ico</icon>
+            <entry>
+                <title>An Entry</title>
+                <link rel="alternate" href="https://example.com/entry" />
+                <id>entry-id</id>
+                <published>2026-04-01T10:00:00Z</published>
+                <summary>An entry</summary>
+            </entry>
+        </feed>
+        """
+
+    static let atomWithLogoAndIconXML = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <feed xmlns="http://www.w3.org/2005/Atom">
+            <title>Atom Both Feed</title>
+            <link rel="alternate" href="https://example.com" />
+            <id>https://example.com/feed</id>
+            <updated>2026-04-01T00:00:00Z</updated>
+            <icon>https://example.com/favicon.ico</icon>
+            <logo>https://example.com/atom-logo.png</logo>
+            <entry>
+                <title>An Entry</title>
+                <link rel="alternate" href="https://example.com/entry" />
+                <id>entry-id</id>
+                <published>2026-04-01T10:00:00Z</published>
+                <summary>An entry</summary>
+            </entry>
+        </feed>
+        """
+
     // MARK: - Sample OPML XML
 
     static let sampleOPML = """
@@ -439,14 +517,16 @@ enum TestFixtures {
         link: URL? = URL(string: "https://example.com"),
         feedDescription: String = "A test feed",
         articles: [Article] = [],
-        lastUpdated: Date? = nil
+        lastUpdated: Date? = nil,
+        imageURL: URL? = nil
     ) -> RSSFeed {
         RSSFeed(
             title: title,
             link: link,
             feedDescription: feedDescription,
             articles: articles,
-            lastUpdated: lastUpdated
+            lastUpdated: lastUpdated,
+            imageURL: imageURL
         )
     }
 
@@ -472,6 +552,7 @@ enum TestFixtures {
         feedURL: URL = URL(string: "https://example.com/feed")!,
         feedDescription: String = "A test feed",
         addedDate: Date = Date(timeIntervalSince1970: 1_711_800_000),
+        iconURL: URL? = nil,
         lastFetchError: String? = nil,
         lastFetchErrorDate: Date? = nil
     ) -> PersistentFeed {
@@ -481,6 +562,7 @@ enum TestFixtures {
             feedURL: feedURL,
             feedDescription: feedDescription,
             addedDate: addedDate,
+            iconURL: iconURL,
             lastFetchError: lastFetchError,
             lastFetchErrorDate: lastFetchErrorDate
         )
