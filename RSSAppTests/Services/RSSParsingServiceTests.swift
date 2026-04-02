@@ -135,6 +135,30 @@ struct RSSParsingServiceTests {
         #expect(feed.articles[2].id == "https://example.com/article-3")
     }
 
+    @Test("RSS guid takes precedence over Atom id in hybrid entry")
+    func guidPrecedenceOverAtomId() throws {
+        let xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+            <channel>
+                <title>Hybrid Feed</title>
+                <link>https://example.com</link>
+                <description>A feed with both guid and id</description>
+                <item>
+                    <title>Hybrid Entry</title>
+                    <guid>urn:guid-value</guid>
+                    <id>urn:id-value</id>
+                    <link>https://example.com/hybrid</link>
+                </item>
+            </channel>
+            </rss>
+            """
+        let data = Data(xml.utf8)
+        let feed = try service.parse(data)
+
+        #expect(feed.articles[0].id == "urn:guid-value")
+    }
+
     // MARK: - Edge Cases
 
     @Test("Parses empty channel with no articles")
