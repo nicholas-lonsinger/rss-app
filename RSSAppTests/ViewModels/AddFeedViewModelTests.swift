@@ -150,6 +150,22 @@ struct AddFeedViewModelTests {
         #expect(viewModel.canSubmit == false)
     }
 
+    @Test("addFeed is a no-op when already validating")
+    @MainActor
+    func addFeedReentrancyGuard() async {
+        let mockFetching = MockFeedFetchingService()
+        mockFetching.feedToReturn = TestFixtures.makeFeed()
+        let mockPersistence = MockFeedPersistenceService()
+
+        let viewModel = AddFeedViewModel(feedFetching: mockFetching, persistence: mockPersistence)
+        viewModel.urlInput = "https://example.com/feed"
+        viewModel.isValidating = true
+        await viewModel.addFeed()
+
+        #expect(viewModel.didAddFeed == false)
+        #expect(mockPersistence.feeds.isEmpty)
+    }
+
     @Test("addFeed detects duplicate when input omits scheme")
     @MainActor
     func addFeedDuplicateWithSchemeNormalization() async {

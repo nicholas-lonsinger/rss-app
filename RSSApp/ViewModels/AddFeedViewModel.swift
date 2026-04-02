@@ -28,6 +28,7 @@ final class AddFeedViewModel {
     }
 
     func addFeed() async {
+        guard !isValidating else { return }
         Self.logger.debug("addFeed() called with input: '\(self.urlInput, privacy: .public)'")
         errorMessage = nil
 
