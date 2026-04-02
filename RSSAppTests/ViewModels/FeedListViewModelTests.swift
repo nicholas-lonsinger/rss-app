@@ -553,4 +553,68 @@ struct FeedListViewModelTests {
         #expect(viewModel.feeds[1].feedDescription == "Real Desc Two")
         #expect(viewModel.opmlImportResult?.addedCount == 2)
     }
+
+    // MARK: - Error State on Refresh
+
+    @Test("refreshAllFeeds sets error state on failed feeds")
+    @MainActor
+    func refreshAllFeedsSetsErrorState() async {
+        let url = URL(string: "https://fail.com/feed")!
+        let feed = TestFixtures.makeSubscribedFeed(title: "Broken", url: url)
+
+        let mockStorage = MockFeedStorageService()
+        mockStorage.feeds = [feed]
+        let mockFetching = MockFeedFetchingService()
+        mockFetching.errorsByURL = [url: FeedFetchingError.invalidResponse(statusCode: 404)]
+
+        let viewModel = FeedListViewModel(feedStorage: mockStorage, feedFetching: mockFetching)
+        viewModel.loadFeeds()
+        await viewModel.refreshAllFeeds()
+
+        #expect(viewModel.feeds[0].lastFetchError == "HTTP 404")
+        #expect(viewModel.feeds[0].lastFetchErrorDate != nil)
+    }
+
+    @Test("refreshAllFeeds clears error state on successful feeds")
+    @MainActor
+    func refreshAllFeedsClearsErrorState() async {
+        let url = URL(string: "https://recovered.com/feed")!
+        let feed = TestFixtures.makeSubscribedFeed(
+            title: "Was Broken",
+            url: url,
+            lastFetchError: "HTTP 404",
+            lastFetchErrorDate: Date()
+        )
+
+        let mockStorage = MockFeedStorageService()
+        mockStorage.feeds = [feed]
+        let mockFetching = MockFeedFetchingService()
+        mockFetching.feedsByURL = [url: TestFixtures.makeFeed(title: "Fixed")]
+
+        let viewModel = FeedListViewModel(feedStorage: mockStorage, feedFetching: mockFetching)
+        viewModel.loadFeeds()
+        await viewModel.refreshAllFeeds()
+
+        #expect(viewModel.feeds[0].lastFetchError == nil)
+        #expect(viewModel.feeds[0].lastFetchErrorDate == nil)
+        #expect(viewModel.feeds[0].title == "Fixed")
+    }
+
+    @Test("refreshAllFeeds persists error state to storage")
+    @MainActor
+    func refreshAllFeedsPersistsErrorState() async {
+        let url = URL(string: "https://fail.com/feed")!
+        let feed = TestFixtures.makeSubscribedFeed(title: "Broken", url: url)
+
+        let mockStorage = MockFeedStorageService()
+        mockStorage.feeds = [feed]
+        let mockFetching = MockFeedFetchingService()
+        mockFetching.errorsByURL = [url: FeedFetchingError.invalidResponse(statusCode: 500)]
+
+        let viewModel = FeedListViewModel(feedStorage: mockStorage, feedFetching: mockFetching)
+        viewModel.loadFeeds()
+        await viewModel.refreshAllFeeds()
+
+        #expect(mockStorage.feeds[0].lastFetchError == "HTTP 500")
+    }
 }

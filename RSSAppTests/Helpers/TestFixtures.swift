@@ -382,14 +382,18 @@ enum TestFixtures {
         title: String = "Test Feed",
         url: URL = URL(string: "https://example.com/feed")!,
         feedDescription: String = "A test feed",
-        addedDate: Date = Date(timeIntervalSince1970: 1_711_800_000)
+        addedDate: Date = Date(timeIntervalSince1970: 1_711_800_000),
+        lastFetchError: String? = nil,
+        lastFetchErrorDate: Date? = nil
     ) -> SubscribedFeed {
         SubscribedFeed(
             id: id,
             title: title,
             url: url,
             feedDescription: feedDescription,
-            addedDate: addedDate
+            addedDate: addedDate,
+            lastFetchError: lastFetchError,
+            lastFetchErrorDate: lastFetchErrorDate
         )
     }
 

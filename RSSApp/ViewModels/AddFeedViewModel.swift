@@ -31,17 +31,13 @@ final class AddFeedViewModel {
         Self.logger.debug("addFeed() called with input: '\(self.urlInput, privacy: .public)'")
         errorMessage = nil
 
-        var trimmed = urlInput.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmed.isEmpty && !trimmed.contains("://") {
-            trimmed = "https://" + trimmed
-        }
-
-        guard let url = URL(string: trimmed),
-              let scheme = url.scheme?.lowercased(),
-              ["http", "https"].contains(scheme),
-              url.host != nil else {
+        let url: URL
+        switch FeedURLValidator.validate(urlInput) {
+        case .success(let validURL):
+            url = validURL
+        case .failure:
             errorMessage = "Invalid URL. Please enter a valid feed address."
-            Self.logger.info("Invalid URL input: '\(trimmed, privacy: .public)'")
+            Self.logger.info("Invalid URL input: '\(self.urlInput, privacy: .public)'")
             return
         }
 

@@ -28,6 +28,7 @@ RSSApp/
 │   ├── DOMSerializerConstants.swift    # Shared JS bridge constants (message handler name, serializer call)
 │   ├── FeedFetchingService.swift       # FeedFetching protocol + URLSession implementation
 │   ├── FeedStorageService.swift        # FeedStoring protocol + UserDefaults persistence for subscribed feeds
+│   ├── FeedURLValidator.swift          # Shared URL normalization + validation (trim, scheme prepend, HTTP/HTTPS + host check)
 │   ├── HTMLUtilities.swift             # HTML/XML escaping (text + attributes), tag stripping, entity decoding, image extraction
 │   ├── KeychainService.swift           # Keychain wrapper for secure API key storage
 │   ├── MetadataExtractor.swift         # Extracts article title/byline from meta tags and DOM elements
@@ -36,6 +37,7 @@ RSSApp/
 │   └── SiteSpecificExtracting.swift    # Protocol for per-hostname content extractors
 ├── ViewModels/                         # View state management
 │   ├── AddFeedViewModel.swift          # @Observable @MainActor — URL validation + feed subscription
+│   ├── EditFeedViewModel.swift         # @Observable @MainActor — URL editing + validation + feed update
 │   ├── ArticleSummaryViewModel.swift   # @Observable @MainActor — extraction state machine
 │   ├── DiscussionViewModel.swift       # @Observable @MainActor — chat history + Claude streaming
 │   ├── FeedListViewModel.swift         # @Observable @MainActor — subscribed feed list management
@@ -43,6 +45,7 @@ RSSApp/
 ├── Views/                              # SwiftUI views
 │   ├── ActivityShareView.swift          # UIViewControllerRepresentable wrapping UIActivityViewController
 │   ├── AddFeedView.swift               # Sheet for adding a new feed — URL input + validation
+│   ├── EditFeedView.swift              # Sheet for editing a feed URL — pre-populated input + validation
 │   ├── APIKeySettingsView.swift        # Keychain API key entry/removal UI
 │   ├── ArticleDiscussionView.swift     # Chat sheet — message bubbles + streaming input
 │   ├── ArticleListView.swift           # Feed article list with loading/error/content states
@@ -94,13 +97,14 @@ RSSAppTests/
 │   └── RSSParsingServiceTests.swift    # Channel parsing, thumbnails, IDs, edge cases
 └── ViewModels/
     ├── AddFeedViewModelTests.swift         # URL validation, duplicate detection, success/failure
+    ├── EditFeedViewModelTests.swift        # URL editing, validation, duplicate detection, success/failure
     ├── ArticleReaderViewModelTests.swift   # ArticleSummaryViewModel pre-extraction state tests
     ├── DiscussionViewModelTests.swift      # Message flow, streaming, no-key behavior
     ├── FeedListViewModelTests.swift        # Load, remove by object, remove by IndexSet
     └── FeedViewModelTests.swift            # Load success/failure, state transitions
 ```
 
-**Total: 40 source files + 1 resource, 30 test source files + 1 fixture.**
+**Total: 43 source files + 1 resource, 32 test source files + 1 fixture.**
 
 ## Component Map
 
@@ -124,7 +128,7 @@ RSSAppTests/
 
 `RSSFeed` represents a parsed feed channel — title, link, description, an array of `Article` values, and an optional `lastUpdated` date (from Atom `<updated>` or RSS `<lastBuildDate>`). Also `Sendable`.
 
-`SubscribedFeed` represents a persistent feed subscription — id, title, URL, description, and added date. Conforms to `Identifiable`, `Hashable`, `Codable` (for UserDefaults persistence), and `Sendable`.
+`SubscribedFeed` represents a persistent feed subscription — id, title, URL, description, added date, and optional error tracking (`lastFetchError`, `lastFetchErrorDate`). Provides `updatingMetadata` (which clears error state on success), `updatingError`, and `updatingURL` methods. Error fields are backward-compatible with existing persisted data (optional Codable properties decode as nil when missing). Conforms to `Identifiable`, `Hashable`, `Codable` (for UserDefaults persistence), and `Sendable`.
 
 `OPMLFeedEntry` is an intermediate type for parsed OPML feed entries — title, feed URL, optional site URL, and description. Decoupled from `SubscribedFeed` because OPML data lacks `id` and `addedDate`.
 
@@ -132,7 +136,7 @@ RSSAppTests/
 
 ### Services
 
-**Files:** `ArticleExtractionService.swift`, `CandidateScorer.swift`, `ClaudeAPIService.swift`, `ContentAssembler.swift`, `ContentExtractor.swift`, `DOMSerializerConstants.swift`, `FeedFetchingService.swift`, `FeedStorageService.swift`, `HTMLUtilities.swift`, `KeychainService.swift`, `MetadataExtractor.swift`, `OPMLService.swift`, `RSSParsingService.swift`, `SiteSpecificExtracting.swift`
+**Files:** `ArticleExtractionService.swift`, `CandidateScorer.swift`, `ClaudeAPIService.swift`, `ContentAssembler.swift`, `ContentExtractor.swift`, `DOMSerializerConstants.swift`, `FeedFetchingService.swift`, `FeedStorageService.swift`, `FeedURLValidator.swift`, `HTMLUtilities.swift`, `KeychainService.swift`, `MetadataExtractor.swift`, `OPMLService.swift`, `RSSParsingService.swift`, `SiteSpecificExtracting.swift`
 
 `FeedFetching` is a protocol defining `fetchFeed(from:) async throws -> RSSFeed`. `FeedFetchingService` fetches data via `URLSession.shared` and delegates parsing to `RSSParsingService`.
 
@@ -154,19 +158,23 @@ RSSAppTests/
 
 `KeychainServicing` is a `Sendable` protocol. `KeychainService` wraps `Security` framework (`kSecClassGenericPassword`) to save, load, and delete the Anthropic API key. The key is stored encrypted by the OS and never touches any file accessible to git.
 
+`FeedURLValidator` is a shared utility enum that normalizes and validates raw URL input strings. It trims whitespace, prepends `https://` when no scheme is present, and validates the result has an HTTP or HTTPS scheme with a non-nil host. Used by both `AddFeedViewModel` and `EditFeedViewModel` to deduplicate URL validation logic.
+
 `FeedStoring` is a `Sendable` protocol. `FeedStorageService` persists the user's subscribed feed list in `UserDefaults` using `Codable` encoding. Accepts a `UserDefaults` instance in its initializer (defaults to `.standard`) for test isolation.
 
 `OPMLServing` is a `Sendable` protocol. `OPMLService` handles OPML import/export. Parsing uses `XMLParser` with a private `OPMLParserDelegate` (same `@unchecked Sendable` pattern as `RSSParserDelegate`) that captures all `<outline>` elements with `xmlUrl` attributes regardless of nesting depth, flattening folders. Generation builds OPML 2.0 XML with proper XML escaping. Accepts outlines regardless of `type` attribute for maximum compatibility with real-world OPML files.
 
 ### ViewModels
 
-**Files:** `AddFeedViewModel.swift`, `ArticleSummaryViewModel.swift`, `DiscussionViewModel.swift`, `FeedListViewModel.swift`, `FeedViewModel.swift`
+**Files:** `AddFeedViewModel.swift`, `ArticleSummaryViewModel.swift`, `DiscussionViewModel.swift`, `EditFeedViewModel.swift`, `FeedListViewModel.swift`, `FeedViewModel.swift`
 
 All view models are `@MainActor @Observable`.
 
-`FeedListViewModel` manages the subscribed feed list. Loads feeds from `FeedStoring`, supports removal by object or `IndexSet`, and OPML import/export via `OPMLServing`. `importOPML(from:)` parses OPML data, deduplicates against existing feeds and within the file, and merges new feeds. `importOPMLAndRefresh(from:)` extends import by fetching each feed's RSS XML to populate metadata (title, description) that OPML files typically omit. `exportOPML()` generates OPML data for sharing. `refreshAllFeeds()` re-fetches RSS metadata for all subscribed feeds concurrently (max 6 in-flight), updating stored titles and descriptions; partial failures leave unrefreshed feeds unchanged. Accepts `FeedStoring`, `OPMLServing`, and `FeedFetching` dependencies for testability.
+`FeedListViewModel` manages the subscribed feed list. Loads feeds from `FeedStoring`, supports removal by object or `IndexSet`, and OPML import/export via `OPMLServing`. `importOPML(from:)` parses OPML data, deduplicates against existing feeds and within the file, and merges new feeds. `importOPMLAndRefresh(from:)` extends import by fetching each feed's RSS XML to populate metadata (title, description) that OPML files typically omit. `exportOPML()` generates OPML data for sharing. `refreshAllFeeds()` re-fetches RSS metadata for all subscribed feeds concurrently (max 6 in-flight), updating stored titles and descriptions on success, and setting per-feed error state (`lastFetchError`, `lastFetchErrorDate`) on failure; successful refreshes clear any previous error state. Accepts `FeedStoring`, `OPMLServing`, and `FeedFetching` dependencies for testability.
 
 `AddFeedViewModel` handles the add-feed flow: URL input, validation (scheme/host check, duplicate detection), fetching the feed to extract its title, and persisting via `FeedStoring`. Accepts both `FeedFetching` and `FeedStoring` dependencies for testability.
+
+`EditFeedViewModel` handles the edit-feed flow: pre-populated URL input, validation (same scheme/host check as add, duplicate detection excluding self), fetching the new URL to validate it works, and updating the persisted feed via `FeedStoring`. Clears error state on successful URL change. Accepts `FeedFetching` and `FeedStoring` dependencies for testability.
 
 `FeedViewModel` holds the article list, feed title, loading state, and error state. Requires a `feedURL` parameter. Accepts a `FeedFetching` dependency for testability.
 
@@ -184,9 +192,11 @@ All view models are `@MainActor @Observable`.
 
 `ActivityShareView` is a `UIViewControllerRepresentable` wrapping `UIActivityViewController` for sharing exported OPML files.
 
-`FeedRowView` displays a feed's title (`.headline`) and description (`.subheadline`, `.secondary`).
+`FeedRowView` displays a feed's title (`.headline`), description (`.subheadline`, `.secondary`), and an error indicator (red warning icon + error text) when `lastFetchError` is non-nil.
 
 `AddFeedView` is a sheet with a `Form` for entering a feed URL. Shows validation progress and error states. Auto-dismisses on successful addition.
+
+`EditFeedView` is a sheet with a `Form` for editing a feed's URL. Pre-populates the URL field, validates the new URL, fetches the feed to confirm it works, and auto-dismisses on success. Triggered via a leading swipe action on feed rows in `FeedListView`.
 
 `ArticleListView` shows loading / error / list states. Uses `viewModel.feedTitle` as the navigation title. Tapping a row sets `selectedArticle`, triggering a `.fullScreenCover` with `ArticleReaderView`.
 
@@ -301,7 +311,7 @@ RSSAppApp (@main)
 |-----------|-----------|----------|
 | ContentView | RSSAppTests.swift | Verifies view instantiation |
 | Article | ArticleTests.swift | Creation, nil optionals, Identifiable, Hashable, equality |
-| SubscribedFeed | SubscribedFeedTests.swift | updatingMetadata preserves identity fields, does not mutate original |
+| SubscribedFeed | SubscribedFeedTests.swift | updatingMetadata preserves identity and clears error, does not mutate original, updatingError sets fields, updatingURL changes URL and clears error, Codable roundtrip with error fields, backward compatibility (missing error fields decode as nil) |
 | DOMNode | DOMNodeTests.swift | Text/element accessors, tag name queries, tree traversal, visibility |
 | HTMLUtilities | HTMLUtilitiesTests.swift | Tag stripping, entity decoding (amp, lt, gt, quot, apos, nbsp), whitespace collapse, HTML text escaping (amp, angle brackets, no-op), attribute escaping (amp, quot, lt, gt, no-op, multiple), image extraction (double/single quotes, multiple images, no images) |
 | RSSParsingService | RSSParsingServiceTests.swift | Channel info, article count, basic fields, pubDate, snippets, raw description, thumbnail sources (media:thumbnail, media:content, enclosure, img fallback), thumbnail priority, ID derivation (guid, link), empty channel, malformed XML, empty data, missing fields, empty title, long snippet truncation, Atom XHTML content reconstruction (content, summary, content-overrides-summary, snippet generation, thumbnail extraction), Atom/RSS author extraction, Atom category term attributes, RSS category text, Atom enclosure links, RSS lastBuildDate, Atom feed-level updated date, default author/categories |
@@ -317,6 +327,8 @@ RSSAppApp (@main)
 | DiscussionViewModel | DiscussionViewModelTests.swift | hasAPIKey reflects keychain, send appends messages, chunks accumulate, input cleared, API error → error content, empty input ignored, no-key sets errorMessage |
 | FeedViewModel | FeedViewModelTests.swift | Load success/failure, error clearing on retry, article replacement on refresh, isLoading state |
 | FeedStorageService | FeedStorageServiceTests.swift | Save/load roundtrip, add, remove, empty state, overwrite |
+| FeedURLValidator | FeedURLValidatorTests.swift | Valid HTTP/HTTPS, scheme prepend, empty/whitespace, non-HTTP schemes (ftp, feed), query parameters, whitespace trimming, scheme-only no host |
 | OPMLService | OPMLServiceTests.swift | Parse flat/nested/empty OPML, folder flattening, missing attributes, title fallbacks, malformed XML, no body, round-trip generation, XML escaping, structure validation |
-| FeedListViewModel | FeedListViewModelTests.swift | Load from storage, remove by object, remove by IndexSet, empty state, OPML import (add new, skip duplicates, skip intra-file duplicates, result counts, save to storage, rollback on failure, parse error), OPML export (sets data, error on failure), refresh (update metadata, partial failure, save to storage, empty no-op, isRefreshing state), import+refresh integration |
+| FeedListViewModel | FeedListViewModelTests.swift | Load from storage, remove by object, remove by IndexSet, empty state, OPML import (add new, skip duplicates, skip intra-file duplicates, result counts, save to storage, rollback on failure, parse error), OPML export (sets data, error on failure), refresh (update metadata, partial failure, save to storage, empty no-op, isRefreshing state, error state on failure, error cleared on success, error persisted to storage), import+refresh integration |
 | AddFeedViewModel | AddFeedViewModelTests.swift | Success, scheme prepend, invalid URL, duplicate detection, network error, error clearing |
+| EditFeedViewModel | EditFeedViewModelTests.swift | Success with changed URL, unchanged URL dismisses, invalid URL, duplicate detection, network error, scheme prepend, URL pre-population |
