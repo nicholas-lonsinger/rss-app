@@ -48,12 +48,21 @@ final class FeedViewModel {
         defer { isLoading = false }
 
         do {
-            let rssFeed = try await feedFetching.fetchFeed(from: feed.feedURL)
-            feedTitle = rssFeed.title
-            try persistence.upsertArticles(rssFeed.articles, for: feed)
-            try persistence.save()
-            articles = try persistence.articles(for: feed)
-            Self.logger.notice("Feed loaded: \(self.articles.count, privacy: .public) articles")
+            let result = try await feedFetching.fetchFeed(
+                from: feed.feedURL,
+                etag: feed.etag,
+                lastModified: feed.lastModifiedHeader
+            )
+            if let result {
+                feedTitle = result.feed.title
+                try persistence.upsertArticles(result.feed.articles, for: feed)
+                try persistence.updateFeedCacheHeaders(feed, etag: result.etag, lastModified: result.lastModified)
+                try persistence.save()
+                articles = try persistence.articles(for: feed)
+                Self.logger.notice("Feed loaded: \(self.articles.count, privacy: .public) articles")
+            } else {
+                Self.logger.debug("Feed unchanged (304) for '\(self.feed.title, privacy: .public)'")
+            }
         } catch {
             if articles.isEmpty {
                 errorMessage = error.localizedDescription
