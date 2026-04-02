@@ -40,25 +40,35 @@ struct FeedIconService: FeedIconResolving {
     func resolveIconURL(feedSiteURL: URL?, feedImageURL: URL?) async -> URL? {
         Self.logger.debug("resolveIconURL() feedImageURL=\(feedImageURL?.absoluteString ?? "nil", privacy: .public) siteURL=\(feedSiteURL?.absoluteString ?? "nil", privacy: .public)")
 
+        // Build candidate URLs in priority order, then return the first one that works
+        var candidates: [URL] = []
+
         // Priority 1: Image URL from feed XML
         if let feedImageURL, feedImageURL.scheme == "http" || feedImageURL.scheme == "https" {
-            Self.logger.debug("Using feed XML image URL")
-            return feedImageURL
+            candidates.append(feedImageURL)
         }
 
         // Priority 2: Parse site homepage HTML for icon links
-        if let siteURL = feedSiteURL, let htmlIconURL = await resolveFromHTML(siteURL: siteURL) {
-            Self.logger.debug("Resolved icon from site HTML: \(htmlIconURL.absoluteString, privacy: .public)")
-            return htmlIconURL
+        if let siteURL = feedSiteURL {
+            let htmlIcons = await resolveFromHTML(siteURL: siteURL)
+            candidates.append(contentsOf: htmlIcons)
         }
 
         // Priority 3: Fallback to /favicon.ico
         if let siteURL = feedSiteURL,
            let host = siteURL.host(percentEncoded: false),
-           !host.isEmpty {
-            let faviconURL = URL(string: "\(siteURL.scheme ?? "https")://\(host)/favicon.ico")
-            Self.logger.debug("Falling back to favicon.ico: \(faviconURL?.absoluteString ?? "nil", privacy: .public)")
-            return faviconURL
+           !host.isEmpty,
+           let faviconURL = URL(string: "\(siteURL.scheme ?? "https")://\(host)/favicon.ico") {
+            candidates.append(faviconURL)
+        }
+
+        // Try each candidate — return the first one that responds with a valid image
+        for candidate in candidates {
+            if await isDownloadable(candidate) {
+                Self.logger.debug("Resolved icon: \(candidate.absoluteString, privacy: .public)")
+                return candidate
+            }
+            Self.logger.debug("Candidate failed: \(candidate.absoluteString, privacy: .public)")
         }
 
         Self.logger.debug("No icon URL could be resolved")
@@ -115,25 +125,37 @@ struct FeedIconService: FeedIconResolving {
 
     // MARK: - Private
 
-    private func resolveFromHTML(siteURL: URL) async -> URL? {
+    private func resolveFromHTML(siteURL: URL) async -> [URL] {
         do {
             let request = URLRequest(url: siteURL, timeoutInterval: Self.htmlFetchTimeout)
             let (data, response) = try await URLSession.shared.data(for: request)
 
             guard let httpResponse = response as? HTTPURLResponse,
                   (200...299).contains(httpResponse.statusCode) else {
-                return nil
+                return []
             }
 
             // Use the final URL (after redirects) as the base for resolving relative hrefs
             let baseURL = httpResponse.url ?? siteURL
 
-            guard let html = String(data: data, encoding: .utf8) else { return nil }
-            let icons = HTMLUtilities.extractIconURLs(from: html, baseURL: baseURL)
-            return icons.first
+            guard let html = String(data: data, encoding: .utf8) else { return [] }
+            return HTMLUtilities.extractIconURLs(from: html, baseURL: baseURL)
         } catch {
             Self.logger.debug("Failed to fetch site HTML: \(error, privacy: .public)")
-            return nil
+            return []
+        }
+    }
+
+    /// Quick HEAD request to verify a URL returns a 2xx response with image content.
+    private func isDownloadable(_ url: URL) async -> Bool {
+        do {
+            var request = URLRequest(url: url, timeoutInterval: Self.iconFetchTimeout)
+            request.httpMethod = "HEAD"
+            let (_, response) = try await URLSession.shared.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse else { return false }
+            return (200...299).contains(httpResponse.statusCode)
+        } catch {
+            return false
         }
     }
 

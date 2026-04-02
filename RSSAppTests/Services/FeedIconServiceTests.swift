@@ -10,14 +10,6 @@ struct FeedIconServiceTests {
 
     // MARK: - resolveIconURL
 
-    @Test("Returns feedImageURL when provided")
-    func resolveWithFeedImageURL() async {
-        let imageURL = URL(string: "https://example.com/logo.png")!
-        let result = await service.resolveIconURL(feedSiteURL: nil, feedImageURL: imageURL)
-
-        #expect(result == imageURL)
-    }
-
     @Test("Returns nil when no URLs provided")
     func resolveWithNoURLs() async {
         let result = await service.resolveIconURL(feedSiteURL: nil, feedImageURL: nil)

@@ -272,6 +272,7 @@ final class FeedListViewModel {
             case .success(let fetchResult):
                 guard let fetchResult else {
                     // 304 Not Modified — feed is unchanged, just clear error state
+                    Self.logger.notice("[ICON] '\(feed.title, privacy: .public)' got 304")
                     do {
                         try persistence.updateFeedError(feed, error: nil)
                     } catch {
@@ -279,17 +280,24 @@ final class FeedListViewModel {
                     }
                     // Still resolve icon if not cached (e.g., add-time resolution failed)
                     if feedIconService.cachedIconFileURL(for: feed.id) == nil {
+                        Self.logger.notice("[ICON] '\(feed.title, privacy: .public)' 304 branch: no cached icon, resolving...")
                         let siteURL = Self.siteURL(from: feed.feedURL)
                         let iconURL = await feedIconService.resolveIconURL(
                             feedSiteURL: siteURL,
                             feedImageURL: feed.iconURL
                         )
                         if let iconURL {
+                            Self.logger.notice("[ICON] '\(feed.title, privacy: .public)' resolved to \(iconURL.absoluteString, privacy: .public), caching...")
                             let cached = await feedIconService.cacheIcon(from: iconURL, feedID: feed.id)
+                            Self.logger.notice("[ICON] '\(feed.title, privacy: .public)' cache result: \(cached, privacy: .public)")
                             if cached {
                                 try? persistence.updateFeedIcon(feed, iconURL: iconURL)
                             }
+                        } else {
+                            Self.logger.notice("[ICON] '\(feed.title, privacy: .public)' 304 branch: resolveIconURL returned nil")
                         }
+                    } else {
+                        Self.logger.notice("[ICON] '\(feed.title, privacy: .public)' 304 branch: already cached")
                     }
                     continue
                 }
@@ -300,16 +308,23 @@ final class FeedListViewModel {
 
                     // Resolve and cache icon if not already cached
                     if feedIconService.cachedIconFileURL(for: feed.id) == nil {
+                        Self.logger.notice("[ICON] '\(feed.title, privacy: .public)' 200 branch: no cached icon, resolving (siteURL=\(fetchResult.feed.link?.absoluteString ?? "nil", privacy: .public), imageURL=\(fetchResult.feed.imageURL?.absoluteString ?? "nil", privacy: .public))...")
                         let iconURL = await feedIconService.resolveIconURL(
                             feedSiteURL: fetchResult.feed.link,
                             feedImageURL: fetchResult.feed.imageURL
                         )
                         if let iconURL {
+                            Self.logger.notice("[ICON] '\(feed.title, privacy: .public)' resolved to \(iconURL.absoluteString, privacy: .public), caching...")
                             let cached = await feedIconService.cacheIcon(from: iconURL, feedID: feed.id)
+                            Self.logger.notice("[ICON] '\(feed.title, privacy: .public)' cache result: \(cached, privacy: .public)")
                             if cached {
                                 try? persistence.updateFeedIcon(feed, iconURL: iconURL)
                             }
+                        } else {
+                            Self.logger.notice("[ICON] '\(feed.title, privacy: .public)' resolveIconURL returned nil")
                         }
+                    } else {
+                        Self.logger.notice("[ICON] '\(feed.title, privacy: .public)' 200 branch: already cached")
                     }
                 } catch {
                     failureCount += 1

@@ -95,15 +95,22 @@ enum HTMLUtilities {
     }
 
     private static func resolveURL(_ href: String, base: URL) -> URL? {
+        // Decode HTML entities (e.g., &amp; → &) that appear in attribute values
+        let decoded = href
+            .replacingOccurrences(of: "&amp;", with: "&")
+            .replacingOccurrences(of: "&lt;", with: "<")
+            .replacingOccurrences(of: "&gt;", with: ">")
+            .replacingOccurrences(of: "&quot;", with: "\"")
+
         // Protocol-relative URLs (//cdn.example.com/icon.png)
-        if href.hasPrefix("//") {
-            return URL(string: "\(base.scheme ?? "https"):\(href)")
+        if decoded.hasPrefix("//") {
+            return URL(string: "\(base.scheme ?? "https"):\(decoded)")
         }
         // Absolute URLs
-        if href.hasPrefix("http://") || href.hasPrefix("https://") {
-            return URL(string: href)
+        if decoded.hasPrefix("http://") || decoded.hasPrefix("https://") {
+            return URL(string: decoded)
         }
         // Relative URLs
-        return URL(string: href, relativeTo: base)?.absoluteURL
+        return URL(string: decoded, relativeTo: base)?.absoluteURL
     }
 }
