@@ -187,6 +187,30 @@ struct FeedListViewModelTests {
         #expect(viewModel.unreadCount(for: feed) == 0)
     }
 
+    @Test("refreshUnreadCount updates only the specified feed")
+    @MainActor
+    func refreshUnreadCountForSingleFeed() {
+        let feed1 = TestFixtures.makePersistentFeed(title: "Feed A")
+        let feed2 = TestFixtures.makePersistentFeed(title: "Feed B")
+        let article = TestFixtures.makePersistentArticle(articleID: "1", isRead: false)
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed1, feed2]
+        mockPersistence.articlesByFeedID = [
+            feed1.id: [article],
+            feed2.id: [TestFixtures.makePersistentArticle(articleID: "2", isRead: false)],
+        ]
+
+        let viewModel = FeedListViewModel(persistence: mockPersistence)
+        viewModel.loadFeeds()
+        #expect(viewModel.unreadCount(for: feed1) == 1)
+        #expect(viewModel.unreadCount(for: feed2) == 1)
+
+        article.isRead = true
+        viewModel.refreshUnreadCount(for: feed1)
+        #expect(viewModel.unreadCount(for: feed1) == 0)
+        #expect(viewModel.unreadCount(for: feed2) == 1)
+    }
+
     @Test("removeFeed cleans up unread counts dictionary")
     @MainActor
     func removeFeedCleansUpUnreadCounts() {

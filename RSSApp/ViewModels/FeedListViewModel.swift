@@ -88,6 +88,15 @@ final class FeedListViewModel {
         }
     }
 
+    func refreshUnreadCount(for feed: PersistentFeed) {
+        do {
+            unreadCounts[feed.id] = try persistence.unreadCount(for: feed)
+        } catch {
+            Self.logger.error("Failed to fetch unread count for '\(feed.title, privacy: .public)': \(error, privacy: .public)")
+            unreadCounts[feed.id] = 0
+        }
+    }
+
     func unreadCount(for feed: PersistentFeed) -> Int {
         unreadCounts[feed.id] ?? 0
     }

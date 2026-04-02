@@ -10,6 +10,7 @@ struct FeedListView: View {
     @State private var showExportShare = false
     @State private var showImportResult = false
     @State private var feedToEdit: PersistentFeed?
+    @State private var lastViewedFeedID: PersistentFeed.ID?
 
     private let persistence: FeedPersisting
 
@@ -37,6 +38,7 @@ struct FeedListView: View {
                             viewModel: FeedViewModel(feed: feed, persistence: persistence),
                             persistence: persistence
                         )
+                        .onAppear { lastViewedFeedID = feedID }
                     } else {
                         ContentUnavailableView {
                             Label("Feed Not Found", systemImage: "exclamationmark.triangle")
@@ -96,8 +98,10 @@ struct FeedListView: View {
                     viewModel.loadFeeds()
                 }
                 .onChange(of: navigationPath.count) { oldCount, newCount in
-                    if newCount < oldCount {
-                        viewModel.refreshUnreadCounts()
+                    if newCount < oldCount,
+                       let feedID = lastViewedFeedID,
+                       let feed = viewModel.feeds.first(where: { $0.id == feedID }) {
+                        viewModel.refreshUnreadCount(for: feed)
                     }
                 }
         }
