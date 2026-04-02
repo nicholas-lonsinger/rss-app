@@ -35,12 +35,20 @@ struct RSSParsingService: Sendable {
             throw RSSParsingError.noChannelFound
         }
 
+        let imageURL: URL?
+        if let urlString = delegate.channelImageURL {
+            imageURL = URL(string: urlString.trimmingCharacters(in: .whitespacesAndNewlines))
+        } else {
+            imageURL = nil
+        }
+
         let feed = RSSFeed(
             title: delegate.channelTitle.trimmingCharacters(in: .whitespacesAndNewlines),
             link: URL(string: delegate.channelLink.trimmingCharacters(in: .whitespacesAndNewlines)),
             feedDescription: delegate.channelDescription.trimmingCharacters(in: .whitespacesAndNewlines),
             articles: delegate.articles,
-            lastUpdated: delegate.channelUpdated
+            lastUpdated: delegate.channelUpdated,
+            imageURL: imageURL
         )
 
         Self.logger.notice("Feed parsed: '\(feed.title, privacy: .public)' with \(feed.articles.count, privacy: .public) articles")
@@ -64,9 +72,11 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
     var channelLink = ""
     var channelDescription = ""
     var channelUpdated: Date?
+    var channelImageURL: String?
     var articles: [Article] = []
 
     private var isInsideItem = false
+    private var isInsideChannelImage = false
     private var currentElement = ""
     private var textBuffer = ""
 
@@ -153,6 +163,11 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
         switch name {
         case "channel", "feed":
             foundChannel = true
+
+        case "image":
+            if !isInsideItem {
+                isInsideChannelImage = true
+            }
 
         case "item", "entry":
             isInsideItem = true
@@ -400,6 +415,24 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
             case "updated", "lastBuildDate":
                 if channelUpdated == nil {
                     channelUpdated = Self.parseDate(textBuffer)
+                }
+            case "url":
+                // RSS <image><url>text</url></image>
+                if isInsideChannelImage {
+                    let trimmed = textBuffer.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !trimmed.isEmpty { channelImageURL = trimmed }
+                }
+            case "image":
+                isInsideChannelImage = false
+            case "logo":
+                // Atom <logo> — highest priority feed image for Atom feeds
+                let trimmed = textBuffer.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty { channelImageURL = trimmed }
+            case "icon":
+                // Atom <icon> — fallback when no <logo> is present
+                if channelImageURL == nil {
+                    let trimmed = textBuffer.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !trimmed.isEmpty { channelImageURL = trimmed }
                 }
             default:
                 break

@@ -53,4 +53,64 @@ enum HTMLUtilities {
         }
         return URL(string: String(match.1))
     }
+
+    /// Extracts icon URLs from HTML `<link>` tags, ordered by priority:
+    /// apple-touch-icon → shortcut icon / icon.
+    /// Relative hrefs are resolved against the provided base URL.
+    static func extractIconURLs(from html: String, baseURL: URL) -> [URL] {
+        var appleTouchIcons: [URL] = []
+        var linkIcons: [URL] = []
+
+        // Match <link rel="..." href="..."> — case-insensitive, tolerates attribute order
+        let linkPattern = ##/<link\s[^>]*?rel=["']([^"']+)["'][^>]*?href=["']([^"']+)["'][^>]*?\/?>/##
+            .ignoresCase()
+        let linkPatternReversed = ##/<link\s[^>]*?href=["']([^"']+)["'][^>]*?rel=["']([^"']+)["'][^>]*?\/?>/##
+            .ignoresCase()
+
+        for match in html.matches(of: linkPattern) {
+            let rel = String(match.1).lowercased()
+            let href = String(match.2)
+            if let url = resolveURL(href, base: baseURL) {
+                if rel.contains("apple-touch-icon") {
+                    appleTouchIcons.append(url)
+                } else if rel.contains("icon") {
+                    linkIcons.append(url)
+                }
+            }
+        }
+
+        for match in html.matches(of: linkPatternReversed) {
+            let href = String(match.1)
+            let rel = String(match.2).lowercased()
+            if let url = resolveURL(href, base: baseURL) {
+                if rel.contains("apple-touch-icon") {
+                    appleTouchIcons.append(url)
+                } else if rel.contains("icon") {
+                    linkIcons.append(url)
+                }
+            }
+        }
+
+        return appleTouchIcons + linkIcons
+    }
+
+    private static func resolveURL(_ href: String, base: URL) -> URL? {
+        // Decode HTML entities (e.g., &amp; → &) that appear in attribute values
+        let decoded = href
+            .replacingOccurrences(of: "&amp;", with: "&")
+            .replacingOccurrences(of: "&lt;", with: "<")
+            .replacingOccurrences(of: "&gt;", with: ">")
+            .replacingOccurrences(of: "&quot;", with: "\"")
+
+        // Protocol-relative URLs (//cdn.example.com/icon.png)
+        if decoded.hasPrefix("//") {
+            return URL(string: "\(base.scheme ?? "https"):\(decoded)")
+        }
+        // Absolute URLs
+        if decoded.hasPrefix("http://") || decoded.hasPrefix("https://") {
+            return URL(string: decoded)
+        }
+        // Relative URLs
+        return URL(string: decoded, relativeTo: base)?.absoluteURL
+    }
 }

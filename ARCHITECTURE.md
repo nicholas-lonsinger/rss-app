@@ -20,8 +20,8 @@ RSSApp/
 │   ├── OPMLImportResult.swift           # OPML import outcome counts (added, skipped, total)
 │   ├── PersistentArticle.swift         # @Model — persisted article with read/unread status, relationship to feed and content
 │   ├── PersistentArticleContent.swift  # @Model — cached extracted HTML/text content, relationship to article
-│   ├── PersistentFeed.swift            # @Model — persisted feed subscription with caching headers, cascade to articles
-│   ├── RSSFeed.swift                   # Feed container with channel info and articles (transient parser output)
+│   ├── PersistentFeed.swift            # @Model — persisted feed subscription with caching headers, icon URL, cascade to articles
+│   ├── RSSFeed.swift                   # Feed container with channel info, imageURL, and articles (transient parser output)
 │   └── SubscribedFeed.swift            # Legacy feed subscription struct (Codable) — retained for UserDefaults migration and OPML export
 ├── Services/                           # Business logic and networking
 │   ├── ArticleExtractionService.swift  # WKWebView + domSerializer.js + native content extraction
@@ -31,22 +31,23 @@ RSSApp/
 │   ├── ContentExtractor.swift          # ContentExtracting protocol + extraction pipeline orchestrator
 │   ├── DOMSerializerConstants.swift    # Shared JS bridge constants (message handler name, serializer call)
 │   ├── FeedFetchingService.swift       # FeedFetching protocol + URLSession implementation
+│   ├── FeedIconService.swift           # FeedIconResolving protocol + icon URL resolution (feed XML → site HTML → /favicon.ico) and file-system caching
 │   ├── FeedPersistenceService.swift    # FeedPersisting protocol + SwiftData implementation (feeds, articles, content cache, read/unread)
 │   ├── FeedStorageService.swift        # FeedStoring protocol + UserDefaults persistence — retained for migration only
 │   ├── FeedURLValidator.swift          # Shared URL normalization + validation (trim, scheme prepend, HTTP/HTTPS + host check)
 │   ├── UserDefaultsMigrationService.swift # One-time migration from UserDefaults SubscribedFeed list to SwiftData PersistentFeed
-│   ├── HTMLUtilities.swift             # HTML/XML escaping (text + attributes), tag stripping, entity decoding, image extraction
+│   ├── HTMLUtilities.swift             # HTML/XML escaping (text + attributes), tag stripping, entity decoding, image extraction, icon URL extraction
 │   ├── KeychainService.swift           # Keychain wrapper for secure API key storage
 │   ├── MetadataExtractor.swift         # Extracts article title/byline from meta tags and DOM elements
 │   ├── OPMLService.swift               # OPMLServing protocol + XMLParser-based OPML parser + XML generator
 │   ├── RSSParsingService.swift         # XMLParser-based RSS 2.0 + Atom parser with XHTML content reconstruction
 │   └── SiteSpecificExtracting.swift    # Protocol for per-hostname content extractors
 ├── ViewModels/                         # View state management
-│   ├── AddFeedViewModel.swift          # @Observable @MainActor — URL validation + feed subscription via FeedPersisting
+│   ├── AddFeedViewModel.swift          # @Observable @MainActor — URL validation + feed subscription via FeedPersisting + icon resolution
 │   ├── EditFeedViewModel.swift         # @Observable @MainActor — URL editing + validation + feed update via FeedPersisting
 │   ├── ArticleSummaryViewModel.swift   # @Observable @MainActor — extraction state machine
 │   ├── DiscussionViewModel.swift       # @Observable @MainActor — chat history + Claude streaming
-│   ├── FeedListViewModel.swift         # @Observable @MainActor — feed list management, refresh, OPML, unread counts via FeedPersisting
+│   ├── FeedListViewModel.swift         # @Observable @MainActor — feed list management, refresh, OPML, unread counts, icon resolution via FeedPersisting
 │   └── FeedViewModel.swift             # @Observable @MainActor — cached + network article loading, read/unread via FeedPersisting
 ├── Views/                              # SwiftUI views
 │   ├── ActivityShareView.swift          # UIViewControllerRepresentable wrapping UIActivityViewController
@@ -60,8 +61,9 @@ RSSApp/
 │   ├── ArticleRowView.swift            # Single article row — thumbnail, title, snippet, date, read/unread styling
 │   ├── ArticleSummaryView.swift        # Extracted article summary sheet — extracted content + discuss
 │   ├── ContentView.swift               # Root view — creates SwiftDataFeedPersistenceService from modelContext, hosts FeedListView
+│   ├── FeedIconView.swift              # Feed icon display — loads cached PNG from disk, fallback globe placeholder
 │   ├── FeedListView.swift              # Subscribed feed list — NavigationStack root with add/remove, unread badges
-│   └── FeedRowView.swift               # Single feed row — title, description, unread count badge
+│   └── FeedRowView.swift               # Single feed row — icon, title, description, unread count badge
 └── Resources/
     ├── domSerializer.js                # Bundled DOM serializer — walks DOM tree, emits JSON for Swift extraction
     └── Assets.xcassets/                # App icons and image assets
@@ -82,6 +84,7 @@ RSSAppTests/
 │   ├── MockClaudeAPIService.swift          # ClaudeAPIServicing mock with injectable chunks/errors
 │   ├── MockContentExtractor.swift          # ContentExtracting mock with injectable results
 │   ├── MockFeedFetchingService.swift       # FeedFetching mock with injectable results/errors
+│   ├── MockFeedIconService.swift          # FeedIconResolving mock with injectable URL/cache results
 │   ├── MockFeedPersistenceService.swift    # FeedPersisting mock with in-memory store
 │   ├── MockFeedStorageService.swift        # FeedStoring mock with in-memory store (for migration tests)
 │   ├── MockKeychainService.swift           # KeychainServicing mock with in-memory store
@@ -97,6 +100,7 @@ RSSAppTests/
 │   ├── ContentExtractorTests.swift     # End-to-end extraction pipeline, site-specific fallback
 │   ├── DOMSerializerTests.swift        # WKWebView integration — JS serialization fidelity
 │   ├── ExtractionPipelineTests.swift   # Full pipeline: HTML → WKWebView serialize → Swift extract
+│   ├── FeedIconServiceTests.swift      # Icon resolution, caching, HTMLUtilities icon extraction
 │   ├── FeedPersistenceServiceTests.swift # SwiftData CRUD, upsert, read/unread, content cache, cascade delete
 │   ├── FeedStorageServiceTests.swift   # Save/load roundtrip, add/remove, empty state (legacy UserDefaults)
 │   ├── HTMLUtilitiesTests.swift        # Tag stripping, entity decoding, image extraction
@@ -114,7 +118,7 @@ RSSAppTests/
     └── FeedViewModelTests.swift            # Load success/failure, state transitions
 ```
 
-**Total: 49 source files + 1 resource, 36 test source files + 1 fixture.**
+**Total: 51 source files + 1 resource, 38 test source files + 1 fixture.**
 
 ## Component Map
 
@@ -130,7 +134,7 @@ RSSAppTests/
 
 **SwiftData persistence models** — Three `@Model` classes form the persistence layer with relationships:
 
-`PersistentFeed` stores feed subscriptions: id, title, feedURL, description, addedDate, caching headers (etag, lastModifiedHeader, lastRefreshDate), and error state (lastFetchError, lastFetchErrorDate). Has a `@Relationship(deleteRule: .cascade)` to `[PersistentArticle]`. All properties use optionals or defaults for future CloudKit compatibility.
+`PersistentFeed` stores feed subscriptions: id, title, feedURL, description, addedDate, caching headers (etag, lastModifiedHeader, lastRefreshDate), icon URL (iconURL), and error state (lastFetchError, lastFetchErrorDate). Has a `@Relationship(deleteRule: .cascade)` to `[PersistentArticle]`. All properties use optionals or defaults for future CloudKit compatibility.
 
 `PersistentArticle` stores article data: articleID (RSS guid/Atom id), title, link, description, snippet, publishedDate, thumbnailURL, author, categories, read status (isRead, readDate), and fetchedDate. Has a relationship to `PersistentFeed` and a `@Relationship(deleteRule: .cascade)` to optional `PersistentArticleContent`.
 
@@ -144,7 +148,7 @@ RSSAppTests/
 
 `ArticleContent` holds the result of content extraction: `htmlContent` (clean HTML for display) and `textContent` (plain text for AI context), plus `title` and `byline`. Has a static `rssFallback(html:)` factory for graceful degradation.
 
-`RSSFeed` represents a parsed feed channel — title, link, description, an array of `Article` values, and an optional `lastUpdated` date. Also `Sendable`.
+`RSSFeed` represents a parsed feed channel — title, link, description, an array of `Article` values, an optional `lastUpdated` date, and an optional `imageURL` (extracted from RSS `<image>`, Atom `<logo>`, or Atom `<icon>`). Also `Sendable`.
 
 `SubscribedFeed` is the legacy feed subscription struct retained for UserDefaults migration (`UserDefaultsMigrationService`) and OPML export compatibility. Conforms to `Codable`.
 
@@ -160,13 +164,15 @@ RSSAppTests/
 
 ### Services
 
-**Files:** `ArticleExtractionService.swift`, `CandidateScorer.swift`, `ClaudeAPIService.swift`, `ContentAssembler.swift`, `ContentExtractor.swift`, `DOMSerializerConstants.swift`, `FeedFetchingService.swift`, `FeedStorageService.swift`, `FeedURLValidator.swift`, `HTMLUtilities.swift`, `KeychainService.swift`, `MetadataExtractor.swift`, `OPMLService.swift`, `RSSParsingService.swift`, `SiteSpecificExtracting.swift`
+**Files:** `ArticleExtractionService.swift`, `CandidateScorer.swift`, `ClaudeAPIService.swift`, `ContentAssembler.swift`, `ContentExtractor.swift`, `DOMSerializerConstants.swift`, `FeedFetchingService.swift`, `FeedIconService.swift`, `FeedPersistenceService.swift`, `FeedStorageService.swift`, `FeedURLValidator.swift`, `HTMLUtilities.swift`, `KeychainService.swift`, `MetadataExtractor.swift`, `OPMLService.swift`, `RSSParsingService.swift`, `SiteSpecificExtracting.swift`
 
 `FeedFetching` is a protocol defining `fetchFeed(from:) async throws -> RSSFeed`. `FeedFetchingService` fetches data via `URLSession.shared` and delegates parsing to `RSSParsingService`.
 
-`RSSParsingService` wraps Foundation's `XMLParser` to parse both RSS 2.0 and Atom feeds with first-class support for each format. Handles Atom XHTML content reconstruction (serializing inner XML back to HTML when `type="xhtml"`), author extraction (RSS `<author>` text and Atom `<author><name>` nesting), categories (RSS `<category>` text and Atom `<category term>` attributes), Atom `<link rel="enclosure">` for media, and feed-level updated dates. Internally uses a synchronous `XMLParserDelegate` class marked `@unchecked Sendable` (safe because it is created and consumed within a single synchronous `parse()` call).
+`RSSParsingService` wraps Foundation's `XMLParser` to parse both RSS 2.0 and Atom feeds with first-class support for each format. Handles Atom XHTML content reconstruction (serializing inner XML back to HTML when `type="xhtml"`), author extraction (RSS `<author>` text and Atom `<author><name>` nesting), categories (RSS `<category>` text and Atom `<category term>` attributes), Atom `<link rel="enclosure">` for media, feed-level updated dates, and channel-level image URLs (RSS `<image><url>`, Atom `<logo>`, Atom `<icon>`). Internally uses a synchronous `XMLParserDelegate` class marked `@unchecked Sendable` (safe because it is created and consumed within a single synchronous `parse()` call).
 
-`HTMLUtilities` provides static methods for stripping HTML tags/entities to plain text, escaping special characters in HTML text content and attribute values, and extracting the first `<img>` URL.
+`FeedIconResolving` is a `Sendable` protocol. `FeedIconService` resolves feed icon URLs through a multi-step priority chain: feed XML image URL → site homepage HTML meta tags (apple-touch-icon, link rel="icon") → `/favicon.ico` fallback. Downloads the resolved image, normalizes it to PNG (resizing if larger than 128px), and caches it to the file system at `{cachesDirectory}/feed-icons/{feedID}.png`. Provides cache lookup and cleanup methods. Used by `FeedListViewModel` during refresh and `AddFeedViewModel` during feed add.
+
+`HTMLUtilities` provides static methods for stripping HTML tags/entities to plain text, escaping special characters in HTML text content and attribute values, extracting the first `<img>` URL, and extracting icon/favicon URLs from HTML `<link>` and `<meta>` tags (used by `FeedIconService`).
 
 **Native content extraction pipeline:** The app uses a custom Swift-native extraction pipeline (replacing Readability.js as of PR #3). The pipeline consists of:
 
@@ -198,9 +204,9 @@ RSSAppTests/
 
 All view models are `@MainActor @Observable`.
 
-`FeedListViewModel` manages the subscribed feed list via `FeedPersisting`. Loads `[PersistentFeed]` from the database, supports removal by object or `IndexSet`, provides `unreadCount(for:)` per feed, and handles OPML import/export via `OPMLServing`. `importOPML(from:)` parses OPML data, deduplicates via `feedExists(url:)`, and adds new `PersistentFeed` objects. `importOPMLAndRefresh(from:)` extends import by fetching each feed's RSS XML to populate metadata. `exportOPML()` converts `PersistentFeed` to `SubscribedFeed` for OPML generation. `refreshAllFeeds()` re-fetches RSS metadata for all subscribed feeds concurrently (max 6 in-flight), upserts articles into the database, and updates feed metadata/error state via the persistence service. Accepts `FeedPersisting`, `OPMLServing`, and `FeedFetching` dependencies for testability.
+`FeedListViewModel` manages the subscribed feed list via `FeedPersisting`. Loads `[PersistentFeed]` from the database, supports removal by object or `IndexSet` (with icon cache cleanup), provides `unreadCount(for:)` per feed, and handles OPML import/export via `OPMLServing`. `importOPML(from:)` parses OPML data, deduplicates via `feedExists(url:)`, and adds new `PersistentFeed` objects. `importOPMLAndRefresh(from:)` extends import by fetching each feed's RSS XML to populate metadata. `exportOPML()` converts `PersistentFeed` to `SubscribedFeed` for OPML generation. `refreshAllFeeds()` re-fetches RSS metadata for all subscribed feeds concurrently (max 6 in-flight), upserts articles into the database, updates feed metadata/error state, and resolves/caches feed icons for feeds without a cached icon. Accepts `FeedPersisting`, `OPMLServing`, `FeedFetching`, and `FeedIconResolving` dependencies for testability.
 
-`AddFeedViewModel` handles the add-feed flow: URL input, validation (scheme/host check, duplicate detection via `feedExists`), fetching the feed to extract its title, and creating a `PersistentFeed` via `FeedPersisting`. Accepts `FeedFetching` and `FeedPersisting` dependencies for testability.
+`AddFeedViewModel` handles the add-feed flow: URL input, validation (scheme/host check, duplicate detection via `feedExists`), fetching the feed to extract its title, creating a `PersistentFeed` via `FeedPersisting`, and fire-and-forget icon resolution. Accepts `FeedFetching`, `FeedPersisting`, and `FeedIconResolving` dependencies for testability.
 
 `EditFeedViewModel` handles the edit-feed flow: pre-populated URL input, validation (duplicate detection via `feedExists`), fetching the new URL, and updating the `PersistentFeed` via `FeedPersisting`. Clears error state on successful URL change. Accepts `FeedFetching` and `FeedPersisting` dependencies for testability.
 
@@ -212,7 +218,7 @@ All view models are `@MainActor @Observable`.
 
 ### Views
 
-**Files:** `ActivityShareView.swift`, `AddFeedView.swift`, `APIKeySettingsView.swift`, `ArticleDiscussionView.swift`, `ArticleListView.swift`, `ArticleReaderView.swift`, `ArticleReaderWebView.swift`, `ArticleRowView.swift`, `ArticleSummaryView.swift`, `ContentView.swift`, `FeedListView.swift`, `FeedRowView.swift`
+**Files:** `ActivityShareView.swift`, `AddFeedView.swift`, `APIKeySettingsView.swift`, `ArticleDiscussionView.swift`, `ArticleListView.swift`, `ArticleReaderView.swift`, `ArticleReaderWebView.swift`, `ArticleRowView.swift`, `ArticleSummaryView.swift`, `ContentView.swift`, `FeedIconView.swift`, `FeedListView.swift`, `FeedRowView.swift`
 
 `ContentView` creates a `SwiftDataFeedPersistenceService` from the `@Environment(\.modelContext)` and passes it to `FeedListView`.
 

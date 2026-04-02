@@ -21,10 +21,16 @@ final class AddFeedViewModel {
 
     private let feedFetching: FeedFetching
     private let persistence: FeedPersisting
+    private let feedIconService: FeedIconResolving
 
-    init(feedFetching: FeedFetching = FeedFetchingService(), persistence: FeedPersisting) {
+    init(
+        feedFetching: FeedFetching = FeedFetchingService(),
+        persistence: FeedPersisting,
+        feedIconService: FeedIconResolving = FeedIconService()
+    ) {
         self.feedFetching = feedFetching
         self.persistence = persistence
+        self.feedIconService = feedIconService
     }
 
     func addFeed() async {
@@ -67,6 +73,33 @@ final class AddFeedViewModel {
             try persistence.addFeed(newFeed)
             didAddFeed = true
             Self.logger.notice("Added feed '\(rssFeed.title, privacy: .public)' from \(url, privacy: .public)")
+
+            // Fire-and-forget icon resolution
+            let iconService = self.feedIconService
+            let feedTitle = rssFeed.title
+            let feedID = newFeed.id
+            let siteURL = rssFeed.link
+            let feedImageURL = rssFeed.imageURL
+            let persistenceRef = self.persistence
+            Task {
+                let candidates = await iconService.resolveIconCandidates(
+                    feedSiteURL: siteURL,
+                    feedImageURL: feedImageURL
+                )
+                for candidate in candidates {
+                    let cached = await iconService.cacheIcon(from: candidate, feedID: feedID)
+                    if cached {
+                        do {
+                            try persistenceRef.updateFeedIcon(newFeed, iconURL: candidate)
+                            try persistenceRef.save()
+                        } catch {
+                            Self.logger.error("Failed to persist icon for '\(feedTitle, privacy: .public)': \(error, privacy: .public)")
+                        }
+                        return
+                    }
+                }
+                Self.logger.debug("No icon cached for '\(feedTitle, privacy: .public)' (\(candidates.count, privacy: .public) candidates tried)")
+            }
         } catch {
             errorMessage = "Could not load feed. Check the URL and try again."
             Self.logger.error("Feed validation failed for \(url, privacy: .public): \(error, privacy: .public)")

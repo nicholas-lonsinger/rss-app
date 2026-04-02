@@ -20,15 +20,18 @@ final class FeedListViewModel {
     private let persistence: FeedPersisting
     private let opmlService: OPMLServing
     private let feedFetching: FeedFetching
+    private let feedIconService: FeedIconResolving
 
     init(
         persistence: FeedPersisting,
         opmlService: OPMLServing = OPMLService(),
-        feedFetching: FeedFetching = FeedFetchingService()
+        feedFetching: FeedFetching = FeedFetchingService(),
+        feedIconService: FeedIconResolving = FeedIconService()
     ) {
         self.persistence = persistence
         self.opmlService = opmlService
         self.feedFetching = feedFetching
+        self.feedIconService = feedIconService
     }
 
     func loadFeeds() {
@@ -59,10 +62,12 @@ final class FeedListViewModel {
 
     func removeFeed(_ feed: PersistentFeed) {
         let previousFeeds = feeds
-        feeds.removeAll { $0.id == feed.id }
+        let feedID = feed.id
+        feeds.removeAll { $0.id == feedID }
         do {
             try persistence.deleteFeed(feed)
-            unreadCounts.removeValue(forKey: feed.id)
+            unreadCounts.removeValue(forKey: feedID)
+            feedIconService.deleteCachedIcon(for: feedID)
             Self.logger.notice("Removed feed '\(feed.title, privacy: .public)'")
         } catch {
             feeds = previousFeeds
@@ -77,8 +82,10 @@ final class FeedListViewModel {
         feeds.remove(atOffsets: offsets)
         do {
             for feed in removed {
+                let feedID = feed.id
                 try persistence.deleteFeed(feed)
-                unreadCounts.removeValue(forKey: feed.id)
+                unreadCounts.removeValue(forKey: feedID)
+                feedIconService.deleteCachedIcon(for: feedID)
                 Self.logger.notice("Removed feed '\(feed.title, privacy: .public)'")
             }
         } catch {
@@ -264,11 +271,18 @@ final class FeedListViewModel {
             switch result {
             case .success(let fetchResult):
                 guard let fetchResult else {
-                    // 304 Not Modified — feed is unchanged, just clear error state
+                    // 304 Not Modified — clear error state and resolve icon if needed
                     do {
                         try persistence.updateFeedError(feed, error: nil)
                     } catch {
                         Self.logger.error("Failed to clear error state for '\(feed.title, privacy: .public)': \(error, privacy: .public)")
+                    }
+                    Task {
+                        await self.resolveAndCacheIconIfNeeded(
+                            for: feed,
+                            siteURL: Self.siteURL(from: feed.feedURL),
+                            feedImageURL: feed.iconURL
+                        )
                     }
                     continue
                 }
@@ -276,6 +290,13 @@ final class FeedListViewModel {
                     try persistence.updateFeedMetadata(feed, title: fetchResult.feed.title, description: fetchResult.feed.feedDescription)
                     try persistence.upsertArticles(fetchResult.feed.articles, for: feed)
                     try persistence.updateFeedCacheHeaders(feed, etag: fetchResult.etag, lastModified: fetchResult.lastModified)
+                    Task {
+                        await self.resolveAndCacheIconIfNeeded(
+                            for: feed,
+                            siteURL: fetchResult.feed.link,
+                            feedImageURL: fetchResult.feed.imageURL
+                        )
+                    }
                 } catch {
                     failureCount += 1
                     Self.logger.error("Failed to persist refresh for '\(feed.title, privacy: .public)': \(error, privacy: .public)")
@@ -302,6 +323,42 @@ final class FeedListViewModel {
         if failureCount > 0 {
             errorMessage = "\(failureCount) of \(feedsToRefresh.count) feed(s) could not be updated."
         }
+    }
+
+    /// Resolves and caches a feed icon if one is not already cached on disk.
+    /// Tries each candidate URL in priority order until one downloads and caches successfully.
+    private func resolveAndCacheIconIfNeeded(
+        for feed: PersistentFeed,
+        siteURL: URL?,
+        feedImageURL: URL?
+    ) async {
+        guard feedIconService.cachedIconFileURL(for: feed.id) == nil else {
+            Self.logger.debug("Icon already cached for '\(feed.title, privacy: .public)'")
+            return
+        }
+        let candidates = await feedIconService.resolveIconCandidates(
+            feedSiteURL: siteURL,
+            feedImageURL: feedImageURL
+        )
+        for candidate in candidates {
+            let cached = await feedIconService.cacheIcon(from: candidate, feedID: feed.id)
+            if cached {
+                do {
+                    try persistence.updateFeedIcon(feed, iconURL: candidate)
+                } catch {
+                    Self.logger.error("Failed to persist icon URL for '\(feed.title, privacy: .public)': \(error, privacy: .public)")
+                }
+                return
+            }
+        }
+        Self.logger.debug("No icon could be cached for '\(feed.title, privacy: .public)' (\(candidates.count, privacy: .public) candidates tried)")
+    }
+
+    /// Derives a site root URL from a feed URL (e.g., https://example.com/feed → https://example.com).
+    /// Returns nil if the feed URL has no host.
+    private static func siteURL(from feedURL: URL) -> URL? {
+        guard let host = feedURL.host(percentEncoded: false), !host.isEmpty else { return nil }
+        return URL(string: "\(feedURL.scheme ?? "https")://\(host)")
     }
 
     private static func errorDescription(for error: any Error) -> String {
