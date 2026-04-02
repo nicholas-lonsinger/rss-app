@@ -211,6 +211,23 @@ enum TestFixtures {
         </feed>
         """
 
+    static let atomSelfLinkOnlyXML = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <feed xmlns="http://www.w3.org/2005/Atom">
+            <title>Self Link Only Feed</title>
+            <link rel="self" type="application/atom+xml" href="https://example.com/atom.xml" />
+            <id>https://example.com/atom.xml</id>
+            <updated>2026-04-01T00:00:00Z</updated>
+            <entry>
+                <title>Entry One</title>
+                <link rel="alternate" href="https://example.com/entry-1" />
+                <id>entry-1-id</id>
+                <published>2026-04-01T10:00:00Z</published>
+                <summary>An entry in a self-link-only feed</summary>
+            </entry>
+        </feed>
+        """
+
     static let atomCategoriesXML = """
         <?xml version="1.0" encoding="UTF-8"?>
         <feed xmlns="http://www.w3.org/2005/Atom">
