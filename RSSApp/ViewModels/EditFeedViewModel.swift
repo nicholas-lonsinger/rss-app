@@ -11,9 +11,9 @@ final class EditFeedViewModel {
     )
 
     var urlInput: String
-    var isValidating = false
-    var errorMessage: String?
-    var updatedFeed: SubscribedFeed?
+    private(set) var isValidating = false
+    private(set) var errorMessage: String?
+    private(set) var updatedFeed: SubscribedFeed?
 
     var canSubmit: Bool {
         !urlInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isValidating
@@ -35,6 +35,7 @@ final class EditFeedViewModel {
     }
 
     func saveFeed() async {
+        guard !isValidating else { return }
         Self.logger.debug("saveFeed() called with input: '\(self.urlInput, privacy: .public)'")
         errorMessage = nil
 
@@ -50,6 +51,7 @@ final class EditFeedViewModel {
 
         // No change — dismiss without saving
         if url == feed.url {
+            Self.logger.debug("URL unchanged, dismissing without save")
             updatedFeed = feed
             return
         }
@@ -73,25 +75,35 @@ final class EditFeedViewModel {
         isValidating = true
         defer { isValidating = false }
 
+        let rssFeed: RSSFeed
         do {
-            let rssFeed = try await feedFetching.fetchFeed(from: url)
-            let updated = feed
-                .updatingURL(url)
-                .updatingMetadata(title: rssFeed.title, feedDescription: rssFeed.feedDescription)
-
-            guard let index = existingFeeds.firstIndex(where: { $0.id == feed.id }) else {
-                errorMessage = "This feed no longer exists."
-                Self.logger.warning("Feed \(self.feed.id, privacy: .public) not found in storage during edit save")
-                return
-            }
-            existingFeeds[index] = updated
-            try feedStorage.saveFeeds(existingFeeds)
-
-            updatedFeed = updated
-            Self.logger.notice("Updated feed '\(rssFeed.title, privacy: .public)' URL to \(url, privacy: .public)")
+            rssFeed = try await feedFetching.fetchFeed(from: url)
         } catch {
             errorMessage = "Could not load feed. Check the URL and try again."
             Self.logger.error("Feed validation failed for \(url, privacy: .public): \(error, privacy: .public)")
+            return
         }
+
+        let updated = feed
+            .updatingURL(url)
+            .updatingMetadata(title: rssFeed.title, feedDescription: rssFeed.feedDescription)
+
+        guard let index = existingFeeds.firstIndex(where: { $0.id == feed.id }) else {
+            errorMessage = "This feed no longer exists."
+            Self.logger.warning("Feed \(self.feed.id, privacy: .public) not found in storage during edit save")
+            return
+        }
+        existingFeeds[index] = updated
+
+        do {
+            try feedStorage.saveFeeds(existingFeeds)
+        } catch {
+            errorMessage = "Unable to save changes. Please try again."
+            Self.logger.error("Failed to persist edited feed: \(error, privacy: .public)")
+            return
+        }
+
+        updatedFeed = updated
+        Self.logger.notice("Updated feed '\(rssFeed.title, privacy: .public)' URL to \(url, privacy: .public)")
     }
 }

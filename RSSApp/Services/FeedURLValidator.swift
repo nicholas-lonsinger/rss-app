@@ -7,8 +7,8 @@ enum FeedURLValidationError: Error {
 enum FeedURLValidator {
 
     /// Normalizes and validates a raw URL input string for feed subscription.
-    /// Prepends `https://` if no scheme is present, then validates that the URL
-    /// has an HTTP/HTTPS scheme and a host.
+    /// Trims whitespace, prepends `https://` if no scheme is present, then validates
+    /// that the URL has an HTTP/HTTPS scheme and a host.
     static func validate(_ input: String) -> Result<URL, FeedURLValidationError> {
         var trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmed.isEmpty && !trimmed.contains("://") {
