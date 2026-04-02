@@ -7,10 +7,20 @@ struct ArticleSummaryView: View {
     @State private var showDiscussion = false
     @Environment(\.dismiss) private var dismiss
 
-    init(article: Article, preExtractedContent: ArticleContent? = nil) {
+    init(
+        article: Article,
+        preExtractedContent: ArticleContent? = nil,
+        persistentArticle: PersistentArticle? = nil,
+        persistence: FeedPersisting? = nil
+    ) {
         self.article = article
         self._viewModel = State(
-            initialValue: ArticleSummaryViewModel(article: article, preExtractedContent: preExtractedContent)
+            initialValue: ArticleSummaryViewModel(
+                article: article,
+                preExtractedContent: preExtractedContent,
+                persistentArticle: persistentArticle,
+                persistence: persistence
+            )
         )
     }
 

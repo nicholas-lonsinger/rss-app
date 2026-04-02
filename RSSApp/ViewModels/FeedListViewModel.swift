@@ -184,24 +184,26 @@ final class FeedListViewModel {
         let logger = Self.logger
         let maxConcurrency = 6
 
-        let results: [(UUID, Result<RSSFeed, any Error>)]
+        let results: [(UUID, Result<FeedFetchResult?, any Error>)]
         do {
             results = try await withThrowingTaskGroup(
-            of: (UUID, Result<RSSFeed, any Error>).self,
-            returning: [(UUID, Result<RSSFeed, any Error>)].self
+            of: (UUID, Result<FeedFetchResult?, any Error>).self,
+            returning: [(UUID, Result<FeedFetchResult?, any Error>)].self
         ) { group in
-            var collected: [(UUID, Result<RSSFeed, any Error>)] = []
+            var collected: [(UUID, Result<FeedFetchResult?, any Error>)] = []
             var iterator = feedsToRefresh.makeIterator()
 
-            func enqueueNext(_ group: inout ThrowingTaskGroup<(UUID, Result<RSSFeed, any Error>), any Error>, _ iterator: inout IndexingIterator<[PersistentFeed]>) -> Bool {
+            func enqueueNext(_ group: inout ThrowingTaskGroup<(UUID, Result<FeedFetchResult?, any Error>), any Error>, _ iterator: inout IndexingIterator<[PersistentFeed]>) -> Bool {
                 guard let feed = iterator.next() else { return false }
                 let feedID = feed.id
                 let feedURL = feed.feedURL
                 let feedTitle = feed.title
+                let feedEtag = feed.etag
+                let feedLastModified = feed.lastModifiedHeader
                 group.addTask {
                     do {
-                        let rssFeed = try await feedFetching.fetchFeed(from: feedURL)
-                        return (feedID, .success(rssFeed))
+                        let result = try await feedFetching.fetchFeed(from: feedURL, etag: feedEtag, lastModified: feedLastModified)
+                        return (feedID, .success(result))
                     } catch is CancellationError {
                         throw CancellationError()
                     } catch {
@@ -233,10 +235,16 @@ final class FeedListViewModel {
         for (id, result) in results {
             guard let feed = idToFeed[id] else { continue }
             switch result {
-            case .success(let rssFeed):
+            case .success(let fetchResult):
+                guard let fetchResult else {
+                    // 304 Not Modified — feed is unchanged, just clear error state
+                    try? persistence.updateFeedError(feed, error: nil)
+                    continue
+                }
                 do {
-                    try persistence.updateFeedMetadata(feed, title: rssFeed.title, description: rssFeed.feedDescription)
-                    try persistence.upsertArticles(rssFeed.articles, for: feed)
+                    try persistence.updateFeedMetadata(feed, title: fetchResult.feed.title, description: fetchResult.feed.feedDescription)
+                    try persistence.upsertArticles(fetchResult.feed.articles, for: feed)
+                    try persistence.updateFeedCacheHeaders(feed, etag: fetchResult.etag, lastModified: fetchResult.lastModified)
                 } catch {
                     Self.logger.error("Failed to persist refresh for '\(feed.title, privacy: .public)': \(error, privacy: .public)")
                 }

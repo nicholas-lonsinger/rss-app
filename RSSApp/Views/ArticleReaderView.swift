@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ArticleReaderView: View {
     let article: PersistentArticle
+    let persistence: FeedPersisting?
 
     @State private var showSummary = false
     @State private var showSettings = false
@@ -40,7 +41,9 @@ struct ArticleReaderView: View {
                 .sheet(isPresented: $showSummary) {
                     ArticleSummaryView(
                         article: article.toArticle(),
-                        preExtractedContent: extractionState.content
+                        preExtractedContent: extractionState.content,
+                        persistentArticle: article,
+                        persistence: persistence
                     )
                 }
         }

@@ -33,7 +33,8 @@ struct FeedListView: View {
                 .navigationDestination(for: PersistentFeed.ID.self) { feedID in
                     if let feed = viewModel.feeds.first(where: { $0.id == feedID }) {
                         ArticleListView(
-                            viewModel: FeedViewModel(feed: feed, persistence: persistence)
+                            viewModel: FeedViewModel(feed: feed, persistence: persistence),
+                            persistence: persistence
                         )
                     }
                 }

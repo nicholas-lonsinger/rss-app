@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ArticleListView: View {
     let viewModel: FeedViewModel
+    let persistence: FeedPersisting
     @State private var selectedArticle: PersistentArticle?
 
     var body: some View {
@@ -47,7 +48,7 @@ struct ArticleListView: View {
         }
         .navigationTitle(viewModel.feedTitle)
         .fullScreenCover(item: $selectedArticle) { article in
-            ArticleReaderView(article: article)
+            ArticleReaderView(article: article, persistence: persistence)
         }
         .task { await viewModel.loadFeed() }
     }

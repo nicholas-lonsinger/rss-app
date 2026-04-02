@@ -30,20 +30,41 @@ final class ArticleSummaryViewModel {
 
     private let article: Article
     private let extractor: any ArticleExtracting
+    private let persistentArticle: PersistentArticle?
+    private let persistence: FeedPersisting?
 
-    init(article: Article, preExtractedContent: ArticleContent? = nil, extractor: (any ArticleExtracting)? = nil) {
+    init(
+        article: Article,
+        preExtractedContent: ArticleContent? = nil,
+        extractor: (any ArticleExtracting)? = nil,
+        persistentArticle: PersistentArticle? = nil,
+        persistence: FeedPersisting? = nil
+    ) {
         self.article = article
         self.extractedContent = preExtractedContent
         self.extractor = extractor ?? ArticleExtractionService()
+        self.persistentArticle = persistentArticle
+        self.persistence = persistence
     }
 
     func loadContent() async {
         do {
             let content: ArticleContent
+
+            // Check pre-extracted content first
             if let existing = extractedContent {
                 Self.logger.debug("Using pre-extracted content (\(existing.textContent.count, privacy: .public) chars)")
                 content = existing
-            } else {
+            }
+            // Check database cache
+            else if let persistentArticle, let persistence,
+                    let cached = try? persistence.cachedContent(for: persistentArticle) {
+                Self.logger.debug("Using cached content for '\(self.article.title, privacy: .public)'")
+                content = cached.toArticleContent()
+                extractedContent = content
+            }
+            // Extract fresh
+            else {
                 content = try await extractArticle()
             }
             state = .ready(content)
@@ -65,6 +86,17 @@ final class ArticleSummaryViewModel {
         Self.logger.debug("Extracting article: '\(self.article.title, privacy: .public)'")
         let content = try await extractor.extract(from: url, fallbackHTML: article.articleDescription)
         extractedContent = content
+
+        // Cache to database
+        if let persistentArticle, let persistence {
+            do {
+                try persistence.cacheContent(content, for: persistentArticle)
+                Self.logger.debug("Cached extracted content for '\(self.article.title, privacy: .public)'")
+            } catch {
+                Self.logger.warning("Failed to cache content: \(error, privacy: .public)")
+            }
+        }
+
         Self.logger.notice("Article extracted (\(content.textContent.count, privacy: .public) chars)")
         return content
     }
