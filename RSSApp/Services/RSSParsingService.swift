@@ -90,14 +90,25 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
 
     // XHTML content reconstruction: when <content type="xhtml"> or <summary type="xhtml">
     // is encountered, inner XML elements must be serialized back to HTML rather than parsed
-    // as feed structure. xhtmlDepth tracks nesting depth; xhtmlBuffer accumulates the HTML.
-    private var xhtmlTarget: XHTMLTarget?
-    private var xhtmlDepth = 0
-    private var xhtmlBuffer = ""
+    // as feed structure. Grouped into a struct so enter/exit are single-assignment operations.
+    private var xhtmlState: XHTMLState?
 
-    private enum XHTMLTarget {
-        case content
-        case summary
+    private struct XHTMLState {
+        enum Target {
+            case content
+            case summary
+
+            var closingElementName: String {
+                switch self {
+                case .content: "content"
+                case .summary: "summary"
+                }
+            }
+        }
+
+        var target: Target
+        var depth = 0
+        var buffer = ""
     }
 
     private static let htmlVoidElements: Set<String> = [
@@ -117,20 +128,20 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
         let name = qualifiedName ?? elementName
 
         // XHTML reconstruction: serialize inner elements as HTML
-        if xhtmlTarget != nil {
-            xhtmlDepth += 1
+        if xhtmlState != nil {
+            xhtmlState!.depth += 1
             // RATIONALE: Atom spec requires <content type="xhtml"> to contain exactly one
             // wrapper <div xmlns="http://www.w3.org/1999/xhtml">. We skip it at depth 1
             // so only its inner content is captured.
-            if xhtmlDepth > 1 {
-                xhtmlBuffer += "<\(elementName)"
+            if xhtmlState!.depth > 1 {
+                xhtmlState!.buffer += "<\(elementName)"
                 for (key, value) in attributeDict where key != "xmlns" {
-                    xhtmlBuffer += " \(key)=\"\(HTMLUtilities.escapeAttribute(value))\""
+                    xhtmlState!.buffer += " \(key)=\"\(HTMLUtilities.escapeAttribute(value))\""
                 }
                 if Self.htmlVoidElements.contains(elementName.lowercased()) {
-                    xhtmlBuffer += " />"
+                    xhtmlState!.buffer += " />"
                 } else {
-                    xhtmlBuffer += ">"
+                    xhtmlState!.buffer += ">"
                 }
             }
             return
@@ -221,16 +232,12 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
 
         case "content":
             if isInsideItem, attributeDict["type"] == "xhtml" {
-                xhtmlTarget = .content
-                xhtmlDepth = 0
-                xhtmlBuffer = ""
+                xhtmlState = XHTMLState(target: .content)
             }
 
         case "summary":
             if isInsideItem, attributeDict["type"] == "xhtml" {
-                xhtmlTarget = .summary
-                xhtmlDepth = 0
-                xhtmlBuffer = ""
+                xhtmlState = XHTMLState(target: .summary)
             }
 
         default:
@@ -239,10 +246,10 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
     }
 
     func parser(_ parser: XMLParser, foundCharacters string: String) {
-        if xhtmlTarget != nil {
+        if xhtmlState != nil {
             // XMLParser resolves entities before delivering text, so we must re-escape
             // to produce valid HTML (e.g., "&amp;" → "&" from parser → "&amp;" in output).
-            xhtmlBuffer += HTMLUtilities.escapeHTML(string)
+            xhtmlState!.buffer += HTMLUtilities.escapeHTML(string)
         } else {
             textBuffer += string
         }
@@ -250,8 +257,8 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
 
     func parser(_ parser: XMLParser, foundCDATA CDATABlock: Data) {
         if let string = String(data: CDATABlock, encoding: .utf8) {
-            if xhtmlTarget != nil {
-                xhtmlBuffer += HTMLUtilities.escapeHTML(string)
+            if xhtmlState != nil {
+                xhtmlState!.buffer += HTMLUtilities.escapeHTML(string)
             } else {
                 textBuffer += string
             }
@@ -267,11 +274,11 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
         let name = qualifiedName ?? elementName
 
         // XHTML reconstruction: close inner elements
-        if let target = xhtmlTarget {
-            if name == (target == .content ? "content" : "summary") && xhtmlDepth == 0 {
+        if let state = xhtmlState {
+            if name == state.target.closingElementName && state.depth == 0 {
                 // End of the XHTML container — flush the reconstructed HTML
-                let html = xhtmlBuffer.trimmingCharacters(in: .whitespacesAndNewlines)
-                switch target {
+                let html = state.buffer.trimmingCharacters(in: .whitespacesAndNewlines)
+                switch state.target {
                 case .content:
                     if !html.isEmpty {
                         itemDescription = html
@@ -287,20 +294,19 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
                         }
                     }
                 }
-                xhtmlTarget = nil
-                xhtmlBuffer = ""
+                xhtmlState = nil
                 currentElement = ""
                 textBuffer = ""
                 return
             }
-            let newDepth = xhtmlDepth - 1
+            let newDepth = state.depth - 1
             if newDepth < 0 {
                 Self.logger.warning("XHTML depth underflow at </\(elementName, privacy: .public)> in '\(self.itemTitle, privacy: .public)'")
             }
-            xhtmlDepth = max(0, newDepth)
+            xhtmlState!.depth = max(0, newDepth)
             // Close tags for elements deeper than the wrapper <div>, skipping void elements
-            if xhtmlDepth > 0, !Self.htmlVoidElements.contains(elementName.lowercased()) {
-                xhtmlBuffer += "</\(elementName)>"
+            if xhtmlState!.depth > 0, !Self.htmlVoidElements.contains(elementName.lowercased()) {
+                xhtmlState!.buffer += "</\(elementName)>"
             }
             return
         }
