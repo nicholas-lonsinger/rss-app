@@ -44,14 +44,14 @@ final class AddFeedViewModel {
             url = validURL
         case .failure:
             errorMessage = "Invalid URL. Please enter a valid feed address."
-            Self.logger.info("Invalid URL input: '\(self.urlInput, privacy: .public)'")
+            Self.logger.debug("Invalid URL input: '\(self.urlInput, privacy: .public)'")
             return
         }
 
         do {
             if try persistence.feedExists(url: url) {
                 errorMessage = "You are already subscribed to this feed."
-                Self.logger.info("Duplicate feed URL: '\(url, privacy: .public)'")
+                Self.logger.debug("Duplicate feed URL: '\(url, privacy: .public)'")
                 return
             }
         } catch {

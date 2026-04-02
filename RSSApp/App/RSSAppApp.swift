@@ -1,8 +1,14 @@
 import SwiftUI
 import SwiftData
+import os
 
 @main
 struct RSSAppApp: App {
+
+    private static let logger = Logger(
+        subsystem: "com.nicholas-lonsinger.rss-app",
+        category: "RSSAppApp"
+    )
 
     let modelContainer: ModelContainer
 
@@ -37,6 +43,8 @@ struct RSSAppApp: App {
                 modelContext: modelContainer.mainContext
             )
         }
+
+        Self.logger.notice("App initialization complete")
     }
 
     var body: some Scene {

@@ -1,10 +1,16 @@
 import Foundation
+import os
 
 enum FeedURLValidationError: Error {
     case invalidURL
 }
 
 enum FeedURLValidator {
+
+    private static let logger = Logger(
+        subsystem: "com.nicholas-lonsinger.rss-app",
+        category: "FeedURLValidator"
+    )
 
     /// Normalizes and validates a raw URL input string for feed subscription.
     /// Trims whitespace, prepends `https://` if no scheme is present, then validates
@@ -13,6 +19,7 @@ enum FeedURLValidator {
         var trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmed.isEmpty && !trimmed.contains("://") {
             trimmed = "https://" + trimmed
+            logger.debug("Prepended https:// scheme: '\(trimmed)'")
         }
 
         guard let url = URL(string: trimmed),

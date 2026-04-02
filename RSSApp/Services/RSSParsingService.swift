@@ -298,14 +298,14 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
                     if !html.isEmpty {
                         itemDescription = html
                     } else {
-                        Self.logger.warning("XHTML content reconstruction produced empty result for '\(self.itemTitle, privacy: .public)'")
+                        Self.logger.debug("XHTML content reconstruction produced empty result for '\(self.itemTitle, privacy: .public)'")
                     }
                 case .summary:
                     if itemDescription.isEmpty {
                         if !html.isEmpty {
                             itemDescription = html
                         } else {
-                            Self.logger.warning("XHTML summary reconstruction produced empty result for '\(self.itemTitle, privacy: .public)'")
+                            Self.logger.debug("XHTML summary reconstruction produced empty result for '\(self.itemTitle, privacy: .public)'")
                         }
                     }
                 }

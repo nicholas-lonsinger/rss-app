@@ -104,7 +104,7 @@ struct ArticleReaderWebView: UIViewRepresentable {
                 if let content = try DOMSerializerConstants.extractContent(fromJSON: jsonString, using: contentExtractor) {
                     extractionState.content = content
                     earlyExtractionSucceeded = true
-                    Self.logger.notice(
+                    Self.logger.debug(
                         "Early extraction succeeded (\(content.textContent.count, privacy: .public) chars)"
                     )
                 } else {
