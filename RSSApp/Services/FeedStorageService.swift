@@ -10,7 +10,7 @@ protocol FeedStoring: Sendable {
 struct FeedStorageService: FeedStoring, @unchecked Sendable {
 
     private static let logger = Logger(
-        subsystem: "com.nicholas-lonsinger.rss-app",
+        subsystem: Logger.appSubsystem,
         category: "FeedStorageService"
     )
 

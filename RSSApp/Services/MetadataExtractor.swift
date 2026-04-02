@@ -9,7 +9,7 @@ import os
 enum MetadataExtractor {
 
     private static let logger = Logger(
-        subsystem: "com.nicholas-lonsinger.rss-app",
+        subsystem: Logger.appSubsystem,
         category: "MetadataExtractor"
     )
 

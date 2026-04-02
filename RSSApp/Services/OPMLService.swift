@@ -15,7 +15,7 @@ protocol OPMLServing: Sendable {
 struct OPMLService: OPMLServing {
 
     private static let logger = Logger(
-        subsystem: "com.nicholas-lonsinger.rss-app",
+        subsystem: Logger.appSubsystem,
         category: "OPMLService"
     )
 
@@ -106,7 +106,7 @@ struct OPMLService: OPMLServing {
 private final class OPMLParserDelegate: NSObject, XMLParserDelegate, @unchecked Sendable {
 
     private static let logger = Logger(
-        subsystem: "com.nicholas-lonsinger.rss-app",
+        subsystem: Logger.appSubsystem,
         category: "OPMLParserDelegate"
     )
 
