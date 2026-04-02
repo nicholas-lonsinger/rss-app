@@ -124,8 +124,21 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
         return try modelContext.fetch(descriptor)
     }
 
+    // RATIONALE: Insert-only by design — existing articles are never updated because preserving
+    // user-generated state (read status, cached content) is more important than reflecting
+    // minor metadata edits (title rewording) from the feed source.
     func upsertArticles(_ articles: [Article], for feed: PersistentFeed) throws {
-        let existingIDs = Set(feed.articles.map(\.articleID))
+        // Query only the articleIDs we need to check, avoiding loading full article objects
+        let feedID = feed.persistentModelID
+        let incomingIDs = articles.map(\.id)
+        let descriptor = FetchDescriptor<PersistentArticle>(
+            predicate: #Predicate { article in
+                article.feed?.persistentModelID == feedID
+                    && incomingIDs.contains(article.articleID)
+            }
+        )
+        let existingArticles = try modelContext.fetch(descriptor)
+        let existingIDs = Set(existingArticles.map(\.articleID))
         var insertedCount = 0
 
         for article in articles {
