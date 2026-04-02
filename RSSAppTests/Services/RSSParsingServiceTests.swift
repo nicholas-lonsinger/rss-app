@@ -302,6 +302,178 @@ struct RSSParsingServiceTests {
         #expect(feed.articles[0].snippet == "Plain text summary with no HTML")
     }
 
+    @Test("Atom feed-level updated date is parsed")
+    func atomFeedUpdatedDate() throws {
+        let data = Data(TestFixtures.sampleAtomXML.utf8)
+        let feed = try service.parse(data)
+
+        #expect(feed.lastUpdated != nil)
+    }
+
+    @Test("Atom entry author name is extracted")
+    func atomEntryAuthor() throws {
+        let data = Data(TestFixtures.sampleAtomXML.utf8)
+        let feed = try service.parse(data)
+
+        #expect(feed.articles[0].author == "Alice")
+        #expect(feed.articles[1].author == "Bob")
+    }
+
+    // MARK: - XHTML Content
+
+    @Test("Atom XHTML content is reconstructed as HTML")
+    func atomXHTMLContentReconstruction() throws {
+        let data = Data(TestFixtures.atomXHTMLContentXML.utf8)
+        let feed = try service.parse(data)
+        let entry = feed.articles[0]
+
+        #expect(entry.articleDescription.contains("<p>"))
+        #expect(entry.articleDescription.contains("<b>bold</b>"))
+        #expect(entry.articleDescription.contains("<em>italic</em>"))
+        #expect(!entry.articleDescription.isEmpty)
+    }
+
+    @Test("Atom XHTML void elements use self-closing tags")
+    func atomXHTMLVoidElements() throws {
+        let data = Data(TestFixtures.atomXHTMLContentXML.utf8)
+        let feed = try service.parse(data)
+        let entry = feed.articles[0]
+
+        #expect(entry.articleDescription.contains("<img "))
+        #expect(entry.articleDescription.contains(" />"))
+        #expect(!entry.articleDescription.contains("</img>"))
+        #expect(!entry.articleDescription.contains("</br>"))
+    }
+
+    @Test("Atom XHTML content extracts thumbnail from img tag")
+    func atomXHTMLThumbnail() throws {
+        let data = Data(TestFixtures.atomXHTMLContentXML.utf8)
+        let feed = try service.parse(data)
+
+        #expect(feed.articles[0].thumbnailURL?.absoluteString == "https://example.com/xhtml-img.jpg")
+    }
+
+    @Test("Atom XHTML summary used as fallback")
+    func atomXHTMLSummaryFallback() throws {
+        let data = Data(TestFixtures.atomXHTMLContentXML.utf8)
+        let feed = try service.parse(data)
+        let entry = feed.articles[1]
+
+        #expect(entry.articleDescription.contains("Summary in XHTML format"))
+    }
+
+    @Test("Atom XHTML content overrides XHTML summary")
+    func atomXHTMLContentOverridesSummary() throws {
+        let data = Data(TestFixtures.atomXHTMLContentXML.utf8)
+        let feed = try service.parse(data)
+        let entry = feed.articles[2]
+
+        #expect(entry.articleDescription.contains("Content wins over summary"))
+        #expect(!entry.articleDescription.contains("Should be ignored"))
+    }
+
+    @Test("Atom XHTML text nodes are HTML-escaped in reconstruction")
+    func atomXHTMLTextEscaping() throws {
+        let xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <feed xmlns="http://www.w3.org/2005/Atom">
+                <title>Escape Feed</title>
+                <link rel="alternate" href="https://example.com" />
+                <id>https://example.com/escape-feed</id>
+                <updated>2026-04-01T00:00:00Z</updated>
+                <entry>
+                    <title>Escape Entry</title>
+                    <link rel="alternate" href="https://example.com/escape" />
+                    <id>escape-entry</id>
+                    <content type="xhtml">
+                        <div xmlns="http://www.w3.org/1999/xhtml">
+                            <p>Tom &amp; Jerry</p>
+                        </div>
+                    </content>
+                </entry>
+            </feed>
+            """
+        let data = Data(xml.utf8)
+        let feed = try service.parse(data)
+        let entry = feed.articles[0]
+
+        // The reconstructed HTML must re-escape the ampersand
+        #expect(entry.articleDescription.contains("&amp;"))
+        #expect(!entry.articleDescription.contains("Tom & Jerry"))
+    }
+
+    @Test("Atom XHTML content generates non-empty snippet")
+    func atomXHTMLSnippet() throws {
+        let data = Data(TestFixtures.atomXHTMLContentXML.utf8)
+        let feed = try service.parse(data)
+        let entry = feed.articles[0]
+
+        #expect(entry.snippet.contains("bold"))
+        #expect(entry.snippet.contains("italic"))
+        #expect(!entry.snippet.contains("<"))
+    }
+
+    // MARK: - Categories
+
+    @Test("Atom category term attributes are extracted")
+    func atomCategoryTerms() throws {
+        let data = Data(TestFixtures.atomCategoriesXML.utf8)
+        let feed = try service.parse(data)
+        let entry = feed.articles[0]
+
+        #expect(entry.categories == ["swift", "ios", "development"])
+    }
+
+    @Test("RSS category text content is extracted")
+    func rssCategoryText() throws {
+        let data = Data(TestFixtures.rssCategoriesXML.utf8)
+        let feed = try service.parse(data)
+        let article = feed.articles[0]
+
+        #expect(article.categories == ["technology", "programming"])
+    }
+
+    // MARK: - Atom Enclosure Links
+
+    @Test("Atom link rel=enclosure extracts image thumbnail")
+    func atomEnclosureLink() throws {
+        let data = Data(TestFixtures.atomEnclosureLinkXML.utf8)
+        let feed = try service.parse(data)
+
+        #expect(feed.articles[0].thumbnailURL?.absoluteString == "https://example.com/enclosure-img.png")
+    }
+
+    // MARK: - RSS Author
+
+    @Test("RSS author element is extracted")
+    func rssAuthor() throws {
+        let data = Data(TestFixtures.rssAuthorXML.utf8)
+        let feed = try service.parse(data)
+
+        #expect(feed.articles[0].author == "jane@example.com (Jane Doe)")
+    }
+
+    // MARK: - RSS lastBuildDate
+
+    @Test("RSS lastBuildDate is parsed as lastUpdated")
+    func rssLastBuildDate() throws {
+        let data = Data(TestFixtures.rssLastBuildDateXML.utf8)
+        let feed = try service.parse(data)
+
+        #expect(feed.lastUpdated != nil)
+    }
+
+    // MARK: - Articles default to nil author and empty categories
+
+    @Test("Articles without author or categories have default values")
+    func defaultAuthorAndCategories() throws {
+        let data = Data(TestFixtures.sampleRSSXML.utf8)
+        let feed = try service.parse(data)
+
+        #expect(feed.articles[0].author == nil)
+        #expect(feed.articles[0].categories.isEmpty)
+    }
+
     // MARK: - Snippet Truncation
 
     @Test("Truncates long snippets with ellipsis")

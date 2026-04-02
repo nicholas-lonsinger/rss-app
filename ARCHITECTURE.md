@@ -28,11 +28,11 @@ RSSApp/
 │   ├── DOMSerializerConstants.swift    # Shared JS bridge constants (message handler name, serializer call)
 │   ├── FeedFetchingService.swift       # FeedFetching protocol + URLSession implementation
 │   ├── FeedStorageService.swift        # FeedStoring protocol + UserDefaults persistence for subscribed feeds
-│   ├── HTMLUtilities.swift             # HTML tag stripping, entity decoding, image extraction
+│   ├── HTMLUtilities.swift             # HTML/XML escaping (text + attributes), tag stripping, entity decoding, image extraction
 │   ├── KeychainService.swift           # Keychain wrapper for secure API key storage
 │   ├── MetadataExtractor.swift         # Extracts article title/byline from meta tags and DOM elements
 │   ├── OPMLService.swift               # OPMLServing protocol + XMLParser-based OPML parser + XML generator
-│   ├── RSSParsingService.swift         # XMLParser-based RSS 2.0 parser
+│   ├── RSSParsingService.swift         # XMLParser-based RSS 2.0 + Atom parser with XHTML content reconstruction
 │   └── SiteSpecificExtracting.swift    # Protocol for per-hostname content extractors
 ├── ViewModels/                         # View state management
 │   ├── AddFeedViewModel.swift          # @Observable @MainActor — URL validation + feed subscription
@@ -114,7 +114,7 @@ RSSAppTests/
 
 **Files:** `Article.swift`, `ArticleContent.swift`, `ChatMessage.swift`, `DOMNode.swift`, `OPMLFeedEntry.swift`, `OPMLImportResult.swift`, `RSSFeed.swift`, `SubscribedFeed.swift`
 
-`Article` is the core data model representing a single feed item. It stores the title, link, raw HTML description, a plain-text snippet, publication date, and thumbnail URL. It conforms to `Identifiable` (for lists), `Hashable` (for navigation), and `Sendable` (for concurrency safety).
+`Article` is the core data model representing a single feed item. It stores the title, link, raw HTML description, a plain-text snippet, publication date, thumbnail URL, optional author name, and a categories array. It conforms to `Identifiable` (for lists), `Hashable` (for navigation), and `Sendable` (for concurrency safety).
 
 `ArticleContent` holds the result of content extraction: `htmlContent` (clean HTML for display) and `textContent` (plain text for AI context), plus `title` and `byline`. Has a static `rssFallback(html:)` factory for graceful degradation.
 
@@ -122,7 +122,7 @@ RSSAppTests/
 
 `DOMNode.swift` defines `SerializedDOM` (top-level page representation with title, URL, lang, meta tags, and body tree) and `DOMNode` (recursive tree node with tag name, attributes, visibility flag, and children). Both are `Codable` and `Sendable` value types. `CandidateScorer` internally wraps nodes in a reference-type `NodeWrapper` to add parent pointers during scoring.
 
-`RSSFeed` represents a parsed feed channel — title, link, description, and an array of `Article` values. Also `Sendable`.
+`RSSFeed` represents a parsed feed channel — title, link, description, an array of `Article` values, and an optional `lastUpdated` date (from Atom `<updated>` or RSS `<lastBuildDate>`). Also `Sendable`.
 
 `SubscribedFeed` represents a persistent feed subscription — id, title, URL, description, and added date. Conforms to `Identifiable`, `Hashable`, `Codable` (for UserDefaults persistence), and `Sendable`.
 
@@ -136,9 +136,9 @@ RSSAppTests/
 
 `FeedFetching` is a protocol defining `fetchFeed(from:) async throws -> RSSFeed`. `FeedFetchingService` fetches data via `URLSession.shared` and delegates parsing to `RSSParsingService`.
 
-`RSSParsingService` wraps Foundation's `XMLParser` to parse RSS 2.0 XML. Internally uses a synchronous `XMLParserDelegate` class marked `@unchecked Sendable` (safe because it is created and consumed within a single synchronous `parse()` call).
+`RSSParsingService` wraps Foundation's `XMLParser` to parse both RSS 2.0 and Atom feeds with first-class support for each format. Handles Atom XHTML content reconstruction (serializing inner XML back to HTML when `type="xhtml"`), author extraction (RSS `<author>` text and Atom `<author><name>` nesting), categories (RSS `<category>` text and Atom `<category term>` attributes), Atom `<link rel="enclosure">` for media, and feed-level updated dates. Internally uses a synchronous `XMLParserDelegate` class marked `@unchecked Sendable` (safe because it is created and consumed within a single synchronous `parse()` call).
 
-`HTMLUtilities` provides static methods for stripping HTML tags/entities to plain text and extracting the first `<img>` URL.
+`HTMLUtilities` provides static methods for stripping HTML tags/entities to plain text, escaping special characters in HTML text content and attribute values, and extracting the first `<img>` URL.
 
 **Native content extraction pipeline:** The app uses a custom Swift-native extraction pipeline (replacing Readability.js as of PR #3). The pipeline consists of:
 
@@ -303,8 +303,8 @@ RSSAppApp (@main)
 | Article | ArticleTests.swift | Creation, nil optionals, Identifiable, Hashable, equality |
 | SubscribedFeed | SubscribedFeedTests.swift | updatingMetadata preserves identity fields, does not mutate original |
 | DOMNode | DOMNodeTests.swift | Text/element accessors, tag name queries, tree traversal, visibility |
-| HTMLUtilities | HTMLUtilitiesTests.swift | Tag stripping, entity decoding (amp, lt, gt, quot, apos, nbsp), whitespace collapse, image extraction (double/single quotes, multiple images, no images) |
-| RSSParsingService | RSSParsingServiceTests.swift | Channel info, article count, basic fields, pubDate, snippets, raw description, thumbnail sources (media:thumbnail, media:content, enclosure, img fallback), thumbnail priority, ID derivation (guid, link), empty channel, malformed XML, empty data, missing fields, empty title, long snippet truncation |
+| HTMLUtilities | HTMLUtilitiesTests.swift | Tag stripping, entity decoding (amp, lt, gt, quot, apos, nbsp), whitespace collapse, HTML text escaping (amp, angle brackets, no-op), attribute escaping (amp, quot, lt, gt, no-op, multiple), image extraction (double/single quotes, multiple images, no images) |
+| RSSParsingService | RSSParsingServiceTests.swift | Channel info, article count, basic fields, pubDate, snippets, raw description, thumbnail sources (media:thumbnail, media:content, enclosure, img fallback), thumbnail priority, ID derivation (guid, link), empty channel, malformed XML, empty data, missing fields, empty title, long snippet truncation, Atom XHTML content reconstruction (content, summary, content-overrides-summary, snippet generation, thumbnail extraction), Atom/RSS author extraction, Atom category term attributes, RSS category text, Atom enclosure links, RSS lastBuildDate, Atom feed-level updated date, default author/categories |
 | KeychainService | KeychainServiceTests.swift | Save/load roundtrip, load when empty, delete clears value, overwrite updates value |
 | ClaudeAPIService | ClaudeAPIServiceTests.swift | Request headers, request body JSON encoding, SSE text delta parsing, non-delta event returns nil, malformed JSON returns nil, delta without text returns nil |
 | CandidateScorer | CandidateScorerTests.swift | Content node identification in simple pages, scoring with class/id signals, link-density penalty, pruning of unlikely nodes |

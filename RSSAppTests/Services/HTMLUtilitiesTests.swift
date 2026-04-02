@@ -48,6 +48,50 @@ struct HTMLUtilitiesTests {
         #expect(HTMLUtilities.stripHTML(html) == "Hello World")
     }
 
+    // MARK: - escapeHTML
+
+    @Test("Escapes ampersand in HTML text")
+    func escapeHTMLAmpersand() {
+        #expect(HTMLUtilities.escapeHTML("Tom & Jerry") == "Tom &amp; Jerry")
+    }
+
+    @Test("Escapes angle brackets in HTML text")
+    func escapeHTMLAngleBrackets() {
+        #expect(HTMLUtilities.escapeHTML("a < b > c") == "a &lt; b &gt; c")
+    }
+
+    @Test("Passes through plain text in escapeHTML")
+    func escapeHTMLPlainText() {
+        #expect(HTMLUtilities.escapeHTML("hello world") == "hello world")
+    }
+
+    // MARK: - escapeAttribute
+
+    @Test("Escapes ampersand in attribute value")
+    func escapeAmpersand() {
+        #expect(HTMLUtilities.escapeAttribute("a&b") == "a&amp;b")
+    }
+
+    @Test("Escapes double quote in attribute value")
+    func escapeDoubleQuote() {
+        #expect(HTMLUtilities.escapeAttribute("say \"hello\"") == "say &quot;hello&quot;")
+    }
+
+    @Test("Escapes angle brackets in attribute value")
+    func escapeAngleBrackets() {
+        #expect(HTMLUtilities.escapeAttribute("<tag>") == "&lt;tag&gt;")
+    }
+
+    @Test("Passes through string with no special characters")
+    func escapeNoSpecialChars() {
+        #expect(HTMLUtilities.escapeAttribute("hello world") == "hello world")
+    }
+
+    @Test("Escapes multiple special characters in one string")
+    func escapeMultipleSpecialChars() {
+        #expect(HTMLUtilities.escapeAttribute("a&b<c>d\"e") == "a&amp;b&lt;c&gt;d&quot;e")
+    }
+
     // MARK: - extractFirstImageURL
 
     @Test("Extracts img src with double quotes")

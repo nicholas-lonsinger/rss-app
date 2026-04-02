@@ -8,4 +8,6 @@ struct Article: Identifiable, Hashable, Sendable {
     let snippet: String
     let publishedDate: Date?
     let thumbnailURL: URL?
+    let author: String?
+    let categories: [String]
 }

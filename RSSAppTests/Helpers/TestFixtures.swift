@@ -161,6 +161,147 @@ enum TestFixtures {
         </feed>
         """
 
+    static let atomXHTMLContentXML = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <feed xmlns="http://www.w3.org/2005/Atom">
+            <title>XHTML Feed</title>
+            <link rel="alternate" href="https://example.com" />
+            <id>https://example.com/xhtml-feed</id>
+            <updated>2026-04-01T00:00:00Z</updated>
+            <entry>
+                <title>XHTML Entry</title>
+                <link rel="alternate" href="https://example.com/xhtml-1" />
+                <id>xhtml-entry-1</id>
+                <published>2026-04-01T10:00:00Z</published>
+                <content type="xhtml">
+                    <div xmlns="http://www.w3.org/1999/xhtml">
+                        <p>This is <b>bold</b> and <em>italic</em> text.</p>
+                        <img src="https://example.com/xhtml-img.jpg" alt="test"/>
+                    </div>
+                </content>
+            </entry>
+            <entry>
+                <title>XHTML Summary Entry</title>
+                <link rel="alternate" href="https://example.com/xhtml-2" />
+                <id>xhtml-entry-2</id>
+                <published>2026-04-01T09:00:00Z</published>
+                <summary type="xhtml">
+                    <div xmlns="http://www.w3.org/1999/xhtml">
+                        <p>Summary in XHTML format.</p>
+                    </div>
+                </summary>
+            </entry>
+            <entry>
+                <title>XHTML Content With Summary Fallback</title>
+                <link rel="alternate" href="https://example.com/xhtml-3" />
+                <id>xhtml-entry-3</id>
+                <published>2026-04-01T08:00:00Z</published>
+                <summary type="xhtml">
+                    <div xmlns="http://www.w3.org/1999/xhtml">
+                        <p>Should be ignored.</p>
+                    </div>
+                </summary>
+                <content type="xhtml">
+                    <div xmlns="http://www.w3.org/1999/xhtml">
+                        <p>Content wins over summary.</p>
+                    </div>
+                </content>
+            </entry>
+        </feed>
+        """
+
+    static let atomCategoriesXML = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <feed xmlns="http://www.w3.org/2005/Atom">
+            <title>Categories Feed</title>
+            <link rel="alternate" href="https://example.com" />
+            <id>https://example.com/cat-feed</id>
+            <updated>2026-04-01T00:00:00Z</updated>
+            <entry>
+                <title>Tagged Entry</title>
+                <link rel="alternate" href="https://example.com/tagged" />
+                <id>tagged-entry</id>
+                <published>2026-04-01T10:00:00Z</published>
+                <category term="swift" />
+                <category term="ios" />
+                <category term="development" />
+                <summary>Entry with Atom categories</summary>
+            </entry>
+        </feed>
+        """
+
+    static let rssCategoriesXML = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <rss version="2.0">
+        <channel>
+            <title>RSS Categories Feed</title>
+            <link>https://example.com</link>
+            <description>Feed with categories</description>
+            <item>
+                <title>Tagged Item</title>
+                <link>https://example.com/tagged-rss</link>
+                <guid>tagged-rss-guid</guid>
+                <category>technology</category>
+                <category>programming</category>
+                <description>Item with RSS categories</description>
+            </item>
+        </channel>
+        </rss>
+        """
+
+    static let atomEnclosureLinkXML = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <feed xmlns="http://www.w3.org/2005/Atom">
+            <title>Enclosure Feed</title>
+            <link rel="alternate" href="https://example.com" />
+            <id>https://example.com/enc-feed</id>
+            <updated>2026-04-01T00:00:00Z</updated>
+            <entry>
+                <title>Entry With Enclosure</title>
+                <link rel="alternate" href="https://example.com/enc-entry" />
+                <link rel="enclosure" type="image/png" href="https://example.com/enclosure-img.png" />
+                <id>enc-entry-id</id>
+                <published>2026-04-01T10:00:00Z</published>
+                <summary>Entry with Atom enclosure link</summary>
+            </entry>
+        </feed>
+        """
+
+    static let rssAuthorXML = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <rss version="2.0">
+        <channel>
+            <title>Author Feed</title>
+            <link>https://example.com</link>
+            <description>Feed with authors</description>
+            <item>
+                <title>Authored Item</title>
+                <link>https://example.com/authored</link>
+                <guid>authored-guid</guid>
+                <author>jane@example.com (Jane Doe)</author>
+                <description>Article by Jane</description>
+            </item>
+        </channel>
+        </rss>
+        """
+
+    static let rssLastBuildDateXML = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <rss version="2.0">
+        <channel>
+            <title>Dated Feed</title>
+            <link>https://example.com</link>
+            <description>Feed with lastBuildDate</description>
+            <lastBuildDate>Mon, 30 Mar 2026 12:00:00 +0000</lastBuildDate>
+            <item>
+                <title>An Item</title>
+                <link>https://example.com/item</link>
+                <description>Just an item</description>
+            </item>
+        </channel>
+        </rss>
+        """
+
     // MARK: - Sample OPML XML
 
     static let sampleOPML = """
@@ -219,7 +360,9 @@ enum TestFixtures {
         articleDescription: String = "<p>Test description</p>",
         snippet: String = "Test description",
         publishedDate: Date? = Date(timeIntervalSince1970: 1_711_800_000),
-        thumbnailURL: URL? = URL(string: "https://example.com/thumb.jpg")
+        thumbnailURL: URL? = URL(string: "https://example.com/thumb.jpg"),
+        author: String? = nil,
+        categories: [String] = []
     ) -> Article {
         Article(
             id: id,
@@ -228,7 +371,9 @@ enum TestFixtures {
             articleDescription: articleDescription,
             snippet: snippet,
             publishedDate: publishedDate,
-            thumbnailURL: thumbnailURL
+            thumbnailURL: thumbnailURL,
+            author: author,
+            categories: categories
         )
     }
 
@@ -252,13 +397,15 @@ enum TestFixtures {
         title: String = "Test Feed",
         link: URL? = URL(string: "https://example.com"),
         feedDescription: String = "A test feed",
-        articles: [Article] = []
+        articles: [Article] = [],
+        lastUpdated: Date? = nil
     ) -> RSSFeed {
         RSSFeed(
             title: title,
             link: link,
             feedDescription: feedDescription,
-            articles: articles
+            articles: articles,
+            lastUpdated: lastUpdated
         )
     }
 

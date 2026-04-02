@@ -39,7 +39,8 @@ struct RSSParsingService: Sendable {
             title: delegate.channelTitle.trimmingCharacters(in: .whitespacesAndNewlines),
             link: URL(string: delegate.channelLink.trimmingCharacters(in: .whitespacesAndNewlines)),
             feedDescription: delegate.channelDescription.trimmingCharacters(in: .whitespacesAndNewlines),
-            articles: delegate.articles
+            articles: delegate.articles,
+            lastUpdated: delegate.channelUpdated
         )
 
         Self.logger.notice("Feed parsed: '\(feed.title, privacy: .public)' with \(feed.articles.count, privacy: .public) articles")
@@ -53,10 +54,16 @@ struct RSSParsingService: Sendable {
 // synchronously within a single parse() call and never escapes that scope.
 private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked Sendable {
 
+    private static let logger = Logger(
+        subsystem: "com.nicholas-lonsinger.rss-app",
+        category: "RSSParserDelegate"
+    )
+
     var foundChannel = false
     var channelTitle = ""
     var channelLink = ""
     var channelDescription = ""
+    var channelUpdated: Date?
     var articles: [Article] = []
 
     private var isInsideItem = false
@@ -71,6 +78,32 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
     private var itemPubDate = ""
     private var itemThumbnailURL: String?
     private var itemEnclosureURL: String?
+    private var itemAuthor = ""
+    private var itemCategories: [String] = []
+
+    // Atom author nesting: <author><name>Text</name></author>
+    private var isInsideAuthor = false
+
+    // Tracks whether the current <category> had a term attribute (Atom style)
+    // to prevent double-appending when text content also exists.
+    private var categoryHandledByAttribute = false
+
+    // XHTML content reconstruction: when <content type="xhtml"> or <summary type="xhtml">
+    // is encountered, inner XML elements must be serialized back to HTML rather than parsed
+    // as feed structure. xhtmlDepth tracks nesting depth; xhtmlBuffer accumulates the HTML.
+    private var xhtmlTarget: XHTMLTarget?
+    private var xhtmlDepth = 0
+    private var xhtmlBuffer = ""
+
+    private enum XHTMLTarget {
+        case content
+        case summary
+    }
+
+    private static let htmlVoidElements: Set<String> = [
+        "area", "base", "br", "col", "embed", "hr", "img",
+        "input", "link", "meta", "param", "source", "track", "wbr",
+    ]
 
     // MARK: - XMLParserDelegate
 
@@ -82,6 +115,27 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
         attributes attributeDict: [String: String] = [:]
     ) {
         let name = qualifiedName ?? elementName
+
+        // XHTML reconstruction: serialize inner elements as HTML
+        if xhtmlTarget != nil {
+            xhtmlDepth += 1
+            // RATIONALE: Atom spec requires <content type="xhtml"> to contain exactly one
+            // wrapper <div xmlns="http://www.w3.org/1999/xhtml">. We skip it at depth 1
+            // so only its inner content is captured.
+            if xhtmlDepth > 1 {
+                xhtmlBuffer += "<\(elementName)"
+                for (key, value) in attributeDict where key != "xmlns" {
+                    xhtmlBuffer += " \(key)=\"\(HTMLUtilities.escapeAttribute(value))\""
+                }
+                if Self.htmlVoidElements.contains(elementName.lowercased()) {
+                    xhtmlBuffer += " />"
+                } else {
+                    xhtmlBuffer += ">"
+                }
+            }
+            return
+        }
+
         currentElement = name
         textBuffer = ""
 
@@ -98,6 +152,15 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
             itemPubDate = ""
             itemThumbnailURL = nil
             itemEnclosureURL = nil
+            itemAuthor = ""
+            itemCategories = []
+            isInsideAuthor = false
+            categoryHandledByAttribute = false
+
+        case "author":
+            if isInsideItem {
+                isInsideAuthor = true
+            }
 
         case "link":
             // RATIONALE: Atom uses self-closing <link rel="alternate" href="URL"/> while
@@ -110,6 +173,15 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
                     if itemLink.isEmpty { itemLink = href }
                 } else {
                     if channelLink.isEmpty { channelLink = href }
+                }
+            }
+            // Atom enclosure links: <link rel="enclosure" type="image/..." href="URL"/>
+            if rel == "enclosure", isInsideItem {
+                let type = attributeDict["type"] ?? ""
+                if type.hasPrefix("image/"), let href = attributeDict["href"] {
+                    if itemEnclosureURL == nil {
+                        itemEnclosureURL = href
+                    }
                 }
             }
 
@@ -135,18 +207,54 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
                 }
             }
 
+        case "category":
+            // Atom uses <category term="value"/>, RSS uses <category>text</category>
+            if isInsideItem, let term = attributeDict["term"] {
+                let trimmed = term.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty {
+                    itemCategories.append(trimmed)
+                    categoryHandledByAttribute = true
+                }
+            } else {
+                categoryHandledByAttribute = false
+            }
+
+        case "content":
+            if isInsideItem, attributeDict["type"] == "xhtml" {
+                xhtmlTarget = .content
+                xhtmlDepth = 0
+                xhtmlBuffer = ""
+            }
+
+        case "summary":
+            if isInsideItem, attributeDict["type"] == "xhtml" {
+                xhtmlTarget = .summary
+                xhtmlDepth = 0
+                xhtmlBuffer = ""
+            }
+
         default:
             break
         }
     }
 
     func parser(_ parser: XMLParser, foundCharacters string: String) {
-        textBuffer += string
+        if xhtmlTarget != nil {
+            // XMLParser resolves entities before delivering text, so we must re-escape
+            // to produce valid HTML (e.g., "&amp;" → "&" from parser → "&amp;" in output).
+            xhtmlBuffer += HTMLUtilities.escapeHTML(string)
+        } else {
+            textBuffer += string
+        }
     }
 
     func parser(_ parser: XMLParser, foundCDATA CDATABlock: Data) {
         if let string = String(data: CDATABlock, encoding: .utf8) {
-            textBuffer += string
+            if xhtmlTarget != nil {
+                xhtmlBuffer += HTMLUtilities.escapeHTML(string)
+            } else {
+                textBuffer += string
+            }
         }
     }
 
@@ -158,10 +266,49 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
     ) {
         let name = qualifiedName ?? elementName
 
+        // XHTML reconstruction: close inner elements
+        if let target = xhtmlTarget {
+            if name == (target == .content ? "content" : "summary") && xhtmlDepth == 0 {
+                // End of the XHTML container — flush the reconstructed HTML
+                let html = xhtmlBuffer.trimmingCharacters(in: .whitespacesAndNewlines)
+                switch target {
+                case .content:
+                    if !html.isEmpty {
+                        itemDescription = html
+                    } else {
+                        Self.logger.warning("XHTML content reconstruction produced empty result for '\(self.itemTitle, privacy: .public)'")
+                    }
+                case .summary:
+                    if itemDescription.isEmpty {
+                        if !html.isEmpty {
+                            itemDescription = html
+                        } else {
+                            Self.logger.warning("XHTML summary reconstruction produced empty result for '\(self.itemTitle, privacy: .public)'")
+                        }
+                    }
+                }
+                xhtmlTarget = nil
+                xhtmlBuffer = ""
+                currentElement = ""
+                textBuffer = ""
+                return
+            }
+            let newDepth = xhtmlDepth - 1
+            if newDepth < 0 {
+                Self.logger.warning("XHTML depth underflow at </\(elementName, privacy: .public)> in '\(self.itemTitle, privacy: .public)'")
+            }
+            xhtmlDepth = max(0, newDepth)
+            // Close tags for elements deeper than the wrapper <div>, skipping void elements
+            if xhtmlDepth > 0, !Self.htmlVoidElements.contains(elementName.lowercased()) {
+                xhtmlBuffer += "</\(elementName)>"
+            }
+            return
+        }
+
         if isInsideItem {
             switch name {
             case "title":
-                itemTitle = textBuffer
+                if !isInsideAuthor { itemTitle = textBuffer }
             case "link":
                 // Only set from text content (RSS style) if non-empty.
                 // Also guards against overwriting the href already set in didStartElement
@@ -183,7 +330,7 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
                 }
             case "content":
                 // Atom content; treated like RSS content:encoded — overwrites description/summary
-                // if non-empty. Last non-empty value wins if both appear in the same entry.
+                // if non-empty. (XHTML type is handled separately above.)
                 if !textBuffer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     itemDescription = textBuffer
                 }
@@ -203,6 +350,28 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
                 if itemPubDate.isEmpty {
                     itemPubDate = textBuffer
                 }
+            case "author":
+                // RSS <author> stores plain text; Atom <author> is a container (handled via name)
+                isInsideAuthor = false
+                let text = textBuffer.trimmingCharacters(in: .whitespacesAndNewlines)
+                if itemAuthor.isEmpty, !text.isEmpty {
+                    itemAuthor = text
+                }
+            case "name":
+                // Atom <author><name>Text</name></author>
+                if isInsideAuthor {
+                    let text = textBuffer.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !text.isEmpty { itemAuthor = text }
+                }
+            case "category":
+                // RSS <category>text</category> — skip if already handled via term attribute
+                if !categoryHandledByAttribute {
+                    let text = textBuffer.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !text.isEmpty {
+                        itemCategories.append(text)
+                    }
+                }
+                categoryHandledByAttribute = false
             case "item", "entry":
                 articles.append(buildArticle())
                 isInsideItem = false
@@ -222,6 +391,10 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
             case "subtitle":
                 // Atom feed subtitle; used as channel description when no RSS <description> was found
                 if channelDescription.isEmpty { channelDescription = textBuffer }
+            case "updated", "lastBuildDate":
+                if channelUpdated == nil {
+                    channelUpdated = Self.parseDate(textBuffer)
+                }
             default:
                 break
             }
@@ -269,6 +442,9 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
             thumbnailURL = HTMLUtilities.extractFirstImageURL(from: rawDescription)
         }
 
+        // Author: trimmed, nil if empty
+        let authorTrimmed = itemAuthor.trimmingCharacters(in: .whitespacesAndNewlines)
+
         return Article(
             id: id,
             title: title.isEmpty ? "Untitled" : title,
@@ -276,7 +452,9 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
             articleDescription: rawDescription,
             snippet: snippet,
             publishedDate: Self.parseDate(itemPubDate),
-            thumbnailURL: thumbnailURL
+            thumbnailURL: thumbnailURL,
+            author: authorTrimmed.isEmpty ? nil : authorTrimmed,
+            categories: itemCategories
         )
     }
 

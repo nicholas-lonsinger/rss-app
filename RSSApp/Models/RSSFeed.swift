@@ -5,4 +5,5 @@ struct RSSFeed: Sendable {
     let link: URL?
     let feedDescription: String
     let articles: [Article]
+    let lastUpdated: Date?
 }

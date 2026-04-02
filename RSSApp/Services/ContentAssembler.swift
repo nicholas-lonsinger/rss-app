@@ -45,7 +45,7 @@ enum ContentAssembler {
     private static func assembleNode(_ node: DOMNode, html: inout String, text: inout String) {
         if node.isText {
             let content = node.txt ?? ""
-            html.append(escapeHTML(content))
+            html.append(HTMLUtilities.escapeHTML(content))
             text.append(content)
             return
         }
@@ -100,16 +100,16 @@ enum ContentAssembler {
     /// Appends only content-relevant attributes for the given tag.
     private static func appendAttributes(for node: DOMNode, tag: String, html: inout String) {
         if tag == "a", let href = node.href {
-            html.append(" href=\"\(escapeAttribute(href))\"")
+            html.append(" href=\"\(HTMLUtilities.escapeAttribute(href))\"")
         }
     }
 
     /// Assembles an `<img>` tag with src and alt attributes.
     private static func assembleImage(_ node: DOMNode, html: inout String) {
         guard let src = node.src else { return }
-        html.append("<img src=\"\(escapeAttribute(src))\"")
+        html.append("<img src=\"\(HTMLUtilities.escapeAttribute(src))\"")
         if let alt = node.alt {
-            html.append(" alt=\"\(escapeAttribute(alt))\"")
+            html.append(" alt=\"\(HTMLUtilities.escapeAttribute(alt))\"")
         }
         html.append(">")
     }
@@ -126,19 +126,6 @@ enum ContentAssembler {
 
     private static func isBlockElement(_ tag: String) -> Bool {
         blockElements.contains(tag)
-    }
-
-    private static func escapeHTML(_ text: String) -> String {
-        text.replacingOccurrences(of: "&", with: "&amp;")
-            .replacingOccurrences(of: "<", with: "&lt;")
-            .replacingOccurrences(of: ">", with: "&gt;")
-    }
-
-    private static func escapeAttribute(_ value: String) -> String {
-        value.replacingOccurrences(of: "&", with: "&amp;")
-             .replacingOccurrences(of: "\"", with: "&quot;")
-             .replacingOccurrences(of: "<", with: "&lt;")
-             .replacingOccurrences(of: ">", with: "&gt;")
     }
 
     /// Normalizes whitespace while preserving paragraph structure.
