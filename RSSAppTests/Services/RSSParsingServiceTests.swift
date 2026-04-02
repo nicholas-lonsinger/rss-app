@@ -310,6 +310,16 @@ struct RSSParsingServiceTests {
         #expect(feed.link?.absoluteString == "https://example.com")
     }
 
+    @Test("Atom feed with only rel=self link produces nil feed link")
+    func atomSelfLinkOnly() throws {
+        let data = Data(TestFixtures.atomSelfLinkOnlyXML.utf8)
+        let feed = try service.parse(data)
+
+        #expect(feed.link == nil)
+        #expect(feed.title == "Self Link Only Feed")
+        #expect(feed.articles.count == 1)
+    }
+
     @Test("Atom feed with no subtitle has empty description")
     func atomNoSubtitle() throws {
         let data = Data(TestFixtures.atomNoContentXML.utf8)
