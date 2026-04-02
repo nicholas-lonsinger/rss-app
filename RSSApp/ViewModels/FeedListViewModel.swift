@@ -11,7 +11,7 @@ final class FeedListViewModel {
     )
 
     private(set) var feeds: [PersistentFeed] = []
-    private(set) var unreadCounts: [UUID: Int] = [:]
+    private var unreadCounts: [UUID: Int] = [:]
     private(set) var isRefreshing = false
     var errorMessage: String?
     var opmlImportResult: OPMLImportResult?
@@ -44,12 +44,13 @@ final class FeedListViewModel {
     }
 
     func refreshUnreadCounts() {
+        Self.logger.debug("refreshUnreadCounts() called for \(self.feeds.count, privacy: .public) feeds")
         var counts: [UUID: Int] = [:]
         for feed in feeds {
             do {
                 counts[feed.id] = try persistence.unreadCount(for: feed)
             } catch {
-                Self.logger.warning("Failed to fetch unread count for '\(feed.title, privacy: .public)': \(error, privacy: .public)")
+                Self.logger.error("Failed to fetch unread count for '\(feed.title, privacy: .public)': \(error, privacy: .public)")
                 counts[feed.id] = 0
             }
         }
@@ -61,6 +62,7 @@ final class FeedListViewModel {
         feeds.removeAll { $0.id == feed.id }
         do {
             try persistence.deleteFeed(feed)
+            unreadCounts.removeValue(forKey: feed.id)
             Self.logger.notice("Removed feed '\(feed.title, privacy: .public)'")
         } catch {
             feeds = previousFeeds
@@ -76,6 +78,7 @@ final class FeedListViewModel {
         do {
             for feed in removed {
                 try persistence.deleteFeed(feed)
+                unreadCounts.removeValue(forKey: feed.id)
                 Self.logger.notice("Removed feed '\(feed.title, privacy: .public)'")
             }
         } catch {
