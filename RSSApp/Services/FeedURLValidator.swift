@@ -19,7 +19,7 @@ enum FeedURLValidator {
         var trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmed.isEmpty && !trimmed.contains("://") {
             trimmed = "https://" + trimmed
-            logger.debug("Prepended https:// scheme: '\(trimmed, privacy: .public)'")
+            logger.debug("Prepended https:// scheme: '\(trimmed)'")
         }
 
         guard let url = URL(string: trimmed),
