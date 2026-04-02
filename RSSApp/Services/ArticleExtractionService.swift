@@ -102,7 +102,7 @@ final class ArticleExtractionService: ArticleExtracting {
                 .first { $0.isKeyWindow }
 
             guard let keyWindow else {
-                Self.logger.warning("No key window available — fast-failing extraction")
+                Self.logger.debug("No key window available — fast-failing extraction")
                 coordinator.resumeAndCleanup(throwing: ArticleExtractionError.noKeyWindow)
                 return
             }

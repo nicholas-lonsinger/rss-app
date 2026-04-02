@@ -44,7 +44,7 @@ struct ContentExtractor: ContentExtracting {
 
         // 3. Score candidates and find the best content node.
         guard let candidate = CandidateScorer.findTopCandidate(in: dom.body) else {
-            Self.logger.warning("No candidate found in DOM")
+            Self.logger.debug("No candidate found in DOM")
             return nil
         }
 
@@ -52,11 +52,11 @@ struct ContentExtractor: ContentExtracting {
         let (html, text) = ContentAssembler.assemble(from: candidate.node)
 
         guard !text.isEmpty else {
-            Self.logger.warning("Candidate produced empty text content")
+            Self.logger.debug("Candidate produced empty text content")
             return nil
         }
 
-        Self.logger.notice(
+        Self.logger.debug(
             "Extraction complete: score=\(candidate.score, privacy: .public), \(text.count, privacy: .public) text chars"
         )
 

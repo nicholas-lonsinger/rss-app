@@ -30,7 +30,7 @@ struct UserDefaultsMigrationService {
         } catch {
             // Don't mark migration complete — retry on next launch in case a future
             // update can decode the data or the error is transient.
-            logger.error("Failed to load legacy feeds, will retry next launch: \(error, privacy: .public)")
+            logger.warning("Failed to load legacy feeds, will retry next launch: \(error, privacy: .public)")
             return
         }
 

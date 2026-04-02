@@ -1,8 +1,14 @@
 import SwiftUI
 import SwiftData
+import os
 
 @main
 struct RSSAppApp: App {
+
+    private static let logger = Logger(
+        subsystem: "com.nicholas-lonsinger.rss-app",
+        category: "RSSAppApp"
+    )
 
     let modelContainer: ModelContainer
 
@@ -31,6 +37,8 @@ struct RSSAppApp: App {
         } catch {
             fatalError("Failed to create ModelContainer: \(error)")
         }
+
+        Self.logger.notice("App launched, ModelContainer initialized")
 
         if !isTestEnvironment {
             UserDefaultsMigrationService.migrateIfNeeded(
