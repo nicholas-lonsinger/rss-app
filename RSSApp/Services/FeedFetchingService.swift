@@ -51,7 +51,7 @@ struct FeedFetchingService: FeedFetching {
         let (data, response) = try await URLSession.shared.data(for: request)
 
         guard let httpResponse = response as? HTTPURLResponse else {
-            Self.logger.warning("Response is not HTTPURLResponse for \(url.absoluteString, privacy: .public)")
+            Self.logger.error("Response is not HTTPURLResponse for \(url.absoluteString, privacy: .public)")
             throw FeedFetchingError.invalidResponse(statusCode: 0)
         }
 
@@ -65,7 +65,7 @@ struct FeedFetchingService: FeedFetching {
             throw FeedFetchingError.invalidResponse(statusCode: httpResponse.statusCode)
         }
 
-        Self.logger.notice("Received \(data.count, privacy: .public) bytes from \(url.absoluteString, privacy: .public)")
+        Self.logger.info("Received \(data.count, privacy: .public) bytes from \(url.absoluteString, privacy: .public)")
 
         let feed = try parsingService.parse(data)
         let responseEtag = httpResponse.value(forHTTPHeaderField: "ETag")

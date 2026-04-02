@@ -38,13 +38,13 @@ struct RSSAppApp: App {
             fatalError("Failed to create ModelContainer: \(error)")
         }
 
-        Self.logger.notice("App launched, ModelContainer initialized")
-
         if !isTestEnvironment {
             UserDefaultsMigrationService.migrateIfNeeded(
                 modelContext: modelContainer.mainContext
             )
         }
+
+        Self.logger.notice("App initialization complete")
     }
 
     var body: some Scene {

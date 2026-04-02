@@ -31,7 +31,7 @@ struct RSSParsingService: Sendable {
         }
 
         guard delegate.foundChannel else {
-            Self.logger.warning("No <channel> (RSS) or <feed> (Atom) element found in feed")
+            Self.logger.error("No <channel> (RSS) or <feed> (Atom) element found in feed")
             throw RSSParsingError.noChannelFound
         }
 
