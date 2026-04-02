@@ -302,6 +302,24 @@ struct RSSParsingServiceTests {
         #expect(feed.articles[0].snippet == "Plain text summary with no HTML")
     }
 
+    @Test("Atom entry uses updated date when published is absent")
+    func atomUpdatedDateFallback() throws {
+        let data = Data(TestFixtures.atomNoContentXML.utf8)
+        let feed = try service.parse(data)
+
+        #expect(feed.articles[0].publishedDate != nil)
+
+        // Verify exact date to catch timezone-offset inversions
+        let calendar = Calendar(identifier: .gregorian)
+        let components = calendar.dateComponents(
+            in: TimeZone(identifier: "UTC")!,
+            from: feed.articles[0].publishedDate!
+        )
+        #expect(components.year == 2026)
+        #expect(components.month == 4)
+        #expect(components.day == 1)
+    }
+
     @Test("Atom feed-level updated date is parsed")
     func atomFeedUpdatedDate() throws {
         let data = Data(TestFixtures.sampleAtomXML.utf8)
