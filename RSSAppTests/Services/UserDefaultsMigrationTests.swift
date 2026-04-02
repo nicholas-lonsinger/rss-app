@@ -131,4 +131,24 @@ struct UserDefaultsMigrationTests {
 
         #expect(migrated[0].id == feedID)
     }
+
+    @Test("migrateIfNeeded does not set flag on corrupt legacy data, allowing retry")
+    @MainActor
+    func retriesOnCorruptData() throws {
+        let (defaults, _) = makeDefaults()
+        let container = try SwiftDataTestHelpers.makeTestContainer()
+
+        // Write corrupt data that cannot be decoded
+        defaults.set(Data("not valid json".utf8), forKey: "subscribedFeeds")
+
+        UserDefaultsMigrationService.migrateIfNeeded(
+            modelContext: container.mainContext,
+            defaults: defaults
+        )
+
+        // Migration flag should NOT be set — allows retry on next launch
+        #expect(defaults.bool(forKey: "swiftdata_migration_complete_v1") == false)
+        // Legacy data should still be there
+        #expect(defaults.data(forKey: "subscribedFeeds") != nil)
+    }
 }

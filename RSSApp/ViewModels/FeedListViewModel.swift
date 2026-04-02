@@ -71,7 +71,12 @@ final class FeedListViewModel {
     }
 
     func unreadCount(for feed: PersistentFeed) -> Int {
-        (try? persistence.unreadCount(for: feed)) ?? 0
+        do {
+            return try persistence.unreadCount(for: feed)
+        } catch {
+            Self.logger.warning("Failed to fetch unread count for '\(feed.title, privacy: .public)': \(error, privacy: .public)")
+            return 0
+        }
     }
 
     // MARK: - OPML Import/Export
@@ -238,7 +243,11 @@ final class FeedListViewModel {
             case .success(let fetchResult):
                 guard let fetchResult else {
                     // 304 Not Modified — feed is unchanged, just clear error state
-                    try? persistence.updateFeedError(feed, error: nil)
+                    do {
+                        try persistence.updateFeedError(feed, error: nil)
+                    } catch {
+                        Self.logger.error("Failed to clear error state for '\(feed.title, privacy: .public)': \(error, privacy: .public)")
+                    }
                     continue
                 }
                 do {
@@ -246,11 +255,16 @@ final class FeedListViewModel {
                     try persistence.upsertArticles(fetchResult.feed.articles, for: feed)
                     try persistence.updateFeedCacheHeaders(feed, etag: fetchResult.etag, lastModified: fetchResult.lastModified)
                 } catch {
+                    failureCount += 1
                     Self.logger.error("Failed to persist refresh for '\(feed.title, privacy: .public)': \(error, privacy: .public)")
                 }
             case .failure(let error):
                 failureCount += 1
-                try? persistence.updateFeedError(feed, error: Self.errorDescription(for: error))
+                do {
+                    try persistence.updateFeedError(feed, error: Self.errorDescription(for: error))
+                } catch {
+                    Self.logger.error("Failed to persist error state for '\(feed.title, privacy: .public)': \(error, privacy: .public)")
+                }
             }
         }
 

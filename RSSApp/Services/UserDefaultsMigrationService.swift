@@ -28,8 +28,9 @@ struct UserDefaultsMigrationService {
         do {
             feeds = try legacyStorage.loadFeeds()
         } catch {
-            logger.error("Failed to load legacy feeds: \(error, privacy: .public)")
-            defaults.set(true, forKey: migrationKey)
+            // Don't mark migration complete — retry on next launch in case a future
+            // update can decode the data or the error is transient.
+            logger.error("Failed to load legacy feeds, will retry next launch: \(error, privacy: .public)")
             return
         }
 

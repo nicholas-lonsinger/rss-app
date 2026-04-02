@@ -57,11 +57,22 @@ final class ArticleSummaryViewModel {
                 content = existing
             }
             // Check database cache
-            else if let persistentArticle, let persistence,
-                    let cached = try? persistence.cachedContent(for: persistentArticle) {
-                Self.logger.debug("Using cached content for '\(self.article.title, privacy: .public)'")
-                content = cached.toArticleContent()
-                extractedContent = content
+            else if let persistentArticle, let persistence {
+                let cachedContent: PersistentArticleContent?
+                do {
+                    cachedContent = try persistence.cachedContent(for: persistentArticle)
+                } catch {
+                    Self.logger.warning("Failed to load cached content for '\(self.article.title, privacy: .public)': \(error, privacy: .public)")
+                    cachedContent = nil
+                }
+
+                if let cached = cachedContent {
+                    Self.logger.debug("Using cached content for '\(self.article.title, privacy: .public)'")
+                    content = cached.toArticleContent()
+                    extractedContent = content
+                } else {
+                    content = try await extractArticle()
+                }
             }
             // Extract fresh
             else {

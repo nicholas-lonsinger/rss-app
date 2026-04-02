@@ -36,6 +36,12 @@ struct FeedListView: View {
                             viewModel: FeedViewModel(feed: feed, persistence: persistence),
                             persistence: persistence
                         )
+                    } else {
+                        ContentUnavailableView {
+                            Label("Feed Not Found", systemImage: "exclamationmark.triangle")
+                        } description: {
+                            Text("This feed is no longer available.")
+                        }
                     }
                 }
                 .toolbar { toolbarItems }

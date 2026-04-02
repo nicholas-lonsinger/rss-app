@@ -95,4 +95,114 @@ struct FeedViewModelTests {
 
         #expect(viewModel.feedTitle == "Original")
     }
+
+    // MARK: - Cache-First Loading
+
+    @Test("loadFeed shows cached articles when network fails")
+    @MainActor
+    func loadFeedCachedArticlesOnNetworkFailure() async {
+        let feed = TestFixtures.makePersistentFeed(feedURL: URL(string: "https://example.com/feed")!)
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+        // Pre-populate cached articles
+        let cachedArticles = [
+            TestFixtures.makeArticle(id: "cached-1", title: "Cached Article"),
+        ]
+        try? mockPersistence.upsertArticles(cachedArticles, for: feed)
+
+        let mock = MockFeedFetchingService()
+        mock.errorToThrow = FeedFetchingError.invalidResponse(statusCode: 500)
+
+        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence)
+        await viewModel.loadFeed()
+
+        // Should show cached articles, NOT show error
+        #expect(viewModel.articles.count == 1)
+        #expect(viewModel.errorMessage == nil)
+        #expect(viewModel.isLoading == false)
+    }
+
+    @Test("loadFeed shows error only when no cached articles and network fails")
+    @MainActor
+    func loadFeedErrorWhenNoCachedArticles() async {
+        let feed = TestFixtures.makePersistentFeed(feedURL: URL(string: "https://example.com/feed")!)
+        let mockPersistence = MockFeedPersistenceService()
+        let mock = MockFeedFetchingService()
+        mock.errorToThrow = FeedFetchingError.invalidResponse(statusCode: 500)
+
+        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence)
+        await viewModel.loadFeed()
+
+        #expect(viewModel.articles.isEmpty)
+        #expect(viewModel.errorMessage != nil)
+    }
+
+    // MARK: - Read Status
+
+    @Test("markAsRead sets read status on unread article")
+    @MainActor
+    func markAsReadSetsStatus() {
+        let feed = TestFixtures.makePersistentFeed()
+        let article = TestFixtures.makePersistentArticle(isRead: false)
+        let mockPersistence = MockFeedPersistenceService()
+
+        let viewModel = FeedViewModel(feed: feed, feedFetching: MockFeedFetchingService(), persistence: mockPersistence)
+        viewModel.markAsRead(article)
+
+        #expect(article.isRead == true)
+    }
+
+    @Test("markAsRead is no-op for already read article")
+    @MainActor
+    func markAsReadNoOpForRead() {
+        let feed = TestFixtures.makePersistentFeed()
+        let article = TestFixtures.makePersistentArticle(isRead: true)
+        let mockPersistence = MockFeedPersistenceService()
+
+        let viewModel = FeedViewModel(feed: feed, feedFetching: MockFeedFetchingService(), persistence: mockPersistence)
+        viewModel.markAsRead(article)
+
+        #expect(article.isRead == true)
+        #expect(viewModel.errorMessage == nil)
+    }
+
+    @Test("toggleReadStatus toggles from unread to read")
+    @MainActor
+    func toggleReadStatusToRead() {
+        let feed = TestFixtures.makePersistentFeed()
+        let article = TestFixtures.makePersistentArticle(isRead: false)
+        let mockPersistence = MockFeedPersistenceService()
+
+        let viewModel = FeedViewModel(feed: feed, feedFetching: MockFeedFetchingService(), persistence: mockPersistence)
+        viewModel.toggleReadStatus(article)
+
+        #expect(article.isRead == true)
+    }
+
+    @Test("toggleReadStatus toggles from read to unread")
+    @MainActor
+    func toggleReadStatusToUnread() {
+        let feed = TestFixtures.makePersistentFeed()
+        let article = TestFixtures.makePersistentArticle(isRead: true)
+        let mockPersistence = MockFeedPersistenceService()
+
+        let viewModel = FeedViewModel(feed: feed, feedFetching: MockFeedFetchingService(), persistence: mockPersistence)
+        viewModel.toggleReadStatus(article)
+
+        #expect(article.isRead == false)
+    }
+
+    @Test("markAsRead sets errorMessage on persistence failure")
+    @MainActor
+    func markAsReadPersistenceError() {
+        let feed = TestFixtures.makePersistentFeed()
+        let article = TestFixtures.makePersistentArticle(isRead: false)
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.errorToThrow = NSError(domain: "test", code: 1)
+
+        let viewModel = FeedViewModel(feed: feed, feedFetching: MockFeedFetchingService(), persistence: mockPersistence)
+        viewModel.markAsRead(article)
+
+        #expect(viewModel.errorMessage != nil)
+    }
 }

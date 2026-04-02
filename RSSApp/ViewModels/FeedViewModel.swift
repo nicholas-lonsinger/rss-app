@@ -33,9 +33,14 @@ final class FeedViewModel {
     func loadFeed() async {
         Self.logger.debug("loadFeed() called for '\(self.feed.title, privacy: .public)'")
 
-        // Show cached articles immediately
-        if let cached = try? persistence.articles(for: feed), !cached.isEmpty {
-            articles = cached
+        // Show cached articles immediately (cache-first loading for offline support)
+        do {
+            let cached = try persistence.articles(for: feed)
+            if !cached.isEmpty {
+                articles = cached
+            }
+        } catch {
+            Self.logger.warning("Failed to load cached articles for '\(self.feed.title, privacy: .public)': \(error, privacy: .public)")
         }
 
         isLoading = articles.isEmpty
@@ -61,6 +66,7 @@ final class FeedViewModel {
         do {
             try persistence.markArticleRead(article, isRead: true)
         } catch {
+            errorMessage = "Unable to save read status."
             Self.logger.error("Failed to mark article as read: \(error, privacy: .public)")
         }
     }
@@ -69,6 +75,7 @@ final class FeedViewModel {
         do {
             try persistence.markArticleRead(article, isRead: !article.isRead)
         } catch {
+            errorMessage = "Unable to save read status."
             Self.logger.error("Failed to toggle read status: \(error, privacy: .public)")
         }
     }

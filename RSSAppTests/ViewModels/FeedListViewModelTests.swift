@@ -316,4 +316,151 @@ struct FeedListViewModelTests {
         #expect(viewModel.feeds[0].lastFetchErrorDate == nil)
         #expect(viewModel.feeds[0].title == "Fixed")
     }
+
+    // MARK: - OPML Import (Happy Paths)
+
+    @Test("importOPML adds new feeds")
+    @MainActor
+    func importOPMLAddsNewFeeds() {
+        let mockPersistence = MockFeedPersistenceService()
+        let mockOPML = MockOPMLService()
+        mockOPML.entriesToReturn = [
+            TestFixtures.makeOPMLFeedEntry(title: "Feed A", feedURL: URL(string: "https://a.com/feed")!),
+            TestFixtures.makeOPMLFeedEntry(title: "Feed B", feedURL: URL(string: "https://b.com/feed")!),
+        ]
+
+        let viewModel = FeedListViewModel(persistence: mockPersistence, opmlService: mockOPML)
+        viewModel.importOPML(from: Data())
+
+        #expect(viewModel.feeds.count == 2)
+        #expect(viewModel.opmlImportResult?.addedCount == 2)
+        #expect(viewModel.opmlImportResult?.skippedCount == 0)
+        #expect(viewModel.errorMessage == nil)
+    }
+
+    @Test("importOPML skips duplicate feeds")
+    @MainActor
+    func importOPMLSkipsDuplicates() {
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [
+            TestFixtures.makePersistentFeed(title: "Existing", feedURL: URL(string: "https://existing.com/feed")!),
+        ]
+
+        let mockOPML = MockOPMLService()
+        mockOPML.entriesToReturn = [
+            TestFixtures.makeOPMLFeedEntry(title: "Existing Dupe", feedURL: URL(string: "https://existing.com/feed")!),
+            TestFixtures.makeOPMLFeedEntry(title: "New Feed", feedURL: URL(string: "https://new.com/feed")!),
+        ]
+
+        let viewModel = FeedListViewModel(persistence: mockPersistence, opmlService: mockOPML)
+        viewModel.loadFeeds()
+        viewModel.importOPML(from: Data())
+
+        #expect(viewModel.feeds.count == 2)
+        #expect(viewModel.opmlImportResult?.addedCount == 1)
+        #expect(viewModel.opmlImportResult?.skippedCount == 1)
+    }
+
+    @Test("importOPML with all duplicates adds nothing")
+    @MainActor
+    func importOPMLAllDuplicates() {
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [
+            TestFixtures.makePersistentFeed(feedURL: URL(string: "https://a.com/feed")!),
+        ]
+
+        let mockOPML = MockOPMLService()
+        mockOPML.entriesToReturn = [
+            TestFixtures.makeOPMLFeedEntry(feedURL: URL(string: "https://a.com/feed")!),
+        ]
+
+        let viewModel = FeedListViewModel(persistence: mockPersistence, opmlService: mockOPML)
+        viewModel.loadFeeds()
+        viewModel.importOPML(from: Data())
+
+        #expect(viewModel.feeds.count == 1)
+        #expect(viewModel.opmlImportResult?.addedCount == 0)
+        #expect(viewModel.opmlImportResult?.skippedCount == 1)
+    }
+
+    @Test("importOPML sets correct result counts")
+    @MainActor
+    func importOPMLSetsResultCounts() {
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [
+            TestFixtures.makePersistentFeed(feedURL: URL(string: "https://existing.com/feed")!),
+        ]
+
+        let mockOPML = MockOPMLService()
+        mockOPML.entriesToReturn = [
+            TestFixtures.makeOPMLFeedEntry(feedURL: URL(string: "https://existing.com/feed")!),
+            TestFixtures.makeOPMLFeedEntry(feedURL: URL(string: "https://new1.com/feed")!),
+            TestFixtures.makeOPMLFeedEntry(feedURL: URL(string: "https://new2.com/feed")!),
+        ]
+
+        let viewModel = FeedListViewModel(persistence: mockPersistence, opmlService: mockOPML)
+        viewModel.loadFeeds()
+        viewModel.importOPML(from: Data())
+
+        #expect(viewModel.opmlImportResult?.addedCount == 2)
+        #expect(viewModel.opmlImportResult?.skippedCount == 1)
+    }
+
+    @Test("importOPMLAndRefresh adds feeds then refreshes metadata")
+    @MainActor
+    func importOPMLAndRefreshIntegration() async {
+        let url1 = URL(string: "https://one.com/feed")!
+        let url2 = URL(string: "https://two.com/feed")!
+
+        let mockPersistence = MockFeedPersistenceService()
+        let mockOPML = MockOPMLService()
+        mockOPML.entriesToReturn = [
+            TestFixtures.makeOPMLFeedEntry(title: "OPML One", feedURL: url1, description: ""),
+            TestFixtures.makeOPMLFeedEntry(title: "OPML Two", feedURL: url2, description: ""),
+        ]
+        let mockFetching = MockFeedFetchingService()
+        mockFetching.feedsByURL = [
+            url1: TestFixtures.makeFeed(title: "Real One", feedDescription: "Real Desc"),
+            url2: TestFixtures.makeFeed(title: "Real Two", feedDescription: "Real Desc"),
+        ]
+
+        let viewModel = FeedListViewModel(
+            persistence: mockPersistence,
+            opmlService: mockOPML,
+            feedFetching: mockFetching
+        )
+        await viewModel.importOPMLAndRefresh(from: Data())
+
+        #expect(viewModel.feeds.count == 2)
+        #expect(viewModel.opmlImportResult?.addedCount == 2)
+    }
+
+    // MARK: - 304 Not Modified
+
+    @Test("refreshAllFeeds handles 304 Not Modified")
+    @MainActor
+    func refreshAllFeeds304NotModified() async {
+        let url = URL(string: "https://example.com/feed")!
+        let feed = TestFixtures.makePersistentFeed(
+            title: "Existing",
+            feedURL: url,
+            lastFetchError: "HTTP 500",
+            lastFetchErrorDate: Date()
+        )
+
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+        let mockFetching = MockFeedFetchingService()
+        mockFetching.shouldReturn304 = true
+
+        let viewModel = FeedListViewModel(persistence: mockPersistence, feedFetching: mockFetching)
+        viewModel.loadFeeds()
+        await viewModel.refreshAllFeeds()
+
+        // Title should not change (304 means no new data)
+        #expect(viewModel.feeds[0].title == "Existing")
+        // Error state should be cleared
+        #expect(viewModel.feeds[0].lastFetchError == nil)
+        #expect(viewModel.errorMessage == nil)
+    }
 }
