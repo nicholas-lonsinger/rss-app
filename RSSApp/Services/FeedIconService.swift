@@ -78,7 +78,7 @@ struct FeedIconService: FeedIconResolving {
                 return false
             }
 
-            guard let image = UIImage(data: data) else {
+            guard let image = UIImage(data: data) ?? Self.decodeICO(data) else {
                 Self.logger.debug("Downloaded data is not a valid image")
                 return false
             }
@@ -135,6 +135,110 @@ struct FeedIconService: FeedIconResolving {
             Self.logger.debug("Failed to fetch site HTML: \(error, privacy: .public)")
             return nil
         }
+    }
+
+    /// Decodes an ICO file by extracting the largest embedded image.
+    /// ICO files contain a directory of images (PNG or BMP) at various sizes.
+    static func decodeICO(_ data: Data) -> UIImage? {
+        // ICO header: 2 bytes reserved (0), 2 bytes type (1 = icon), 2 bytes image count
+        guard data.count >= 6 else { return nil }
+        let reserved = UInt16(data[0]) | UInt16(data[1]) << 8
+        let type = UInt16(data[2]) | UInt16(data[3]) << 8
+        let count = UInt16(data[4]) | UInt16(data[5]) << 8
+        guard reserved == 0, type == 1, count > 0 else { return nil }
+
+        // Each directory entry is 16 bytes, starting at offset 6
+        let headerSize = 6
+        let entrySize = 16
+        guard data.count >= headerSize + Int(count) * entrySize else { return nil }
+
+        // Find the largest image entry by pixel area
+        var bestArea = 0
+        var bestOffset: UInt32 = 0
+        var bestSize: UInt32 = 0
+
+        for i in 0..<Int(count) {
+            let base = headerSize + i * entrySize
+            // Width/height of 0 means 256
+            let w = data[base] == 0 ? 256 : Int(data[base])
+            let h = data[base + 1] == 0 ? 256 : Int(data[base + 1])
+            let area = w * h
+
+            let bytesInRes = UInt32(data[base + 8])
+                | UInt32(data[base + 9]) << 8
+                | UInt32(data[base + 10]) << 16
+                | UInt32(data[base + 11]) << 24
+            let imageOffset = UInt32(data[base + 12])
+                | UInt32(data[base + 13]) << 8
+                | UInt32(data[base + 14]) << 16
+                | UInt32(data[base + 15]) << 24
+
+            if area > bestArea {
+                bestArea = area
+                bestOffset = imageOffset
+                bestSize = bytesInRes
+            }
+        }
+
+        guard bestSize > 0,
+              Int(bestOffset) + Int(bestSize) <= data.count else { return nil }
+
+        let imageData = data[Int(bestOffset)..<Int(bestOffset) + Int(bestSize)]
+
+        // Try PNG first (many modern ICOs embed PNG), then fall back to raw data
+        if let image = UIImage(data: Data(imageData)) {
+            logger.debug("Decoded ICO image (PNG-embedded, \(bestArea)px area)")
+            return image
+        }
+
+        // BMP in ICO: starts with BITMAPINFOHEADER (40 bytes).
+        // Wrap it in a proper BMP file so CGImage can decode it.
+        if imageData.count > 40 {
+            if let image = decodeBMPFromICO(Data(imageData), width: Int(sqrt(Double(bestArea)))) {
+                logger.debug("Decoded ICO image (BMP, \(bestArea)px area)")
+                return image
+            }
+        }
+
+        return nil
+    }
+
+    /// Decodes a BMP image entry from an ICO file.
+    /// ICO BMP entries omit the 14-byte BITMAPFILEHEADER and use doubled height
+    /// (to account for the AND mask). This method prepends the file header and
+    /// fixes the height before passing to CGDataProvider.
+    private static func decodeBMPFromICO(_ bmpData: Data, width: Int) -> UIImage? {
+        guard bmpData.count >= 40 else { return nil }
+
+        // Read BITMAPINFOHEADER fields
+        var header = bmpData.prefix(40)
+        let biHeight = Int32(bitPattern:
+            UInt32(header[8]) | UInt32(header[9]) << 8
+            | UInt32(header[10]) << 16 | UInt32(header[11]) << 24
+        )
+
+        // ICO doubles the height to include the AND mask — halve it
+        let realHeight = abs(biHeight) / 2
+        let correctedHeight = UInt32(bitPattern: Int32(realHeight))
+        header[8] = UInt8(correctedHeight & 0xFF)
+        header[9] = UInt8((correctedHeight >> 8) & 0xFF)
+        header[10] = UInt8((correctedHeight >> 16) & 0xFF)
+        header[11] = UInt8((correctedHeight >> 24) & 0xFF)
+
+        // Build a full BMP file: 14-byte file header + corrected BITMAPINFOHEADER + pixel data
+        let pixelDataOffset: UInt32 = 14 + 40
+        let fileSize = UInt32(14 + bmpData.count)
+        var bmpFile = Data(capacity: Int(fileSize))
+        // BITMAPFILEHEADER (14 bytes)
+        bmpFile.append(contentsOf: [0x42, 0x4D]) // "BM"
+        bmpFile.append(contentsOf: withUnsafeBytes(of: fileSize.littleEndian) { Array($0) })
+        bmpFile.append(contentsOf: [0, 0, 0, 0]) // reserved
+        bmpFile.append(contentsOf: withUnsafeBytes(of: pixelDataOffset.littleEndian) { Array($0) })
+        // Corrected header + rest of pixel data
+        bmpFile.append(header)
+        bmpFile.append(bmpData.dropFirst(40))
+
+        return UIImage(data: bmpFile)
     }
 
     private func normalizeImage(_ image: UIImage) -> UIImage {
