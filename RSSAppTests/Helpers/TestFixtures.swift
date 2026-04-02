@@ -248,6 +248,25 @@ enum TestFixtures {
         </feed>
         """
 
+    static let atomCategoryDoubleCountXML = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <feed xmlns="http://www.w3.org/2005/Atom">
+            <title>Double Count Feed</title>
+            <link rel="alternate" href="https://example.com" />
+            <id>https://example.com/dc-feed</id>
+            <updated>2026-04-01T00:00:00Z</updated>
+            <entry>
+                <title>Double Count Entry</title>
+                <link rel="alternate" href="https://example.com/dc-entry" />
+                <id>dc-entry-id</id>
+                <published>2026-04-01T10:00:00Z</published>
+                <category term="tech">Technology</category>
+                <category term="swift">Swift Programming</category>
+                <summary>Entry with category term and text content</summary>
+            </entry>
+        </feed>
+        """
+
     static let rssCategoriesXML = """
         <?xml version="1.0" encoding="UTF-8"?>
         <rss version="2.0">
