@@ -11,6 +11,7 @@ final class FeedListViewModel {
     )
 
     private(set) var feeds: [PersistentFeed] = []
+    private(set) var unreadCounts: [UUID: Int] = [:]
     private(set) var isRefreshing = false
     var errorMessage: String?
     var opmlImportResult: OPMLImportResult?
@@ -33,12 +34,26 @@ final class FeedListViewModel {
     func loadFeeds() {
         do {
             feeds = try persistence.allFeeds()
+            refreshUnreadCounts()
             errorMessage = nil
             Self.logger.debug("Loaded \(self.feeds.count, privacy: .public) feeds")
         } catch {
             errorMessage = "Unable to load your feeds."
             Self.logger.error("Failed to load feeds: \(error, privacy: .public)")
         }
+    }
+
+    func refreshUnreadCounts() {
+        var counts: [UUID: Int] = [:]
+        for feed in feeds {
+            do {
+                counts[feed.id] = try persistence.unreadCount(for: feed)
+            } catch {
+                Self.logger.warning("Failed to fetch unread count for '\(feed.title, privacy: .public)': \(error, privacy: .public)")
+                counts[feed.id] = 0
+            }
+        }
+        unreadCounts = counts
     }
 
     func removeFeed(_ feed: PersistentFeed) {
@@ -71,12 +86,7 @@ final class FeedListViewModel {
     }
 
     func unreadCount(for feed: PersistentFeed) -> Int {
-        do {
-            return try persistence.unreadCount(for: feed)
-        } catch {
-            Self.logger.warning("Failed to fetch unread count for '\(feed.title, privacy: .public)': \(error, privacy: .public)")
-            return 0
-        }
+        unreadCounts[feed.id] ?? 0
     }
 
     // MARK: - OPML Import/Export

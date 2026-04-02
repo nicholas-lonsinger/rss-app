@@ -3,6 +3,7 @@ import UniformTypeIdentifiers
 
 struct FeedListView: View {
     @State private var viewModel: FeedListViewModel
+    @State private var navigationPath = NavigationPath()
     @State private var showAddFeed = false
     @State private var showSettings = false
     @State private var showFileImporter = false
@@ -27,7 +28,7 @@ struct FeedListView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $navigationPath) {
             feedContent
                 .navigationTitle("Feeds")
                 .navigationDestination(for: PersistentFeed.ID.self) { feedID in
@@ -93,6 +94,11 @@ struct FeedListView: View {
                 }
                 .task {
                     viewModel.loadFeeds()
+                }
+                .onChange(of: navigationPath.count) { oldCount, newCount in
+                    if newCount < oldCount {
+                        viewModel.refreshUnreadCounts()
+                    }
                 }
         }
     }
