@@ -465,6 +465,90 @@ struct RSSParsingServiceTests {
         #expect(!entry.snippet.contains("<"))
     }
 
+    @Test("Atom deeply nested XHTML is reconstructed correctly")
+    func atomXHTMLDeeplyNested() throws {
+        let xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <feed xmlns="http://www.w3.org/2005/Atom">
+                <title>Nested XHTML Feed</title>
+                <link rel="alternate" href="https://example.com" />
+                <id>https://example.com/nested</id>
+                <updated>2026-04-01T00:00:00Z</updated>
+                <entry>
+                    <title>Nested Entry</title>
+                    <link rel="alternate" href="https://example.com/nested-1" />
+                    <id>nested-entry-1</id>
+                    <content type="xhtml">
+                        <div xmlns="http://www.w3.org/1999/xhtml">
+                            <div><ul><li>Item one</li><li>Item two</li></ul></div>
+                        </div>
+                    </content>
+                </entry>
+            </feed>
+            """
+        let data = Data(xml.utf8)
+        let feed = try service.parse(data)
+        let entry = feed.articles[0]
+
+        #expect(entry.articleDescription.contains("<div><ul><li>Item one</li><li>Item two</li></ul></div>"))
+    }
+
+    @Test("Atom empty XHTML content produces empty description")
+    func atomXHTMLEmptyContent() throws {
+        let xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <feed xmlns="http://www.w3.org/2005/Atom">
+                <title>Empty XHTML Feed</title>
+                <link rel="alternate" href="https://example.com" />
+                <id>https://example.com/empty-xhtml</id>
+                <updated>2026-04-01T00:00:00Z</updated>
+                <entry>
+                    <title>Empty Entry</title>
+                    <link rel="alternate" href="https://example.com/empty-1" />
+                    <id>empty-xhtml-entry</id>
+                    <content type="xhtml">
+                        <div xmlns="http://www.w3.org/1999/xhtml">
+                        </div>
+                    </content>
+                </entry>
+            </feed>
+            """
+        let data = Data(xml.utf8)
+        let feed = try service.parse(data)
+        let entry = feed.articles[0]
+
+        #expect(entry.articleDescription.isEmpty)
+    }
+
+    @Test("Atom XHTML attributes with special characters are escaped")
+    func atomXHTMLAttributeEscaping() throws {
+        let xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <feed xmlns="http://www.w3.org/2005/Atom">
+                <title>Attribute Escape Feed</title>
+                <link rel="alternate" href="https://example.com" />
+                <id>https://example.com/attr-escape</id>
+                <updated>2026-04-01T00:00:00Z</updated>
+                <entry>
+                    <title>Attribute Entry</title>
+                    <link rel="alternate" href="https://example.com/attr-1" />
+                    <id>attr-escape-entry</id>
+                    <content type="xhtml">
+                        <div xmlns="http://www.w3.org/1999/xhtml">
+                            <a href="https://example.com?a=1&amp;b=2" title="Tom &amp; Jerry">Link</a>
+                        </div>
+                    </content>
+                </entry>
+            </feed>
+            """
+        let data = Data(xml.utf8)
+        let feed = try service.parse(data)
+        let entry = feed.articles[0]
+
+        #expect(entry.articleDescription.contains("href=\"https://example.com?a=1&amp;b=2\""))
+        #expect(entry.articleDescription.contains("title=\"Tom &amp; Jerry\""))
+    }
+
     // MARK: - Categories
 
     @Test("Atom category term attributes are extracted")
