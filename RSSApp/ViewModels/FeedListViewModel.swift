@@ -277,6 +277,20 @@ final class FeedListViewModel {
                     } catch {
                         Self.logger.error("Failed to clear error state for '\(feed.title, privacy: .public)': \(error, privacy: .public)")
                     }
+                    // Still resolve icon if not cached (e.g., add-time resolution failed)
+                    if feedIconService.cachedIconFileURL(for: feed.id) == nil {
+                        let siteURL = Self.siteURL(from: feed.feedURL)
+                        let iconURL = await feedIconService.resolveIconURL(
+                            feedSiteURL: siteURL,
+                            feedImageURL: feed.iconURL
+                        )
+                        if let iconURL {
+                            let cached = await feedIconService.cacheIcon(from: iconURL, feedID: feed.id)
+                            if cached {
+                                try? persistence.updateFeedIcon(feed, iconURL: iconURL)
+                            }
+                        }
+                    }
                     continue
                 }
                 do {
@@ -323,6 +337,12 @@ final class FeedListViewModel {
         if failureCount > 0 {
             errorMessage = "\(failureCount) of \(feedsToRefresh.count) feed(s) could not be updated."
         }
+    }
+
+    /// Derives a site root URL from a feed URL (e.g., https://example.com/feed → https://example.com).
+    private static func siteURL(from feedURL: URL) -> URL? {
+        guard let host = feedURL.host(percentEncoded: false), !host.isEmpty else { return nil }
+        return URL(string: "\(feedURL.scheme ?? "https")://\(host)")
     }
 
     private static func errorDescription(for error: any Error) -> String {
