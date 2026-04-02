@@ -10,9 +10,11 @@ final class MockFeedPersistenceService: FeedPersisting {
     var feeds: [PersistentFeed] = []
     var errorToThrow: (any Error)?
     var unreadCountError: (any Error)?
+    var addFeedFailureAfterCount: Int?
 
     var articlesByFeedID: [UUID: [PersistentArticle]] = [:]
     private var contentByArticleID: [String: PersistentArticleContent] = [:]
+    private var addFeedCallCount = 0
 
     // MARK: - Feed Operations
 
@@ -23,6 +25,10 @@ final class MockFeedPersistenceService: FeedPersisting {
 
     func addFeed(_ feed: PersistentFeed) throws {
         if let error = errorToThrow { throw error }
+        if let limit = addFeedFailureAfterCount, addFeedCallCount >= limit {
+            throw NSError(domain: "MockPersistence", code: 1, userInfo: [NSLocalizedDescriptionKey: "Simulated persistence failure"])
+        }
+        addFeedCallCount += 1
         feeds.append(feed)
     }
 

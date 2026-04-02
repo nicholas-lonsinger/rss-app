@@ -551,6 +551,46 @@ struct FeedListViewModelTests {
         #expect(viewModel.opmlImportResult?.addedCount == 2)
     }
 
+    @Test("importOPML deduplicates within the same file")
+    @MainActor
+    func importOPMLIntraFileDuplicates() {
+        let mockPersistence = MockFeedPersistenceService()
+        let mockOPML = MockOPMLService()
+        mockOPML.entriesToReturn = [
+            TestFixtures.makeOPMLFeedEntry(title: "Feed A", feedURL: URL(string: "https://a.com/feed")!),
+            TestFixtures.makeOPMLFeedEntry(title: "Feed A Dupe", feedURL: URL(string: "https://a.com/feed")!),
+            TestFixtures.makeOPMLFeedEntry(title: "Feed B", feedURL: URL(string: "https://b.com/feed")!),
+        ]
+
+        let viewModel = FeedListViewModel(persistence: mockPersistence, opmlService: mockOPML)
+        viewModel.importOPML(from: Data())
+
+        #expect(viewModel.feeds.count == 2)
+        #expect(viewModel.opmlImportResult?.addedCount == 2)
+        #expect(viewModel.opmlImportResult?.skippedCount == 1)
+    }
+
+    @Test("importOPML aborts early on persistence failure mid-import")
+    @MainActor
+    func importOPMLPersistenceFailureMidImport() {
+        let mockPersistence = MockFeedPersistenceService()
+        // First addFeed succeeds, second fails
+        mockPersistence.addFeedFailureAfterCount = 1
+        let mockOPML = MockOPMLService()
+        mockOPML.entriesToReturn = [
+            TestFixtures.makeOPMLFeedEntry(title: "Feed A", feedURL: URL(string: "https://a.com/feed")!),
+            TestFixtures.makeOPMLFeedEntry(title: "Feed B", feedURL: URL(string: "https://b.com/feed")!),
+            TestFixtures.makeOPMLFeedEntry(title: "Feed C", feedURL: URL(string: "https://c.com/feed")!),
+        ]
+
+        let viewModel = FeedListViewModel(persistence: mockPersistence, opmlService: mockOPML)
+        viewModel.importOPML(from: Data())
+
+        // Only the first feed should have been added — import aborts on second
+        #expect(viewModel.feeds.count == 1)
+        #expect(viewModel.opmlImportResult == nil)
+    }
+
     // MARK: - 304 Not Modified
 
     @Test("refreshAllFeeds handles 304 Not Modified")

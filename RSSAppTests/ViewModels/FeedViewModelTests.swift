@@ -192,6 +192,55 @@ struct FeedViewModelTests {
         #expect(article.isRead == false)
     }
 
+    @Test("loadFeed clears error on successful retry")
+    @MainActor
+    func loadFeedClearsErrorOnRetry() async {
+        let feed = TestFixtures.makePersistentFeed(feedURL: URL(string: "https://example.com/feed")!)
+        let mock = MockFeedFetchingService()
+        mock.errorToThrow = FeedFetchingError.invalidResponse(statusCode: 500)
+        let mockPersistence = MockFeedPersistenceService()
+
+        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence)
+        await viewModel.loadFeed()
+        #expect(viewModel.errorMessage != nil)
+
+        // Retry with success
+        mock.errorToThrow = nil
+        mock.feedToReturn = TestFixtures.makeFeed(articles: [
+            TestFixtures.makeArticle(id: "1", title: "Article"),
+        ])
+        await viewModel.loadFeed()
+
+        #expect(viewModel.errorMessage == nil)
+        #expect(viewModel.articles.count == 1)
+    }
+
+    @Test("loadFeed accumulates articles via upsert")
+    @MainActor
+    func loadFeedAccumulatesArticles() async {
+        let feed = TestFixtures.makePersistentFeed(feedURL: URL(string: "https://example.com/feed")!)
+        let mock = MockFeedFetchingService()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+
+        // First load: 2 articles
+        mock.feedToReturn = TestFixtures.makeFeed(articles: [
+            TestFixtures.makeArticle(id: "1", title: "First"),
+            TestFixtures.makeArticle(id: "2", title: "Second"),
+        ])
+        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence)
+        await viewModel.loadFeed()
+        #expect(viewModel.articles.count == 2)
+
+        // Second load: 1 new + 1 existing (should have 3 total after upsert)
+        mock.feedToReturn = TestFixtures.makeFeed(articles: [
+            TestFixtures.makeArticle(id: "2", title: "Second Updated"),
+            TestFixtures.makeArticle(id: "3", title: "Third"),
+        ])
+        await viewModel.loadFeed()
+        #expect(viewModel.articles.count == 3)
+    }
+
     @Test("markAsRead sets errorMessage on persistence failure")
     @MainActor
     func markAsReadPersistenceError() {
