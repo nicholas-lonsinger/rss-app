@@ -1,0 +1,181 @@
+import Foundation
+import SwiftData
+import os
+
+// MARK: - Protocol
+
+@MainActor
+protocol FeedPersisting: Sendable {
+
+    // MARK: Feed operations
+
+    func allFeeds() throws -> [PersistentFeed]
+    func addFeed(_ feed: PersistentFeed) throws
+    func deleteFeed(_ feed: PersistentFeed) throws
+    func updateFeedMetadata(_ feed: PersistentFeed, title: String, description: String) throws
+    func updateFeedError(_ feed: PersistentFeed, error: String?) throws
+    func updateFeedURL(_ feed: PersistentFeed, newURL: URL) throws
+    func updateFeedCacheHeaders(_ feed: PersistentFeed, etag: String?, lastModified: String?) throws
+    func feedExists(url: URL) throws -> Bool
+
+    // MARK: Article operations
+
+    func articles(for feed: PersistentFeed) throws -> [PersistentArticle]
+    func upsertArticles(_ articles: [Article], for feed: PersistentFeed) throws
+    func markArticleRead(_ article: PersistentArticle, isRead: Bool) throws
+    func unreadCount(for feed: PersistentFeed) throws -> Int
+
+    // MARK: Content cache
+
+    func cachedContent(for article: PersistentArticle) throws -> PersistentArticleContent?
+    func cacheContent(_ content: ArticleContent, for article: PersistentArticle) throws
+}
+
+// MARK: - SwiftData Implementation
+
+@MainActor
+final class SwiftDataFeedPersistenceService: FeedPersisting {
+
+    private static let logger = Logger(
+        subsystem: "com.nicholas-lonsinger.rss-app",
+        category: "FeedPersistenceService"
+    )
+
+    private let modelContext: ModelContext
+
+    init(modelContext: ModelContext) {
+        self.modelContext = modelContext
+    }
+
+    // MARK: - Feed Operations
+
+    func allFeeds() throws -> [PersistentFeed] {
+        let descriptor = FetchDescriptor<PersistentFeed>(
+            sortBy: [SortDescriptor(\.addedDate)]
+        )
+        let feeds = try modelContext.fetch(descriptor)
+        Self.logger.debug("Fetched \(feeds.count, privacy: .public) feeds")
+        return feeds
+    }
+
+    func addFeed(_ feed: PersistentFeed) throws {
+        modelContext.insert(feed)
+        try modelContext.save()
+        Self.logger.notice("Added feed '\(feed.title, privacy: .public)'")
+    }
+
+    func deleteFeed(_ feed: PersistentFeed) throws {
+        let title = feed.title
+        modelContext.delete(feed)
+        try modelContext.save()
+        Self.logger.notice("Deleted feed '\(title, privacy: .public)'")
+    }
+
+    func updateFeedMetadata(_ feed: PersistentFeed, title: String, description: String) throws {
+        feed.title = title
+        feed.feedDescription = description
+        feed.lastRefreshDate = Date()
+        feed.lastFetchError = nil
+        feed.lastFetchErrorDate = nil
+        try modelContext.save()
+        Self.logger.debug("Updated metadata for '\(title, privacy: .public)'")
+    }
+
+    func updateFeedError(_ feed: PersistentFeed, error: String?) throws {
+        feed.lastFetchError = error
+        feed.lastFetchErrorDate = error != nil ? Date() : nil
+        try modelContext.save()
+        Self.logger.debug("Updated error state for '\(feed.title, privacy: .public)'")
+    }
+
+    func updateFeedURL(_ feed: PersistentFeed, newURL: URL) throws {
+        feed.feedURL = newURL
+        feed.lastFetchError = nil
+        feed.lastFetchErrorDate = nil
+        try modelContext.save()
+        Self.logger.debug("Updated URL for '\(feed.title, privacy: .public)'")
+    }
+
+    func updateFeedCacheHeaders(_ feed: PersistentFeed, etag: String?, lastModified: String?) throws {
+        feed.etag = etag
+        feed.lastModifiedHeader = lastModified
+        try modelContext.save()
+        Self.logger.debug("Updated cache headers for '\(feed.title, privacy: .public)'")
+    }
+
+    func feedExists(url: URL) throws -> Bool {
+        let feedURL = url
+        var descriptor = FetchDescriptor<PersistentFeed>(
+            predicate: #Predicate { $0.feedURL == feedURL }
+        )
+        descriptor.fetchLimit = 1
+        let count = try modelContext.fetchCount(descriptor)
+        return count > 0
+    }
+
+    // MARK: - Article Operations
+
+    func articles(for feed: PersistentFeed) throws -> [PersistentArticle] {
+        let feedID = feed.persistentModelID
+        let descriptor = FetchDescriptor<PersistentArticle>(
+            predicate: #Predicate { $0.feed?.persistentModelID == feedID },
+            sortBy: [SortDescriptor(\.publishedDate, order: .reverse)]
+        )
+        return try modelContext.fetch(descriptor)
+    }
+
+    func upsertArticles(_ articles: [Article], for feed: PersistentFeed) throws {
+        let existingIDs = Set(feed.articles.map(\.articleID))
+        var insertedCount = 0
+
+        for article in articles {
+            guard !existingIDs.contains(article.id) else { continue }
+            let persistent = PersistentArticle(from: article)
+            persistent.feed = feed
+            modelContext.insert(persistent)
+            insertedCount += 1
+        }
+
+        if insertedCount > 0 {
+            try modelContext.save()
+        }
+        Self.logger.debug("Upserted articles for '\(feed.title, privacy: .public)': \(insertedCount, privacy: .public) new, \(articles.count - insertedCount, privacy: .public) existing")
+    }
+
+    func markArticleRead(_ article: PersistentArticle, isRead: Bool) throws {
+        article.isRead = isRead
+        article.readDate = isRead ? Date() : nil
+        try modelContext.save()
+        Self.logger.debug("Marked article '\(article.title, privacy: .public)' as \(isRead ? "read" : "unread", privacy: .public)")
+    }
+
+    func unreadCount(for feed: PersistentFeed) throws -> Int {
+        let feedID = feed.persistentModelID
+        let descriptor = FetchDescriptor<PersistentArticle>(
+            predicate: #Predicate { $0.feed?.persistentModelID == feedID && !$0.isRead }
+        )
+        return try modelContext.fetchCount(descriptor)
+    }
+
+    // MARK: - Content Cache
+
+    func cachedContent(for article: PersistentArticle) throws -> PersistentArticleContent? {
+        article.content
+    }
+
+    func cacheContent(_ content: ArticleContent, for article: PersistentArticle) throws {
+        if let existing = article.content {
+            existing.title = content.title
+            existing.byline = content.byline
+            existing.htmlContent = content.htmlContent
+            existing.textContent = content.textContent
+            existing.extractedDate = Date()
+        } else {
+            let persistent = PersistentArticleContent(from: content)
+            persistent.article = article
+            modelContext.insert(persistent)
+        }
+        try modelContext.save()
+        Self.logger.debug("Cached content for '\(article.title, privacy: .public)'")
+    }
+}

@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct ArticleRowView: View {
-    let article: Article
+    let article: PersistentArticle
 
     var body: some View {
         HStack(spacing: 8) {
@@ -23,6 +23,8 @@ struct ArticleRowView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(article.title)
                     .font(.headline)
+                    .fontWeight(article.isRead ? .regular : .semibold)
+                    .foregroundStyle(article.isRead ? .secondary : .primary)
                     .lineLimit(2)
 
                 Text(article.snippet)

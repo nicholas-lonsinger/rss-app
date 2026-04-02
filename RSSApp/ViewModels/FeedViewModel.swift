@@ -10,33 +10,66 @@ final class FeedViewModel {
         category: "FeedViewModel"
     )
 
-    var articles: [Article] = []
+    var articles: [PersistentArticle] = []
     var feedTitle: String = "Feed"
     var isLoading = false
     var errorMessage: String?
 
     private let feedFetching: FeedFetching
-    private let feedURL: URL
+    private let persistence: FeedPersisting
+    private let feed: PersistentFeed
 
-    init(feedFetching: FeedFetching = FeedFetchingService(), feedURL: URL) {
+    init(
+        feed: PersistentFeed,
+        feedFetching: FeedFetching = FeedFetchingService(),
+        persistence: FeedPersisting
+    ) {
+        self.feed = feed
         self.feedFetching = feedFetching
-        self.feedURL = feedURL
+        self.persistence = persistence
+        self.feedTitle = feed.title
     }
 
     func loadFeed() async {
-        Self.logger.debug("loadFeed() called")
-        isLoading = true
+        Self.logger.debug("loadFeed() called for '\(self.feed.title, privacy: .public)'")
+
+        // Show cached articles immediately
+        if let cached = try? persistence.articles(for: feed), !cached.isEmpty {
+            articles = cached
+        }
+
+        isLoading = articles.isEmpty
         errorMessage = nil
         defer { isLoading = false }
 
         do {
-            let feed = try await feedFetching.fetchFeed(from: feedURL)
-            feedTitle = feed.title
-            articles = feed.articles
-            Self.logger.notice("Feed loaded: \(feed.articles.count, privacy: .public) articles")
+            let rssFeed = try await feedFetching.fetchFeed(from: feed.feedURL)
+            feedTitle = rssFeed.title
+            try persistence.upsertArticles(rssFeed.articles, for: feed)
+            articles = try persistence.articles(for: feed)
+            Self.logger.notice("Feed loaded: \(self.articles.count, privacy: .public) articles")
         } catch {
-            errorMessage = error.localizedDescription
+            if articles.isEmpty {
+                errorMessage = error.localizedDescription
+            }
             Self.logger.error("Feed load failed: \(error, privacy: .public)")
+        }
+    }
+
+    func markAsRead(_ article: PersistentArticle) {
+        guard !article.isRead else { return }
+        do {
+            try persistence.markArticleRead(article, isRead: true)
+        } catch {
+            Self.logger.error("Failed to mark article as read: \(error, privacy: .public)")
+        }
+    }
+
+    func toggleReadStatus(_ article: PersistentArticle) {
+        do {
+            try persistence.markArticleRead(article, isRead: !article.isRead)
+        } catch {
+            Self.logger.error("Failed to toggle read status: \(error, privacy: .public)")
         }
     }
 }

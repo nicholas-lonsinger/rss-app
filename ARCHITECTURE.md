@@ -2,23 +2,27 @@
 
 ## Overview
 
-RSS App is an iOS application for reading and managing RSS feeds. It is built as a pure SwiftUI app using the `@main` App lifecycle, targeting iOS 26 (iPhone only) with Swift 6 strict concurrency. There are no external package dependencies — the app uses only Apple system frameworks (`Foundation`, `WebKit`, `SafariServices`, `Security`).
+RSS App is an iOS application for reading and managing RSS feeds. It is built as a pure SwiftUI app using the `@main` App lifecycle, targeting iOS 26 (iPhone only) with Swift 6 strict concurrency. There are no external package dependencies — the app uses only Apple system frameworks (`Foundation`, `SwiftData`, `WebKit`, `SafariServices`, `Security`).
 
 ## Directory Structure
 
 ```
 RSSApp/
 ├── App/                                # App lifecycle
-│   └── RSSAppApp.swift                 # @main entry point — WindowGroup with ContentView
+│   └── RSSAppApp.swift                 # @main entry point — ModelContainer + WindowGroup with ContentView
 ├── Models/                             # Data models
-│   ├── Article.swift                   # Article (Identifiable, Hashable, Sendable)
+│   ├── Article.swift                   # Article struct — transient parser output (Identifiable, Hashable, Sendable)
 │   ├── ArticleContent.swift            # Extracted article data — htmlContent + textContent
 │   ├── ChatMessage.swift               # Chat message with role (user/assistant) and content
 │   ├── DOMNode.swift                   # SerializedDOM + DOMNode tree from domSerializer.js
+│   ├── ModelConversion.swift           # Bidirectional conversion: PersistentFeed↔SubscribedFeed, PersistentArticle↔Article, PersistentArticleContent↔ArticleContent
 │   ├── OPMLFeedEntry.swift              # Intermediate OPML parsed entry (title, feedURL, siteURL, description)
 │   ├── OPMLImportResult.swift           # OPML import outcome counts (added, skipped, total)
-│   ├── RSSFeed.swift                   # Feed container with channel info and articles
-│   └── SubscribedFeed.swift            # Persistent feed subscription (Identifiable, Hashable, Codable, Sendable)
+│   ├── PersistentArticle.swift         # @Model — persisted article with read/unread status, relationship to feed and content
+│   ├── PersistentArticleContent.swift  # @Model — cached extracted HTML/text content, relationship to article
+│   ├── PersistentFeed.swift            # @Model — persisted feed subscription with caching headers, cascade to articles
+│   ├── RSSFeed.swift                   # Feed container with channel info and articles (transient parser output)
+│   └── SubscribedFeed.swift            # Legacy feed subscription struct (Codable) — retained for UserDefaults migration and OPML export
 ├── Services/                           # Business logic and networking
 │   ├── ArticleExtractionService.swift  # WKWebView + domSerializer.js + native content extraction
 │   ├── CandidateScorer.swift           # Readability-style DOM scoring to find article content node
@@ -27,8 +31,10 @@ RSSApp/
 │   ├── ContentExtractor.swift          # ContentExtracting protocol + extraction pipeline orchestrator
 │   ├── DOMSerializerConstants.swift    # Shared JS bridge constants (message handler name, serializer call)
 │   ├── FeedFetchingService.swift       # FeedFetching protocol + URLSession implementation
-│   ├── FeedStorageService.swift        # FeedStoring protocol + UserDefaults persistence for subscribed feeds
+│   ├── FeedPersistenceService.swift    # FeedPersisting protocol + SwiftData implementation (feeds, articles, content cache, read/unread)
+│   ├── FeedStorageService.swift        # FeedStoring protocol + UserDefaults persistence — retained for migration only
 │   ├── FeedURLValidator.swift          # Shared URL normalization + validation (trim, scheme prepend, HTTP/HTTPS + host check)
+│   ├── UserDefaultsMigrationService.swift # One-time migration from UserDefaults SubscribedFeed list to SwiftData PersistentFeed
 │   ├── HTMLUtilities.swift             # HTML/XML escaping (text + attributes), tag stripping, entity decoding, image extraction
 │   ├── KeychainService.swift           # Keychain wrapper for secure API key storage
 │   ├── MetadataExtractor.swift         # Extracts article title/byline from meta tags and DOM elements
@@ -36,12 +42,12 @@ RSSApp/
 │   ├── RSSParsingService.swift         # XMLParser-based RSS 2.0 + Atom parser with XHTML content reconstruction
 │   └── SiteSpecificExtracting.swift    # Protocol for per-hostname content extractors
 ├── ViewModels/                         # View state management
-│   ├── AddFeedViewModel.swift          # @Observable @MainActor — URL validation + feed subscription
-│   ├── EditFeedViewModel.swift         # @Observable @MainActor — URL editing + validation + feed update
+│   ├── AddFeedViewModel.swift          # @Observable @MainActor — URL validation + feed subscription via FeedPersisting
+│   ├── EditFeedViewModel.swift         # @Observable @MainActor — URL editing + validation + feed update via FeedPersisting
 │   ├── ArticleSummaryViewModel.swift   # @Observable @MainActor — extraction state machine
 │   ├── DiscussionViewModel.swift       # @Observable @MainActor — chat history + Claude streaming
-│   ├── FeedListViewModel.swift         # @Observable @MainActor — subscribed feed list management
-│   └── FeedViewModel.swift             # @Observable @MainActor — feed loading state
+│   ├── FeedListViewModel.swift         # @Observable @MainActor — feed list management, refresh, OPML, unread counts via FeedPersisting
+│   └── FeedViewModel.swift             # @Observable @MainActor — cached + network article loading, read/unread via FeedPersisting
 ├── Views/                              # SwiftUI views
 │   ├── ActivityShareView.swift          # UIViewControllerRepresentable wrapping UIActivityViewController
 │   ├── AddFeedView.swift               # Sheet for adding a new feed — URL input + validation
@@ -51,11 +57,11 @@ RSSApp/
 │   ├── ArticleListView.swift           # Feed article list with loading/error/content states
 │   ├── ArticleReaderView.swift         # Full-screen reader — WKWebView + discuss/settings toolbar
 │   ├── ArticleReaderWebView.swift      # UIViewRepresentable wrapping WKWebView with DOM serializer injection
-│   ├── ArticleRowView.swift            # Single article row — thumbnail, title, snippet, date
+│   ├── ArticleRowView.swift            # Single article row — thumbnail, title, snippet, date, read/unread styling
 │   ├── ArticleSummaryView.swift        # Extracted article summary sheet — extracted content + discuss
-│   ├── ContentView.swift               # Root view — hosts FeedListView
-│   ├── FeedListView.swift              # Subscribed feed list — NavigationStack root with add/remove
-│   └── FeedRowView.swift               # Single feed row — title + description
+│   ├── ContentView.swift               # Root view — creates SwiftDataFeedPersistenceService from modelContext, hosts FeedListView
+│   ├── FeedListView.swift              # Subscribed feed list — NavigationStack root with add/remove, unread badges
+│   └── FeedRowView.swift               # Single feed row — title, description, unread count badge
 └── Resources/
     ├── domSerializer.js                # Bundled DOM serializer — walks DOM tree, emits JSON for Swift extraction
     └── Assets.xcassets/                # App icons and image assets
@@ -68,14 +74,16 @@ RSSAppTests/
 │   └── simple-blog.html               # HTML test fixture for DOM serialization and pipeline tests
 ├── Helpers/
 │   ├── DOMNodeTestHelpers.swift        # DOMNodeFactory — convenience builders for test DOM trees
-│   ├── TestFixtures.swift              # Sample RSS XML, factory methods for Article/RSSFeed
+│   ├── SwiftDataTestHelpers.swift      # In-memory ModelContainer factory for SwiftData tests
+│   ├── TestFixtures.swift              # Sample RSS XML, factory methods for Article/RSSFeed/PersistentFeed/PersistentArticle
 │   └── WebViewTestHelpers.swift        # WKWebView-based serialization helpers for integration tests
 ├── Mocks/
 │   ├── MockArticleExtractionService.swift  # ArticleExtracting mock with injectable content/errors
 │   ├── MockClaudeAPIService.swift          # ClaudeAPIServicing mock with injectable chunks/errors
 │   ├── MockContentExtractor.swift          # ContentExtracting mock with injectable results
 │   ├── MockFeedFetchingService.swift       # FeedFetching mock with injectable results/errors
-│   ├── MockFeedStorageService.swift        # FeedStoring mock with in-memory store
+│   ├── MockFeedPersistenceService.swift    # FeedPersisting mock with in-memory store
+│   ├── MockFeedStorageService.swift        # FeedStoring mock with in-memory store (for migration tests)
 │   ├── MockKeychainService.swift           # KeychainServicing mock with in-memory store
 │   └── MockOPMLService.swift               # OPMLServing mock with injectable entries/data/errors
 ├── Models/
@@ -89,8 +97,10 @@ RSSAppTests/
 │   ├── ContentExtractorTests.swift     # End-to-end extraction pipeline, site-specific fallback
 │   ├── DOMSerializerTests.swift        # WKWebView integration — JS serialization fidelity
 │   ├── ExtractionPipelineTests.swift   # Full pipeline: HTML → WKWebView serialize → Swift extract
-│   ├── FeedStorageServiceTests.swift   # Save/load roundtrip, add/remove, empty state
+│   ├── FeedPersistenceServiceTests.swift # SwiftData CRUD, upsert, read/unread, content cache, cascade delete
+│   ├── FeedStorageServiceTests.swift   # Save/load roundtrip, add/remove, empty state (legacy UserDefaults)
 │   ├── HTMLUtilitiesTests.swift        # Tag stripping, entity decoding, image extraction
+│   ├── UserDefaultsMigrationTests.swift # Migration from UserDefaults to SwiftData, idempotency, ID preservation
 │   ├── KeychainServiceTests.swift      # Save/load/delete/overwrite roundtrips
 │   ├── OPMLServiceTests.swift          # Parse flat/nested/empty OPML, generate + round-trip, XML escaping
 │   ├── MetadataExtractorTests.swift    # Title/byline extraction from meta tags and DOM
@@ -104,7 +114,7 @@ RSSAppTests/
     └── FeedViewModelTests.swift            # Load success/failure, state transitions
 ```
 
-**Total: 43 source files + 1 resource, 32 test source files + 1 fixture.**
+**Total: 49 source files + 1 resource, 36 test source files + 1 fixture.**
 
 ## Component Map
 
@@ -112,25 +122,39 @@ RSSAppTests/
 
 **Files:** `RSSAppApp.swift`
 
-`RSSAppApp` is the entry point. It declares a single `WindowGroup` scene containing `ContentView`. The app uses the SwiftUI App lifecycle — no `AppDelegate` or `SceneDelegate`.
+`RSSAppApp` is the entry point. It creates a `ModelContainer` for the SwiftData schema (`PersistentFeed`, `PersistentArticle`, `PersistentArticleContent`), runs `UserDefaultsMigrationService` on first launch to migrate legacy data, and declares a `WindowGroup` scene with `.modelContainer()` containing `ContentView`. In test environments (detected via `XCTestConfigurationFilePath`), uses an in-memory store and skips migration. The app uses the SwiftUI App lifecycle — no `AppDelegate` or `SceneDelegate`.
 
 ### Models
 
-**Files:** `Article.swift`, `ArticleContent.swift`, `ChatMessage.swift`, `DOMNode.swift`, `OPMLFeedEntry.swift`, `OPMLImportResult.swift`, `RSSFeed.swift`, `SubscribedFeed.swift`
+**Files:** `Article.swift`, `ArticleContent.swift`, `ChatMessage.swift`, `DOMNode.swift`, `ModelConversion.swift`, `OPMLFeedEntry.swift`, `OPMLImportResult.swift`, `PersistentArticle.swift`, `PersistentArticleContent.swift`, `PersistentFeed.swift`, `RSSFeed.swift`, `SubscribedFeed.swift`
 
-`Article` is the core data model representing a single feed item. It stores the title, link, raw HTML description, a plain-text snippet, publication date, thumbnail URL, optional author name, and a categories array. It conforms to `Identifiable` (for lists), `Hashable` (for navigation), and `Sendable` (for concurrency safety).
+**SwiftData persistence models** — Three `@Model` classes form the persistence layer with relationships:
+
+`PersistentFeed` stores feed subscriptions: id, title, feedURL, description, addedDate, caching headers (etag, lastModifiedHeader, lastRefreshDate), and error state (lastFetchError, lastFetchErrorDate). Has a `@Relationship(deleteRule: .cascade)` to `[PersistentArticle]`. All properties use optionals or defaults for future CloudKit compatibility.
+
+`PersistentArticle` stores article data: articleID (RSS guid/Atom id), title, link, description, snippet, publishedDate, thumbnailURL, author, categories, read status (isRead, readDate), and fetchedDate. Has a relationship to `PersistentFeed` and a `@Relationship(deleteRule: .cascade)` to optional `PersistentArticleContent`.
+
+`PersistentArticleContent` caches extracted article content: title, byline, htmlContent, textContent, and extractedDate. Has a relationship to `PersistentArticle`.
+
+`ModelConversion` provides bidirectional conversion extensions between the `@Model` classes and the transient parser structs: `PersistentFeed` ↔ `SubscribedFeed`, `PersistentArticle` ↔ `Article`, `PersistentArticleContent` ↔ `ArticleContent`.
+
+**Transient parser structs** — These remain as transfer objects from the RSS parser and content extractor:
+
+`Article` represents a single feed item parsed from RSS/Atom XML. Conforms to `Identifiable`, `Hashable`, and `Sendable`.
 
 `ArticleContent` holds the result of content extraction: `htmlContent` (clean HTML for display) and `textContent` (plain text for AI context), plus `title` and `byline`. Has a static `rssFallback(html:)` factory for graceful degradation.
+
+`RSSFeed` represents a parsed feed channel — title, link, description, an array of `Article` values, and an optional `lastUpdated` date. Also `Sendable`.
+
+`SubscribedFeed` is the legacy feed subscription struct retained for UserDefaults migration (`UserDefaultsMigrationService`) and OPML export compatibility. Conforms to `Codable`.
+
+**Other models:**
 
 `ChatMessage` represents a single turn in the discussion chat. `role` is `.user` or `.assistant`. `content` is mutable (`var`) to allow streaming chunks to be appended in place.
 
 `DOMNode.swift` defines `SerializedDOM` (top-level page representation with title, URL, lang, meta tags, and body tree) and `DOMNode` (recursive tree node with tag name, attributes, visibility flag, and children). Both are `Codable` and `Sendable` value types. `CandidateScorer` internally wraps nodes in a reference-type `NodeWrapper` to add parent pointers during scoring.
 
-`RSSFeed` represents a parsed feed channel — title, link, description, an array of `Article` values, and an optional `lastUpdated` date (from Atom `<updated>` or RSS `<lastBuildDate>`). Also `Sendable`.
-
-`SubscribedFeed` represents a persistent feed subscription — id, title, URL, description, added date, and optional error tracking (`lastFetchError`, `lastFetchErrorDate`). Provides `updatingMetadata` (which clears error state on success), `updatingError`, and `updatingURL` methods. Error fields are backward-compatible with existing persisted data (optional Codable properties decode as nil when missing). Conforms to `Identifiable`, `Hashable`, `Codable` (for UserDefaults persistence), and `Sendable`.
-
-`OPMLFeedEntry` is an intermediate type for parsed OPML feed entries — title, feed URL, optional site URL, and description. Decoupled from `SubscribedFeed` because OPML data lacks `id` and `addedDate`.
+`OPMLFeedEntry` is an intermediate type for parsed OPML feed entries — title, feed URL, optional site URL, and description. Decoupled from persistence because OPML data lacks `id` and `addedDate`.
 
 `OPMLImportResult` communicates import outcome to the UI — counts of added, skipped, and total feeds in the file.
 
@@ -160,7 +184,11 @@ RSSAppTests/
 
 `FeedURLValidator` is a shared utility enum that normalizes and validates raw URL input strings. It trims whitespace, prepends `https://` when no scheme is present, and validates the result has an HTTP or HTTPS scheme with a non-nil host. Used by both `AddFeedViewModel` and `EditFeedViewModel` to deduplicate URL validation logic.
 
-`FeedStoring` is a `Sendable` protocol. `FeedStorageService` persists the user's subscribed feed list in `UserDefaults` using `Codable` encoding. Accepts a `UserDefaults` instance in its initializer (defaults to `.standard`) for test isolation.
+`FeedPersisting` is a `@MainActor` protocol defining the persistence layer. `SwiftDataFeedPersistenceService` implements it using a `ModelContext`. Provides feed CRUD, article upsert (deduplicating by `articleID` within a feed, preserving read status), read/unread tracking, unread counts, and content caching. The `@MainActor` isolation matches the view model pattern and avoids `@Model` cross-actor transfer issues.
+
+`UserDefaultsMigrationService` performs a one-time migration of `SubscribedFeed` data from UserDefaults to SwiftData on first launch. Idempotent — sets a migration flag on success and retries on failure.
+
+`FeedStoring` is a `Sendable` protocol retained for migration support only. `FeedStorageService` reads the legacy `UserDefaults` feed list for `UserDefaultsMigrationService`. No view models depend on it.
 
 `OPMLServing` is a `Sendable` protocol. `OPMLService` handles OPML import/export. Parsing uses `XMLParser` with a private `OPMLParserDelegate` (same `@unchecked Sendable` pattern as `RSSParserDelegate`) that captures all `<outline>` elements with `xmlUrl` attributes regardless of nesting depth, flattening folders. Generation builds OPML 2.0 XML with proper XML escaping. Accepts outlines regardless of `type` attribute for maximum compatibility with real-world OPML files.
 
@@ -170,13 +198,13 @@ RSSAppTests/
 
 All view models are `@MainActor @Observable`.
 
-`FeedListViewModel` manages the subscribed feed list. Loads feeds from `FeedStoring`, supports removal by object or `IndexSet`, and OPML import/export via `OPMLServing`. `importOPML(from:)` parses OPML data, deduplicates against existing feeds and within the file, and merges new feeds. `importOPMLAndRefresh(from:)` extends import by fetching each feed's RSS XML to populate metadata (title, description) that OPML files typically omit. `exportOPML()` generates OPML data for sharing. `refreshAllFeeds()` re-fetches RSS metadata for all subscribed feeds concurrently (max 6 in-flight), updating stored titles and descriptions on success, and setting per-feed error state (`lastFetchError`, `lastFetchErrorDate`) on failure; successful refreshes clear any previous error state. Accepts `FeedStoring`, `OPMLServing`, and `FeedFetching` dependencies for testability.
+`FeedListViewModel` manages the subscribed feed list via `FeedPersisting`. Loads `[PersistentFeed]` from the database, supports removal by object or `IndexSet`, provides `unreadCount(for:)` per feed, and handles OPML import/export via `OPMLServing`. `importOPML(from:)` parses OPML data, deduplicates via `feedExists(url:)`, and adds new `PersistentFeed` objects. `importOPMLAndRefresh(from:)` extends import by fetching each feed's RSS XML to populate metadata. `exportOPML()` converts `PersistentFeed` to `SubscribedFeed` for OPML generation. `refreshAllFeeds()` re-fetches RSS metadata for all subscribed feeds concurrently (max 6 in-flight), upserts articles into the database, and updates feed metadata/error state via the persistence service. Accepts `FeedPersisting`, `OPMLServing`, and `FeedFetching` dependencies for testability.
 
-`AddFeedViewModel` handles the add-feed flow: URL input, validation (scheme/host check, duplicate detection), fetching the feed to extract its title, and persisting via `FeedStoring`. Accepts both `FeedFetching` and `FeedStoring` dependencies for testability.
+`AddFeedViewModel` handles the add-feed flow: URL input, validation (scheme/host check, duplicate detection via `feedExists`), fetching the feed to extract its title, and creating a `PersistentFeed` via `FeedPersisting`. Accepts `FeedFetching` and `FeedPersisting` dependencies for testability.
 
-`EditFeedViewModel` handles the edit-feed flow: pre-populated URL input, validation (same scheme/host check as add, duplicate detection excluding self), fetching the new URL to validate it works, and updating the persisted feed via `FeedStoring`. Clears error state on successful URL change. Accepts `FeedFetching` and `FeedStoring` dependencies for testability.
+`EditFeedViewModel` handles the edit-feed flow: pre-populated URL input, validation (duplicate detection via `feedExists`), fetching the new URL, and updating the `PersistentFeed` via `FeedPersisting`. Clears error state on successful URL change. Accepts `FeedFetching` and `FeedPersisting` dependencies for testability.
 
-`FeedViewModel` holds the article list, feed title, loading state, and error state. Requires a `feedURL` parameter. Accepts a `FeedFetching` dependency for testability.
+`FeedViewModel` manages the article list for a single feed. Takes a `PersistentFeed` and `FeedPersisting`. On `loadFeed()`, displays cached `[PersistentArticle]` immediately, then fetches from network and upserts new articles. Provides `markAsRead(_:)` and `toggleReadStatus(_:)` for read/unread tracking. Only shows loading spinner when there are no cached articles. Only shows error when network fails and there are no cached articles (offline resilience).
 
 `ArticleSummaryViewModel` drives the article summary/extraction flow. Its `State` enum (`idle` / `extracting` / `ready(ArticleContent)` / `failed(String)`) reflects the extraction lifecycle. Stores `extractedContent` for use by the discussion sheet. Accepts an `ArticleExtracting` dependency for testability.
 
@@ -186,21 +214,21 @@ All view models are `@MainActor @Observable`.
 
 **Files:** `ActivityShareView.swift`, `AddFeedView.swift`, `APIKeySettingsView.swift`, `ArticleDiscussionView.swift`, `ArticleListView.swift`, `ArticleReaderView.swift`, `ArticleReaderWebView.swift`, `ArticleRowView.swift`, `ArticleSummaryView.swift`, `ContentView.swift`, `FeedListView.swift`, `FeedRowView.swift`
 
-`ContentView` hosts `FeedListView` as the root view.
+`ContentView` creates a `SwiftDataFeedPersistenceService` from the `@Environment(\.modelContext)` and passes it to `FeedListView`.
 
-`FeedListView` is the `NavigationStack` root. It shows the list of subscribed feeds using `FeedRowView` rows with `NavigationLink(value:)`. Empty state shows a `ContentUnavailableView` prompting the user to add a feed. Toolbar has add (+) and a menu (ellipsis.circle) with import feeds, export feeds, and settings options. Uses `.navigationDestination(for: SubscribedFeed.self)` to push `ArticleListView` with a `FeedViewModel` for the selected feed. Supports swipe-to-delete via `.onDelete` and pull-to-refresh via `.refreshable` to update feed metadata. OPML import uses `.fileImporter` accepting `.opml`/`.xml` files and automatically refreshes feed metadata after import; export uses `ActivityShareView` to share a generated `.opml` file.
+`FeedListView` is the `NavigationStack` root. Accepts a `FeedPersisting` instance and creates `FeedListViewModel`. Shows the list of subscribed feeds using `FeedRowView` rows with `NavigationLink(value: PersistentFeed.id)`. Empty state shows a `ContentUnavailableView` prompting the user to add a feed. Toolbar has add (+) and a menu (ellipsis.circle) with import feeds, export feeds, and settings options. Uses `.navigationDestination(for: UUID.self)` to push `ArticleListView` with a `FeedViewModel` for the selected feed. Supports swipe-to-delete, swipe-to-edit, and pull-to-refresh to update feed metadata and upsert articles. Passes the persistence service to `AddFeedView` and `EditFeedView`.
 
 `ActivityShareView` is a `UIViewControllerRepresentable` wrapping `UIActivityViewController` for sharing exported OPML files.
 
-`FeedRowView` displays a feed's title (`.headline`), description (`.subheadline`, `.secondary`), and an error indicator (red warning icon + error text) when `lastFetchError` is non-nil.
+`FeedRowView` displays a `PersistentFeed`'s title (`.headline`), description (`.subheadline`, `.secondary`), an error indicator when `lastFetchError` is non-nil, and an unread count badge (blue capsule) when `unreadCount > 0`.
 
-`AddFeedView` is a sheet with a `Form` for entering a feed URL. Shows validation progress and error states. Auto-dismisses on successful addition.
+`AddFeedView` is a sheet accepting a `FeedPersisting` instance. Shows a `Form` for entering a feed URL with validation progress and error states. Auto-dismisses on successful addition.
 
-`EditFeedView` is a sheet with a `Form` for editing a feed's URL. Pre-populates the URL field, validates the new URL, fetches the feed to confirm it works, and auto-dismisses on success. Triggered via a leading swipe action on feed rows in `FeedListView`.
+`EditFeedView` is a sheet accepting a `PersistentFeed` and `FeedPersisting`. Pre-populates the URL field, validates the new URL, fetches the feed to confirm it works, and auto-dismisses on success.
 
-`ArticleListView` shows loading / error / list states. Uses `viewModel.feedTitle` as the navigation title. Tapping a row sets `selectedArticle`, triggering a `.fullScreenCover` with `ArticleReaderView`.
+`ArticleListView` shows `[PersistentArticle]` with loading / error / list states. Supports swipe actions to mark articles as read/unread. Tapping a row marks it as read and presents `ArticleReaderView` via `.fullScreenCover`. Uses `viewModel.feedTitle` as the navigation title.
 
-`ArticleRowView` displays a 60×60 `AsyncImage` thumbnail, headline title, subheadline snippet, and caption-style relative date.
+`ArticleRowView` displays a `PersistentArticle` with a 60×60 `AsyncImage` thumbnail, headline title (bold for unread, regular for read), subheadline snippet, and caption-style relative date. Read articles show dimmed (`.secondary`) title text.
 
 `ArticleReaderView` is presented as a `fullScreenCover`. It hosts a `NavigationStack` with Done (dismiss), gear (settings), and sparkles (summarize) toolbar buttons. Contains `ArticleReaderWebView` for displaying the article and supports presenting `ArticleSummaryView` (for extraction) and `APIKeySettingsView` (for API key configuration) as sheets. The discussion flow is reached from within `ArticleSummaryView`. The `ArticleReaderWebView` coordinator performs early extraction via a `WKScriptMessageHandler`, making pre-extracted content available for the summary and discussion flows.
 
@@ -216,31 +244,35 @@ All view models are `@MainActor @Observable`.
 
 ```
 RSSAppApp (@main)
-    └── WindowGroup
+    ├── ModelContainer (PersistentFeed, PersistentArticle, PersistentArticleContent)
+    ├── UserDefaultsMigrationService → one-time migration from UserDefaults
+    └── WindowGroup (.modelContainer)
         └── ContentView
-            └── FeedListView
-                ├── @State FeedListViewModel
-                │   ├── FeedStorageService (FeedStoring protocol)
-                │   │   └── UserDefaults → [SubscribedFeed]
+            ├── @Environment(\.modelContext) → SwiftDataFeedPersistenceService
+            └── FeedListView(persistence:)
+                ├── @State FeedListViewModel(persistence:)
+                │   ├── SwiftDataFeedPersistenceService (FeedPersisting protocol)
+                │   │   └── ModelContext → SwiftData → [PersistentFeed], [PersistentArticle], ...
                 │   └── FeedFetchingService (FeedFetching protocol) ← pull-to-refresh / post-import metadata refresh
                 ├── NavigationStack
                 │   ├── Empty → ContentUnavailableView + "Add Feed" button
-                │   └── List → FeedRowView (title, description)
-                │       └── NavigationLink(value: SubscribedFeed)
+                │   └── List → FeedRowView (title, description, unread count badge)
+                │       └── NavigationLink(value: PersistentFeed.id)
                 │           └── .navigationDestination → ArticleListView
-                │               ├── FeedViewModel(feedURL: feed.url)
-                │               │   ├── FeedFetchingService (FeedFetching protocol)
-                │               │   │   ├── URLSession.shared → HTTP fetch
-                │               │   │   └── RSSParsingService → XMLParser → [Article]
-                │               │   ├── articles: [Article]
+                │               ├── FeedViewModel(feed:, persistence:)
+                │               │   ├── FeedPersisting → cached [PersistentArticle] (shown immediately)
+                │               │   ├── FeedFetchingService → network fetch → upsert to database
+                │               │   ├── articles: [PersistentArticle]
+                │               │   ├── markAsRead / toggleReadStatus
                 │               │   ├── feedTitle: String
-                │               │   ├── isLoading: Bool
-                │               │   └── errorMessage: String?
-                │               ├── Loading → ProgressView
-                │               ├── Error → ContentUnavailableView + Retry
+                │               │   ├── isLoading: Bool (only when no cached articles)
+                │               │   └── errorMessage: String? (only when no cached articles)
+                │               ├── Loading → ProgressView (only if no cached data)
+                │               ├── Error → ContentUnavailableView + Retry (only if no cached data)
                 │               └── Content → List
-                │                   └── ArticleRowView (thumbnail, title, snippet, date)
-                │                       └── tap → fullScreenCover → ArticleReaderView
+                │                   ├── Swipe actions: mark read/unread
+                │                   └── ArticleRowView (thumbnail, title, snippet, date, read/unread styling)
+                │                       └── tap → markAsRead → fullScreenCover → ArticleReaderView
                 │                           ├── ArticleReaderWebView (visible WKWebView)
                 │                           │   └── Coordinator (WKNavigationDelegate + WKScriptMessageHandler)
                 │                           │       ├── Injects domSerializer.js at document end
@@ -263,16 +295,17 @@ RSSAppApp (@main)
                 ├── OPML Import (via .fileImporter)
                 │   └── viewModel.importOPML(from:)
                 │       ├── OPMLService.parseOPML → [OPMLFeedEntry]
-                │       ├── Deduplicate against existing feeds + intra-file
-                │       └── FeedStorageService → persist merged list
+                │       ├── Deduplicate via persistence.feedExists(url:)
+                │       └── persistence.addFeed → SwiftData
                 ├── OPML Export (via Menu)
                 │   └── viewModel.exportOPML()
+                │       ├── PersistentFeed → .toSubscribedFeed() conversion
                 │       ├── OPMLService.generateOPML → Data
                 │       └── ActivityShareView → UIActivityViewController
-                ├── Sheet: AddFeedView
-                │   └── @State AddFeedViewModel
+                ├── Sheet: AddFeedView(persistence:)
+                │   └── @State AddFeedViewModel(persistence:)
                 │       ├── FeedFetchingService → validate URL + fetch title
-                │       └── FeedStorageService → persist subscription
+                │       └── persistence.addFeed → SwiftData
                 └── Sheet: APIKeySettingsView
 ```
 
@@ -297,13 +330,17 @@ RSSAppApp (@main)
 | `domSerializer.js` for DOM serialization | Lightweight JS script that serializes the DOM tree to JSON for Swift-side processing; decouples DOM access (requires JS) from content extraction logic (pure Swift) |
 | Fallback to RSS `articleDescription` | Graceful degradation when native extraction cannot parse a page |
 | Thumbnail priority: media:thumbnail → media:content → enclosure → img in HTML | Covers common RSS image patterns; ordered by specificity |
-| UserDefaults + Codable for feed persistence | Simplest option with no external deps; adequate for a small list of feeds |
-| `SubscribedFeed` separate from `RSSFeed` | `RSSFeed` is transient parsed XML data; `SubscribedFeed` is persistent subscription metadata |
+| SwiftData for persistence | Replaced UserDefaults; supports relational model (feeds → articles → content), read/unread tracking, offline article caching, and future CloudKit sync |
+| `@MainActor` persistence service (not `ModelActor`) | Matches view model `@MainActor` isolation; avoids non-`Sendable` `@Model` cross-actor transfer issues; small data volume makes main-thread DB access acceptable |
+| Transient parser structs retained alongside `@Model` classes | RSS parser and content extractor produce `Article`/`RSSFeed`/`ArticleContent` structs; these remain as transfer objects with `ModelConversion` extensions bridging to `@Model` persistence layer |
+| CloudKit-ready model design | All `@Model` properties use optionals or defaults; no code change needed when enabling sync later |
+| Article deduplication by `(articleID, feed)` | Same article ID can exist across different feeds; upsert preserves read status on existing articles |
+| `SubscribedFeed` retained for migration and OPML | `UserDefaultsMigrationService` reads legacy `Codable` data; `OPMLService` generates OPML from `SubscribedFeed` structs via conversion |
 | `OPMLFeedEntry` intermediate type | Decouples OPML parser from persistence model; OPML data lacks `id`/`addedDate` fields |
 | Manual XML generation for OPML export | `XMLDocument` is macOS-only; string building with XML escaping is sufficient for the simple OPML structure |
 | OPML import accepts outlines without `type="rss"` | Real-world OPML files often omit the type attribute; any outline with a valid `xmlUrl` is treated as a feed |
 | Feed title fetched at add-time | Validates the URL is a real feed; better UX than requiring manual title entry |
-| `FeedViewModel` created per-navigation | Simple lifecycle; fresh fetch on each visit; no premature caching |
+| `FeedViewModel` with cache-first loading | Shows cached articles immediately from SwiftData, then fetches from network and upserts; enables offline browsing |
 
 ## Test Coverage
 
@@ -325,8 +362,10 @@ RSSAppApp (@main)
 | Extraction Pipeline | ExtractionPipelineTests.swift | Full pipeline: HTML fixture → WKWebView serialize → Swift extract; JSON validity; meta tag capture |
 | ArticleSummaryViewModel | ArticleReaderViewModelTests.swift | Pre-extracted content availability, extraction skip behavior, idle state |
 | DiscussionViewModel | DiscussionViewModelTests.swift | hasAPIKey reflects keychain, send appends messages, chunks accumulate, input cleared, API error → error content, empty input ignored, no-key sets errorMessage |
-| FeedViewModel | FeedViewModelTests.swift | Load success/failure, error clearing on retry, article replacement on refresh, isLoading state |
-| FeedStorageService | FeedStorageServiceTests.swift | Save/load roundtrip, add, remove, empty state, overwrite |
+| FeedViewModel | FeedViewModelTests.swift | Load success/failure, isLoading state, feedTitle default/update/unchanged on failure |
+| FeedPersistenceService | FeedPersistenceServiceTests.swift | Feed CRUD (add, delete, update metadata/error/URL/cache headers, feedExists), article upsert (insert new, skip existing preserving read status), read/unread toggle, unread count, content cache (store, update, nil), cascade delete (feed → articles → content) |
+| UserDefaultsMigrationService | UserDefaultsMigrationTests.swift | Migrate feeds, clear UserDefaults, migration flag, skip when migrated, empty defaults, preserve IDs |
+| FeedStorageService | FeedStorageServiceTests.swift | Save/load roundtrip, add, remove, empty state, overwrite (legacy UserDefaults) |
 | FeedURLValidator | FeedURLValidatorTests.swift | Valid HTTP/HTTPS, scheme prepend, empty/whitespace, non-HTTP schemes (ftp, feed), query parameters, whitespace trimming, scheme-only no host |
 | OPMLService | OPMLServiceTests.swift | Parse flat/nested/empty OPML, folder flattening, missing attributes, title fallbacks, malformed XML, no body, round-trip generation, XML escaping, structure validation |
 | FeedListViewModel | FeedListViewModelTests.swift | Load from storage, remove by object, remove by IndexSet, empty state, OPML import (add new, skip duplicates, skip intra-file duplicates, result counts, save to storage, rollback on failure, parse error), OPML export (sets data, error on failure), refresh (update metadata, partial failure, save to storage, empty no-op, isRefreshing state, error state on failure, error cleared on success, error persisted to storage), import+refresh integration |

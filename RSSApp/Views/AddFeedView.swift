@@ -2,7 +2,11 @@ import SwiftUI
 
 struct AddFeedView: View {
     @Environment(\.dismiss) private var dismiss
-    @State private var viewModel = AddFeedViewModel()
+    @State private var viewModel: AddFeedViewModel
+
+    init(persistence: FeedPersisting) {
+        _viewModel = State(initialValue: AddFeedViewModel(persistence: persistence))
+    }
 
     var body: some View {
         NavigationStack {
@@ -50,8 +54,8 @@ struct AddFeedView: View {
                     Button("Cancel") { dismiss() }
                 }
             }
-            .onChange(of: viewModel.addedFeed) { _, newValue in
-                if newValue != nil { dismiss() }
+            .onChange(of: viewModel.didAddFeed) { _, newValue in
+                if newValue { dismiss() }
             }
         }
     }

@@ -2,13 +2,15 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct FeedListView: View {
-    @State private var viewModel = FeedListViewModel()
+    @State private var viewModel: FeedListViewModel
     @State private var showAddFeed = false
     @State private var showSettings = false
     @State private var showFileImporter = false
     @State private var showExportShare = false
     @State private var showImportResult = false
-    @State private var feedToEdit: SubscribedFeed?
+    @State private var feedToEdit: PersistentFeed?
+
+    private let persistence: FeedPersisting
 
     // .opml is not a system-declared UTType on all iOS versions; .xml is the guaranteed fallback.
     private static let opmlContentTypes: [UTType] = {
@@ -19,18 +21,27 @@ struct FeedListView: View {
         return types
     }()
 
+    init(persistence: FeedPersisting) {
+        self.persistence = persistence
+        _viewModel = State(initialValue: FeedListViewModel(persistence: persistence))
+    }
+
     var body: some View {
         NavigationStack {
             feedContent
                 .navigationTitle("Feeds")
-                .navigationDestination(for: SubscribedFeed.self) { feed in
-                    ArticleListView(viewModel: FeedViewModel(feedURL: feed.url))
+                .navigationDestination(for: PersistentFeed.ID.self) { feedID in
+                    if let feed = viewModel.feeds.first(where: { $0.id == feedID }) {
+                        ArticleListView(
+                            viewModel: FeedViewModel(feed: feed, persistence: persistence)
+                        )
+                    }
                 }
                 .toolbar { toolbarItems }
                 .sheet(isPresented: $showAddFeed, onDismiss: {
                     viewModel.loadFeeds()
                 }) {
-                    AddFeedView()
+                    AddFeedView(persistence: persistence)
                 }
                 .sheet(isPresented: $showSettings) {
                     APIKeySettingsView()
@@ -38,7 +49,7 @@ struct FeedListView: View {
                 .sheet(item: $feedToEdit, onDismiss: {
                     viewModel.loadFeeds()
                 }) { feed in
-                    EditFeedView(feed: feed)
+                    EditFeedView(feed: feed, persistence: persistence)
                 }
                 .sheet(isPresented: $showExportShare, onDismiss: {
                     viewModel.opmlExportURL = nil
@@ -96,9 +107,12 @@ struct FeedListView: View {
             }
         } else {
             List {
-                ForEach(viewModel.feeds) { feed in
-                    NavigationLink(value: feed) {
-                        FeedRowView(feed: feed)
+                ForEach(viewModel.feeds, id: \.id) { feed in
+                    NavigationLink(value: feed.id) {
+                        FeedRowView(
+                            feed: feed,
+                            unreadCount: viewModel.unreadCount(for: feed)
+                        )
                     }
                     .swipeActions(edge: .leading) {
                         Button {

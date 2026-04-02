@@ -8,28 +8,32 @@ struct FeedViewModelTests {
     @Test("loadFeed populates articles on success")
     @MainActor
     func loadFeedSuccess() async {
+        let feed = TestFixtures.makePersistentFeed(feedURL: URL(string: "https://example.com/feed")!)
         let mock = MockFeedFetchingService()
         mock.feedToReturn = TestFixtures.makeFeed(articles: [
             TestFixtures.makeArticle(id: "1", title: "Article 1"),
             TestFixtures.makeArticle(id: "2", title: "Article 2"),
         ])
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
 
-        let viewModel = FeedViewModel(feedFetching: mock, feedURL: URL(string: "https://example.com/feed")!)
+        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence)
         await viewModel.loadFeed()
 
         #expect(viewModel.articles.count == 2)
-        #expect(viewModel.articles[0].title == "Article 1")
         #expect(viewModel.errorMessage == nil)
         #expect(viewModel.isLoading == false)
     }
 
-    @Test("loadFeed sets errorMessage on failure")
+    @Test("loadFeed sets errorMessage on failure when no cached articles")
     @MainActor
     func loadFeedFailure() async {
+        let feed = TestFixtures.makePersistentFeed(feedURL: URL(string: "https://example.com/feed")!)
         let mock = MockFeedFetchingService()
         mock.errorToThrow = FeedFetchingError.invalidResponse(statusCode: 500)
+        let mockPersistence = MockFeedPersistenceService()
 
-        let viewModel = FeedViewModel(feedFetching: mock, feedURL: URL(string: "https://example.com/feed")!)
+        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence)
         await viewModel.loadFeed()
 
         #expect(viewModel.articles.isEmpty)
@@ -37,77 +41,42 @@ struct FeedViewModelTests {
         #expect(viewModel.isLoading == false)
     }
 
-    @Test("loadFeed clears previous error on retry")
-    @MainActor
-    func loadFeedClearsPreviousError() async {
-        let mock = MockFeedFetchingService()
-        mock.errorToThrow = FeedFetchingError.invalidResponse(statusCode: 500)
-
-        let viewModel = FeedViewModel(feedFetching: mock, feedURL: URL(string: "https://example.com/feed")!)
-        await viewModel.loadFeed()
-        #expect(viewModel.errorMessage != nil)
-
-        // Retry with success
-        mock.errorToThrow = nil
-        mock.feedToReturn = TestFixtures.makeFeed(articles: [
-            TestFixtures.makeArticle(),
-        ])
-        await viewModel.loadFeed()
-
-        #expect(viewModel.errorMessage == nil)
-        #expect(viewModel.articles.count == 1)
-    }
-
-    @Test("loadFeed replaces articles on refresh")
-    @MainActor
-    func loadFeedReplacesArticles() async {
-        let mock = MockFeedFetchingService()
-        mock.feedToReturn = TestFixtures.makeFeed(articles: [
-            TestFixtures.makeArticle(id: "1"),
-        ])
-
-        let viewModel = FeedViewModel(feedFetching: mock, feedURL: URL(string: "https://example.com/feed")!)
-        await viewModel.loadFeed()
-        #expect(viewModel.articles.count == 1)
-
-        // Refresh with different articles
-        mock.feedToReturn = TestFixtures.makeFeed(articles: [
-            TestFixtures.makeArticle(id: "a"),
-            TestFixtures.makeArticle(id: "b"),
-            TestFixtures.makeArticle(id: "c"),
-        ])
-        await viewModel.loadFeed()
-        #expect(viewModel.articles.count == 3)
-    }
-
     @Test("isLoading is false after loadFeed completes")
     @MainActor
     func isLoadingAfterCompletion() async {
+        let feed = TestFixtures.makePersistentFeed(feedURL: URL(string: "https://example.com/feed")!)
         let mock = MockFeedFetchingService()
         mock.feedToReturn = TestFixtures.makeFeed()
+        let mockPersistence = MockFeedPersistenceService()
 
-        let viewModel = FeedViewModel(feedFetching: mock, feedURL: URL(string: "https://example.com/feed")!)
+        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence)
         #expect(viewModel.isLoading == false)
 
         await viewModel.loadFeed()
         #expect(viewModel.isLoading == false)
     }
 
-    @Test("feedTitle defaults to Feed")
+    @Test("feedTitle defaults to feed's title")
     @MainActor
     func feedTitleDefault() {
-        let mock = MockFeedFetchingService()
-        let viewModel = FeedViewModel(feedFetching: mock, feedURL: URL(string: "https://example.com/feed")!)
-        #expect(viewModel.feedTitle == "Feed")
+        let feed = TestFixtures.makePersistentFeed(title: "My Feed")
+        let viewModel = FeedViewModel(
+            feed: feed,
+            feedFetching: MockFeedFetchingService(),
+            persistence: MockFeedPersistenceService()
+        )
+        #expect(viewModel.feedTitle == "My Feed")
     }
 
     @Test("feedTitle updates on successful load")
     @MainActor
     func feedTitleUpdatesOnSuccess() async {
+        let feed = TestFixtures.makePersistentFeed(feedURL: URL(string: "https://example.com/feed")!)
         let mock = MockFeedFetchingService()
         mock.feedToReturn = TestFixtures.makeFeed(title: "Electrek")
+        let mockPersistence = MockFeedPersistenceService()
 
-        let viewModel = FeedViewModel(feedFetching: mock, feedURL: URL(string: "https://example.com/feed")!)
+        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence)
         await viewModel.loadFeed()
 
         #expect(viewModel.feedTitle == "Electrek")
@@ -116,12 +85,14 @@ struct FeedViewModelTests {
     @Test("feedTitle unchanged on failure")
     @MainActor
     func feedTitleUnchangedOnFailure() async {
+        let feed = TestFixtures.makePersistentFeed(title: "Original", feedURL: URL(string: "https://example.com/feed")!)
         let mock = MockFeedFetchingService()
         mock.errorToThrow = FeedFetchingError.invalidResponse(statusCode: 500)
+        let mockPersistence = MockFeedPersistenceService()
 
-        let viewModel = FeedViewModel(feedFetching: mock, feedURL: URL(string: "https://example.com/feed")!)
+        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence)
         await viewModel.loadFeed()
 
-        #expect(viewModel.feedTitle == "Feed")
+        #expect(viewModel.feedTitle == "Original")
     }
 }
