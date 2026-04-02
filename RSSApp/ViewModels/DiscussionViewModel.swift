@@ -7,7 +7,7 @@ import os
 final class DiscussionViewModel {
 
     private static let logger = Logger(
-        subsystem: "com.nicholas-lonsinger.rss-app",
+        subsystem: Logger.appSubsystem,
         category: "DiscussionViewModel"
     )
 

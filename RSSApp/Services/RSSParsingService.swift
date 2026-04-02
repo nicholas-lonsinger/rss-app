@@ -9,7 +9,7 @@ enum RSSParsingError: Error, Sendable {
 struct RSSParsingService: Sendable {
 
     private static let logger = Logger(
-        subsystem: "com.nicholas-lonsinger.rss-app",
+        subsystem: Logger.appSubsystem,
         category: "RSSParsingService"
     )
 
@@ -63,7 +63,7 @@ struct RSSParsingService: Sendable {
 private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked Sendable {
 
     private static let logger = Logger(
-        subsystem: "com.nicholas-lonsinger.rss-app",
+        subsystem: Logger.appSubsystem,
         category: "RSSParserDelegate"
     )
 

@@ -21,7 +21,7 @@ protocol FeedFetching: Sendable {
 struct FeedFetchingService: FeedFetching {
 
     private static let logger = Logger(
-        subsystem: "com.nicholas-lonsinger.rss-app",
+        subsystem: Logger.appSubsystem,
         category: "FeedFetchingService"
     )
 

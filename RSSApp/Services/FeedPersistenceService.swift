@@ -42,7 +42,7 @@ protocol FeedPersisting: Sendable {
 final class SwiftDataFeedPersistenceService: FeedPersisting {
 
     private static let logger = Logger(
-        subsystem: "com.nicholas-lonsinger.rss-app",
+        subsystem: Logger.appSubsystem,
         category: "FeedPersistenceService"
     )
 

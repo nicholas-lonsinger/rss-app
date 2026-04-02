@@ -8,7 +8,7 @@ enum FeedURLValidationError: Error {
 enum FeedURLValidator {
 
     private static let logger = Logger(
-        subsystem: "com.nicholas-lonsinger.rss-app",
+        subsystem: Logger.appSubsystem,
         category: "FeedURLValidator"
     )
 

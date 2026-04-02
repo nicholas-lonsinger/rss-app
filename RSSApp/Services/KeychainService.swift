@@ -16,13 +16,13 @@ enum KeychainError: Error, Sendable {
 struct KeychainService: KeychainServicing {
 
     private static let logger = Logger(
-        subsystem: "com.nicholas-lonsinger.rss-app",
+        subsystem: Logger.appSubsystem,
         category: "KeychainService"
     )
 
     let service: String
 
-    init(service: String = "com.nicholas-lonsinger.rss-app") {
+    init(service: String = Logger.appSubsystem) {
         self.service = service
     }
 

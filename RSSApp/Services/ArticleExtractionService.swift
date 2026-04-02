@@ -20,7 +20,7 @@ enum ArticleExtractionError: Error, Sendable {
 final class ArticleExtractionService: ArticleExtracting {
 
     private static let logger = Logger(
-        subsystem: "com.nicholas-lonsinger.rss-app",
+        subsystem: Logger.appSubsystem,
         category: "ArticleExtractionService"
     )
 
@@ -133,7 +133,7 @@ final class ArticleExtractionService: ArticleExtracting {
 private final class ExtractionCoordinator: NSObject, WKNavigationDelegate, @unchecked Sendable {
 
     private static let logger = Logger(
-        subsystem: "com.nicholas-lonsinger.rss-app",
+        subsystem: Logger.appSubsystem,
         category: "ExtractionCoordinator"
     )
 

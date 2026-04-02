@@ -17,7 +17,7 @@ struct ArticleReaderWebView: UIViewRepresentable {
     let fallbackHTML: String
 
     private static let logger = Logger(
-        subsystem: "com.nicholas-lonsinger.rss-app",
+        subsystem: Logger.appSubsystem,
         category: "ArticleReaderWebView"
     )
 
@@ -65,7 +65,7 @@ struct ArticleReaderWebView: UIViewRepresentable {
 
     final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
         private static let logger = Logger(
-            subsystem: "com.nicholas-lonsinger.rss-app",
+            subsystem: Logger.appSubsystem,
             category: "ArticleReaderWebView.Coordinator"
         )
 
