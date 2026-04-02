@@ -8,6 +8,7 @@ struct FeedListView: View {
     @State private var showFileImporter = false
     @State private var showExportShare = false
     @State private var showImportResult = false
+    @State private var feedToEdit: SubscribedFeed?
 
     // .opml is not a system-declared UTType on all iOS versions; .xml is the guaranteed fallback.
     private static let opmlContentTypes: [UTType] = {
@@ -33,6 +34,11 @@ struct FeedListView: View {
                 }
                 .sheet(isPresented: $showSettings) {
                     APIKeySettingsView()
+                }
+                .sheet(item: $feedToEdit, onDismiss: {
+                    viewModel.loadFeeds()
+                }) { feed in
+                    EditFeedView(feed: feed)
                 }
                 .sheet(isPresented: $showExportShare, onDismiss: {
                     viewModel.opmlExportURL = nil
@@ -93,6 +99,14 @@ struct FeedListView: View {
                 ForEach(viewModel.feeds) { feed in
                     NavigationLink(value: feed) {
                         FeedRowView(feed: feed)
+                    }
+                    .swipeActions(edge: .leading) {
+                        Button {
+                            feedToEdit = feed
+                        } label: {
+                            Label("Edit", systemImage: "pencil")
+                        }
+                        .tint(.blue)
                     }
                 }
                 .onDelete { offsets in

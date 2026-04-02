@@ -3,32 +3,39 @@ import os
 
 @MainActor
 @Observable
-final class AddFeedViewModel {
+final class EditFeedViewModel {
 
     private static let logger = Logger(
         subsystem: "com.nicholas-lonsinger.rss-app",
-        category: "AddFeedViewModel"
+        category: "EditFeedViewModel"
     )
 
-    var urlInput: String = ""
+    var urlInput: String
     var isValidating = false
     var errorMessage: String?
-    var addedFeed: SubscribedFeed?
+    var updatedFeed: SubscribedFeed?
 
     var canSubmit: Bool {
         !urlInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isValidating
     }
 
+    private let feed: SubscribedFeed
     private let feedFetching: FeedFetching
     private let feedStorage: FeedStoring
 
-    init(feedFetching: FeedFetching = FeedFetchingService(), feedStorage: FeedStoring = FeedStorageService()) {
+    init(
+        feed: SubscribedFeed,
+        feedFetching: FeedFetching = FeedFetchingService(),
+        feedStorage: FeedStoring = FeedStorageService()
+    ) {
+        self.feed = feed
+        self.urlInput = feed.url.absoluteString
         self.feedFetching = feedFetching
         self.feedStorage = feedStorage
     }
 
-    func addFeed() async {
-        Self.logger.debug("addFeed() called with input: '\(self.urlInput, privacy: .public)'")
+    func saveFeed() async {
+        Self.logger.debug("saveFeed() called with input: '\(self.urlInput, privacy: .public)'")
         errorMessage = nil
 
         let url: URL
@@ -41,17 +48,24 @@ final class AddFeedViewModel {
             return
         }
 
+        // No change — dismiss without saving
+        if url == feed.url {
+            updatedFeed = feed
+            return
+        }
+
+        // Check for duplicates against other feeds
         var existingFeeds: [SubscribedFeed]
         do {
             existingFeeds = try feedStorage.loadFeeds()
         } catch {
             errorMessage = "Unable to load existing feeds. Please try again."
-            Self.logger.error("Failed to load feeds for duplicate check: \(error, privacy: .public)")
+            Self.logger.error("Failed to load feeds: \(error, privacy: .public)")
             return
         }
 
-        if existingFeeds.contains(where: { $0.url == url }) {
-            errorMessage = "You are already subscribed to this feed."
+        if existingFeeds.contains(where: { $0.url == url && $0.id != feed.id }) {
+            errorMessage = "Another feed already uses this URL."
             Self.logger.info("Duplicate feed URL: '\(url, privacy: .public)'")
             return
         }
@@ -61,17 +75,20 @@ final class AddFeedViewModel {
 
         do {
             let rssFeed = try await feedFetching.fetchFeed(from: url)
-            let subscribedFeed = SubscribedFeed(
-                id: UUID(),
-                title: rssFeed.title,
-                url: url,
-                feedDescription: rssFeed.feedDescription,
-                addedDate: Date()
-            )
-            existingFeeds.append(subscribedFeed)
+            let updated = feed
+                .updatingURL(url)
+                .updatingMetadata(title: rssFeed.title, feedDescription: rssFeed.feedDescription)
+
+            guard let index = existingFeeds.firstIndex(where: { $0.id == feed.id }) else {
+                errorMessage = "This feed no longer exists."
+                Self.logger.warning("Feed \(self.feed.id, privacy: .public) not found in storage during edit save")
+                return
+            }
+            existingFeeds[index] = updated
             try feedStorage.saveFeeds(existingFeeds)
-            addedFeed = subscribedFeed
-            Self.logger.notice("Added feed '\(rssFeed.title, privacy: .public)' from \(url, privacy: .public)")
+
+            updatedFeed = updated
+            Self.logger.notice("Updated feed '\(rssFeed.title, privacy: .public)' URL to \(url, privacy: .public)")
         } catch {
             errorMessage = "Could not load feed. Check the URL and try again."
             Self.logger.error("Feed validation failed for \(url, privacy: .public): \(error, privacy: .public)")

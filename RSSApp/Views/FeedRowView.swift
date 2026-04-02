@@ -14,6 +14,11 @@ struct FeedRowView: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
             }
+            if let error = feed.lastFetchError {
+                Label(error, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
         }
         .padding(.vertical, 4)
     }

@@ -182,26 +182,26 @@ final class FeedListViewModel {
         let logger = Self.logger
         let maxConcurrency = 6
 
-        let results: [(UUID, RSSFeed?)]
+        let results: [(UUID, Result<RSSFeed, any Error>)]
         do {
             results = try await withThrowingTaskGroup(
-            of: (UUID, RSSFeed?).self,
-            returning: [(UUID, RSSFeed?)].self
+            of: (UUID, Result<RSSFeed, any Error>).self,
+            returning: [(UUID, Result<RSSFeed, any Error>)].self
         ) { group in
-            var collected: [(UUID, RSSFeed?)] = []
+            var collected: [(UUID, Result<RSSFeed, any Error>)] = []
             var iterator = feedsToRefresh.makeIterator()
 
-            func enqueueNext(_ group: inout ThrowingTaskGroup<(UUID, RSSFeed?), any Error>, _ iterator: inout IndexingIterator<[SubscribedFeed]>) -> Bool {
+            func enqueueNext(_ group: inout ThrowingTaskGroup<(UUID, Result<RSSFeed, any Error>), any Error>, _ iterator: inout IndexingIterator<[SubscribedFeed]>) -> Bool {
                 guard let feed = iterator.next() else { return false }
                 group.addTask {
                     do {
                         let rssFeed = try await feedFetching.fetchFeed(from: feed.url)
-                        return (feed.id, rssFeed)
+                        return (feed.id, .success(rssFeed))
                     } catch is CancellationError {
                         throw CancellationError()
                     } catch {
                         logger.warning("Failed to refresh '\(feed.title, privacy: .public)' (\(feed.url.absoluteString, privacy: .public)): \(error, privacy: .public)")
-                        return (feed.id, nil)
+                        return (feed.id, .failure(error))
                     }
                 }
                 return true
@@ -226,16 +226,17 @@ final class FeedListViewModel {
         var updatedFeeds = feeds
         let idToIndex = Dictionary(uniqueKeysWithValues: updatedFeeds.enumerated().map { ($1.id, $0) })
         var failureCount = 0
-        for (id, rssFeed) in results {
-            guard let rssFeed else {
-                failureCount += 1
-                continue
-            }
-            if let index = idToIndex[id] {
+        for (id, result) in results {
+            guard let index = idToIndex[id] else { continue }
+            switch result {
+            case .success(let rssFeed):
                 updatedFeeds[index] = updatedFeeds[index].updatingMetadata(
                     title: rssFeed.title,
                     feedDescription: rssFeed.feedDescription
                 )
+            case .failure(let error):
+                failureCount += 1
+                updatedFeeds[index] = updatedFeeds[index].updatingError(Self.errorDescription(for: error))
             }
         }
 
@@ -255,6 +256,22 @@ final class FeedListViewModel {
 
         if failureCount > 0 {
             errorMessage = "\(failureCount) of \(feedsToRefresh.count) feed(s) could not be updated."
+        }
+    }
+
+    private static func errorDescription(for error: any Error) -> String {
+        switch error {
+        case let fetchError as FeedFetchingError:
+            switch fetchError {
+            case .invalidResponse(let statusCode):
+                return "HTTP \(statusCode)"
+            case .invalidFeedURL:
+                return "Invalid feed URL"
+            }
+        case is URLError:
+            return "Network error"
+        default:
+            return "Fetch failed"
         }
     }
 }
