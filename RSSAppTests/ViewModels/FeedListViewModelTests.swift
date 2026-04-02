@@ -117,6 +117,122 @@ struct FeedListViewModelTests {
         #expect(viewModel.errorMessage != nil)
     }
 
+    // MARK: - Unread Counts
+
+    @Test("loadFeeds populates unread counts")
+    @MainActor
+    func loadFeedsPopulatesUnreadCounts() {
+        let feed = TestFixtures.makePersistentFeed(title: "Feed A")
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+        mockPersistence.articlesByFeedID = [
+            feed.id: [
+                TestFixtures.makePersistentArticle(articleID: "1", isRead: false),
+                TestFixtures.makePersistentArticle(articleID: "2", isRead: true),
+                TestFixtures.makePersistentArticle(articleID: "3", isRead: false),
+            ],
+        ]
+
+        let viewModel = FeedListViewModel(persistence: mockPersistence)
+        viewModel.loadFeeds()
+
+        #expect(viewModel.unreadCount(for: feed) == 2)
+    }
+
+    @Test("refreshUnreadCounts updates counts after read status changes")
+    @MainActor
+    func refreshUnreadCountsUpdatesAfterRead() {
+        let feed = TestFixtures.makePersistentFeed(title: "Feed A")
+        let article = TestFixtures.makePersistentArticle(articleID: "1", isRead: false)
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+        mockPersistence.articlesByFeedID = [feed.id: [article]]
+
+        let viewModel = FeedListViewModel(persistence: mockPersistence)
+        viewModel.loadFeeds()
+        #expect(viewModel.unreadCount(for: feed) == 1)
+
+        article.isRead = true
+        viewModel.refreshUnreadCounts()
+        #expect(viewModel.unreadCount(for: feed) == 0)
+    }
+
+    @Test("unreadCount returns zero for unknown feed")
+    @MainActor
+    func unreadCountReturnsZeroForUnknownFeed() {
+        let mockPersistence = MockFeedPersistenceService()
+        let viewModel = FeedListViewModel(persistence: mockPersistence)
+        viewModel.loadFeeds()
+
+        let unknownFeed = TestFixtures.makePersistentFeed(title: "Unknown")
+        #expect(viewModel.unreadCount(for: unknownFeed) == 0)
+    }
+
+    @Test("refreshUnreadCounts defaults to zero on persistence error")
+    @MainActor
+    func refreshUnreadCountsDefaultsToZeroOnError() {
+        let feed = TestFixtures.makePersistentFeed(title: "Feed A")
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+        mockPersistence.articlesByFeedID = [
+            feed.id: [TestFixtures.makePersistentArticle(articleID: "1", isRead: false)],
+        ]
+
+        let viewModel = FeedListViewModel(persistence: mockPersistence)
+        viewModel.loadFeeds()
+        #expect(viewModel.unreadCount(for: feed) == 1)
+
+        mockPersistence.unreadCountError = NSError(domain: "test", code: 1)
+        viewModel.refreshUnreadCounts()
+        #expect(viewModel.unreadCount(for: feed) == 0)
+    }
+
+    @Test("refreshUnreadCount updates only the specified feed")
+    @MainActor
+    func refreshUnreadCountForSingleFeed() {
+        let feed1 = TestFixtures.makePersistentFeed(title: "Feed A")
+        let feed2 = TestFixtures.makePersistentFeed(title: "Feed B")
+        let article = TestFixtures.makePersistentArticle(articleID: "1", isRead: false)
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed1, feed2]
+        mockPersistence.articlesByFeedID = [
+            feed1.id: [article],
+            feed2.id: [TestFixtures.makePersistentArticle(articleID: "2", isRead: false)],
+        ]
+
+        let viewModel = FeedListViewModel(persistence: mockPersistence)
+        viewModel.loadFeeds()
+        #expect(viewModel.unreadCount(for: feed1) == 1)
+        #expect(viewModel.unreadCount(for: feed2) == 1)
+
+        article.isRead = true
+        viewModel.refreshUnreadCount(for: feed1)
+        #expect(viewModel.unreadCount(for: feed1) == 0)
+        #expect(viewModel.unreadCount(for: feed2) == 1)
+    }
+
+    @Test("removeFeed cleans up unread counts dictionary")
+    @MainActor
+    func removeFeedCleansUpUnreadCounts() {
+        let feed1 = TestFixtures.makePersistentFeed(title: "Keep")
+        let feed2 = TestFixtures.makePersistentFeed(title: "Remove")
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed1, feed2]
+        mockPersistence.articlesByFeedID = [
+            feed1.id: [TestFixtures.makePersistentArticle(articleID: "1", isRead: false)],
+            feed2.id: [TestFixtures.makePersistentArticle(articleID: "2", isRead: false)],
+        ]
+
+        let viewModel = FeedListViewModel(persistence: mockPersistence)
+        viewModel.loadFeeds()
+        #expect(viewModel.unreadCount(for: feed1) == 1)
+        #expect(viewModel.unreadCount(for: feed2) == 1)
+
+        viewModel.removeFeed(feed2)
+        #expect(viewModel.unreadCount(for: feed1) == 1)
+        #expect(viewModel.unreadCount(for: feed2) == 0)
+    }
+
     // MARK: - OPML Import
 
     @Test("importOPML sets error on parse failure")

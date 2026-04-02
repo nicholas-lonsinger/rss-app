@@ -11,6 +11,7 @@ final class FeedListViewModel {
     )
 
     private(set) var feeds: [PersistentFeed] = []
+    private var unreadCounts: [UUID: Int] = [:]
     private(set) var isRefreshing = false
     var errorMessage: String?
     var opmlImportResult: OPMLImportResult?
@@ -33,6 +34,7 @@ final class FeedListViewModel {
     func loadFeeds() {
         do {
             feeds = try persistence.allFeeds()
+            refreshUnreadCounts()
             errorMessage = nil
             Self.logger.debug("Loaded \(self.feeds.count, privacy: .public) feeds")
         } catch {
@@ -41,11 +43,26 @@ final class FeedListViewModel {
         }
     }
 
+    func refreshUnreadCounts() {
+        Self.logger.debug("refreshUnreadCounts() called for \(self.feeds.count, privacy: .public) feeds")
+        var counts: [UUID: Int] = [:]
+        for feed in feeds {
+            do {
+                counts[feed.id] = try persistence.unreadCount(for: feed)
+            } catch {
+                Self.logger.error("Failed to fetch unread count for '\(feed.title, privacy: .public)': \(error, privacy: .public)")
+                counts[feed.id] = 0
+            }
+        }
+        unreadCounts = counts
+    }
+
     func removeFeed(_ feed: PersistentFeed) {
         let previousFeeds = feeds
         feeds.removeAll { $0.id == feed.id }
         do {
             try persistence.deleteFeed(feed)
+            unreadCounts.removeValue(forKey: feed.id)
             Self.logger.notice("Removed feed '\(feed.title, privacy: .public)'")
         } catch {
             feeds = previousFeeds
@@ -61,6 +78,7 @@ final class FeedListViewModel {
         do {
             for feed in removed {
                 try persistence.deleteFeed(feed)
+                unreadCounts.removeValue(forKey: feed.id)
                 Self.logger.notice("Removed feed '\(feed.title, privacy: .public)'")
             }
         } catch {
@@ -70,13 +88,17 @@ final class FeedListViewModel {
         }
     }
 
-    func unreadCount(for feed: PersistentFeed) -> Int {
+    func refreshUnreadCount(for feed: PersistentFeed) {
         do {
-            return try persistence.unreadCount(for: feed)
+            unreadCounts[feed.id] = try persistence.unreadCount(for: feed)
         } catch {
-            Self.logger.warning("Failed to fetch unread count for '\(feed.title, privacy: .public)': \(error, privacy: .public)")
-            return 0
+            Self.logger.error("Failed to fetch unread count for '\(feed.title, privacy: .public)': \(error, privacy: .public)")
+            unreadCounts[feed.id] = 0
         }
+    }
+
+    func unreadCount(for feed: PersistentFeed) -> Int {
+        unreadCounts[feed.id] ?? 0
     }
 
     // MARK: - OPML Import/Export

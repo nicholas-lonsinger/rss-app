@@ -3,12 +3,14 @@ import UniformTypeIdentifiers
 
 struct FeedListView: View {
     @State private var viewModel: FeedListViewModel
+    @State private var navigationPath = NavigationPath()
     @State private var showAddFeed = false
     @State private var showSettings = false
     @State private var showFileImporter = false
     @State private var showExportShare = false
     @State private var showImportResult = false
     @State private var feedToEdit: PersistentFeed?
+    @State private var lastViewedFeedID: PersistentFeed.ID?
 
     private let persistence: FeedPersisting
 
@@ -27,7 +29,7 @@ struct FeedListView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $navigationPath) {
             feedContent
                 .navigationTitle("Feeds")
                 .navigationDestination(for: PersistentFeed.ID.self) { feedID in
@@ -36,6 +38,7 @@ struct FeedListView: View {
                             viewModel: FeedViewModel(feed: feed, persistence: persistence),
                             persistence: persistence
                         )
+                        .onAppear { lastViewedFeedID = feedID }
                     } else {
                         ContentUnavailableView {
                             Label("Feed Not Found", systemImage: "exclamationmark.triangle")
@@ -93,6 +96,13 @@ struct FeedListView: View {
                 }
                 .task {
                     viewModel.loadFeeds()
+                }
+                .onChange(of: navigationPath.count) { oldCount, newCount in
+                    if newCount < oldCount,
+                       let feedID = lastViewedFeedID,
+                       let feed = viewModel.feeds.first(where: { $0.id == feedID }) {
+                        viewModel.refreshUnreadCount(for: feed)
+                    }
                 }
         }
     }
