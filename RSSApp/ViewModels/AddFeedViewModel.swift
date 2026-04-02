@@ -76,6 +76,7 @@ final class AddFeedViewModel {
 
             // Fire-and-forget icon resolution
             let iconService = self.feedIconService
+            let feedTitle = rssFeed.title
             let feedID = newFeed.id
             let siteURL = rssFeed.link
             let feedImageURL = rssFeed.imageURL
@@ -84,11 +85,20 @@ final class AddFeedViewModel {
                 guard let iconURL = await iconService.resolveIconURL(
                     feedSiteURL: siteURL,
                     feedImageURL: feedImageURL
-                ) else { return }
+                ) else {
+                    Self.logger.debug("No icon resolved for '\(feedTitle, privacy: .public)'")
+                    return
+                }
                 let cached = await iconService.cacheIcon(from: iconURL, feedID: feedID)
-                if cached {
-                    try? persistenceRef.updateFeedIcon(newFeed, iconURL: iconURL)
-                    try? persistenceRef.save()
+                guard cached else {
+                    Self.logger.debug("Icon cache failed for '\(feedTitle, privacy: .public)'")
+                    return
+                }
+                do {
+                    try persistenceRef.updateFeedIcon(newFeed, iconURL: iconURL)
+                    try persistenceRef.save()
+                } catch {
+                    Self.logger.error("Failed to persist icon for '\(feedTitle, privacy: .public)': \(error, privacy: .public)")
                 }
             }
         } catch {

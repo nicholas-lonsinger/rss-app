@@ -271,61 +271,28 @@ final class FeedListViewModel {
             switch result {
             case .success(let fetchResult):
                 guard let fetchResult else {
-                    // 304 Not Modified — feed is unchanged, just clear error state
-                    Self.logger.notice("[ICON] '\(feed.title, privacy: .public)' got 304")
+                    // 304 Not Modified — clear error state and resolve icon if needed
                     do {
                         try persistence.updateFeedError(feed, error: nil)
                     } catch {
                         Self.logger.error("Failed to clear error state for '\(feed.title, privacy: .public)': \(error, privacy: .public)")
                     }
-                    // Still resolve icon if not cached (e.g., add-time resolution failed)
-                    if feedIconService.cachedIconFileURL(for: feed.id) == nil {
-                        Self.logger.notice("[ICON] '\(feed.title, privacy: .public)' 304 branch: no cached icon, resolving...")
-                        let siteURL = Self.siteURL(from: feed.feedURL)
-                        let iconURL = await feedIconService.resolveIconURL(
-                            feedSiteURL: siteURL,
-                            feedImageURL: feed.iconURL
-                        )
-                        if let iconURL {
-                            Self.logger.notice("[ICON] '\(feed.title, privacy: .public)' resolved to \(iconURL.absoluteString, privacy: .public), caching...")
-                            let cached = await feedIconService.cacheIcon(from: iconURL, feedID: feed.id)
-                            Self.logger.notice("[ICON] '\(feed.title, privacy: .public)' cache result: \(cached, privacy: .public)")
-                            if cached {
-                                try? persistence.updateFeedIcon(feed, iconURL: iconURL)
-                            }
-                        } else {
-                            Self.logger.notice("[ICON] '\(feed.title, privacy: .public)' 304 branch: resolveIconURL returned nil")
-                        }
-                    } else {
-                        Self.logger.notice("[ICON] '\(feed.title, privacy: .public)' 304 branch: already cached")
-                    }
+                    await resolveAndCacheIconIfNeeded(
+                        for: feed,
+                        siteURL: Self.siteURL(from: feed.feedURL),
+                        feedImageURL: feed.iconURL
+                    )
                     continue
                 }
                 do {
                     try persistence.updateFeedMetadata(feed, title: fetchResult.feed.title, description: fetchResult.feed.feedDescription)
                     try persistence.upsertArticles(fetchResult.feed.articles, for: feed)
                     try persistence.updateFeedCacheHeaders(feed, etag: fetchResult.etag, lastModified: fetchResult.lastModified)
-
-                    // Resolve and cache icon if not already cached
-                    if feedIconService.cachedIconFileURL(for: feed.id) == nil {
-                        Self.logger.notice("[ICON] '\(feed.title, privacy: .public)' 200 branch: no cached icon, resolving (siteURL=\(fetchResult.feed.link?.absoluteString ?? "nil", privacy: .public), imageURL=\(fetchResult.feed.imageURL?.absoluteString ?? "nil", privacy: .public))...")
-                        let iconURL = await feedIconService.resolveIconURL(
-                            feedSiteURL: fetchResult.feed.link,
-                            feedImageURL: fetchResult.feed.imageURL
-                        )
-                        if let iconURL {
-                            Self.logger.notice("[ICON] '\(feed.title, privacy: .public)' resolved to \(iconURL.absoluteString, privacy: .public), caching...")
-                            let cached = await feedIconService.cacheIcon(from: iconURL, feedID: feed.id)
-                            Self.logger.notice("[ICON] '\(feed.title, privacy: .public)' cache result: \(cached, privacy: .public)")
-                            if cached {
-                                try? persistence.updateFeedIcon(feed, iconURL: iconURL)
-                            }
-                        } else {
-                            Self.logger.notice("[ICON] '\(feed.title, privacy: .public)' resolveIconURL returned nil")
-                        }
-                    } else {
-                        Self.logger.notice("[ICON] '\(feed.title, privacy: .public)' 200 branch: already cached")
-                    }
+                    await resolveAndCacheIconIfNeeded(
+                        for: feed,
+                        siteURL: fetchResult.feed.link,
+                        feedImageURL: fetchResult.feed.imageURL
+                    )
                 } catch {
                     failureCount += 1
                     Self.logger.error("Failed to persist refresh for '\(feed.title, privacy: .public)': \(error, privacy: .public)")
@@ -354,7 +321,36 @@ final class FeedListViewModel {
         }
     }
 
+    /// Resolves and caches a feed icon if one is not already cached on disk.
+    private func resolveAndCacheIconIfNeeded(
+        for feed: PersistentFeed,
+        siteURL: URL?,
+        feedImageURL: URL?
+    ) async {
+        guard feedIconService.cachedIconFileURL(for: feed.id) == nil else {
+            Self.logger.debug("Icon already cached for '\(feed.title, privacy: .public)'")
+            return
+        }
+        Self.logger.debug("Resolving icon for '\(feed.title, privacy: .public)'")
+        guard let iconURL = await feedIconService.resolveIconURL(
+            feedSiteURL: siteURL,
+            feedImageURL: feedImageURL
+        ) else {
+            Self.logger.debug("No icon URL resolved for '\(feed.title, privacy: .public)'")
+            return
+        }
+        let cached = await feedIconService.cacheIcon(from: iconURL, feedID: feed.id)
+        if cached {
+            do {
+                try persistence.updateFeedIcon(feed, iconURL: iconURL)
+            } catch {
+                Self.logger.error("Failed to persist icon URL for '\(feed.title, privacy: .public)': \(error, privacy: .public)")
+            }
+        }
+    }
+
     /// Derives a site root URL from a feed URL (e.g., https://example.com/feed → https://example.com).
+    /// Returns nil if the feed URL has no host.
     private static func siteURL(from feedURL: URL) -> URL? {
         guard let host = feedURL.host(percentEncoded: false), !host.isEmpty else { return nil }
         return URL(string: "\(feedURL.scheme ?? "https")://\(host)")

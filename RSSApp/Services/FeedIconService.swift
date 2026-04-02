@@ -7,7 +7,7 @@ import UIKit
 protocol FeedIconResolving: Sendable {
 
     /// Resolves an icon URL from multiple sources in priority order:
-    /// feed XML image → site HTML meta tags → /favicon.ico fallback.
+    /// feed XML image → site HTML link tags → /favicon.ico fallback.
     func resolveIconURL(feedSiteURL: URL?, feedImageURL: URL?) async -> URL?
 
     /// Downloads the image at `remoteURL`, normalizes it to PNG, and caches it
@@ -84,12 +84,14 @@ struct FeedIconService: FeedIconResolving {
 
             guard let httpResponse = response as? HTTPURLResponse,
                   (200...299).contains(httpResponse.statusCode) else {
-                Self.logger.debug("Icon fetch failed with non-2xx status")
+                let code = (response as? HTTPURLResponse)?.statusCode ?? -1
+                Self.logger.warning("Icon fetch returned HTTP \(code, privacy: .public) for \(remoteURL.absoluteString, privacy: .public)")
                 return false
             }
 
             guard let image = UIImage(data: data) ?? Self.decodeICO(data) else {
-                Self.logger.debug("Downloaded data is not a valid image")
+                let contentType = httpResponse.value(forHTTPHeaderField: "Content-Type") ?? "unknown"
+                Self.logger.warning("Downloaded data is not a valid image (\(contentType, privacy: .public), \(data.count, privacy: .public) bytes) from \(remoteURL.absoluteString, privacy: .public)")
                 return false
             }
 
@@ -107,7 +109,7 @@ struct FeedIconService: FeedIconResolving {
             Self.logger.debug("Cached icon for feed \(feedID.uuidString, privacy: .public) (\(pngData.count, privacy: .public) bytes)")
             return true
         } catch {
-            Self.logger.debug("Failed to cache icon: \(error, privacy: .public)")
+            Self.logger.warning("Failed to cache icon for \(remoteURL.absoluteString, privacy: .public): \(error, privacy: .public)")
             return false
         }
     }
@@ -117,10 +119,18 @@ struct FeedIconService: FeedIconResolving {
         return FileManager.default.fileExists(atPath: fileURL.path(percentEncoded: false)) ? fileURL : nil
     }
 
+    // RATIONALE: Uses removeItem (permanent delete) rather than trashItem because these are
+    // ephemeral cache files in the Caches directory that the system can already purge at will.
     func deleteCachedIcon(for feedID: UUID) {
         let fileURL = iconFileURL(for: feedID)
-        try? FileManager.default.removeItem(at: fileURL)
-        Self.logger.debug("Deleted cached icon for feed \(feedID.uuidString, privacy: .public)")
+        do {
+            try FileManager.default.removeItem(at: fileURL)
+            Self.logger.debug("Deleted cached icon for feed \(feedID.uuidString, privacy: .public)")
+        } catch let error as CocoaError where error.code == .fileNoSuchFile {
+            // File already absent — nothing to clean up
+        } catch {
+            Self.logger.warning("Failed to delete cached icon for feed \(feedID.uuidString, privacy: .public): \(error, privacy: .public)")
+        }
     }
 
     // MARK: - Private
@@ -141,7 +151,7 @@ struct FeedIconService: FeedIconResolving {
             guard let html = String(data: data, encoding: .utf8) else { return [] }
             return HTMLUtilities.extractIconURLs(from: html, baseURL: baseURL)
         } catch {
-            Self.logger.debug("Failed to fetch site HTML: \(error, privacy: .public)")
+            Self.logger.warning("Failed to fetch site HTML from \(siteURL.absoluteString, privacy: .public): \(error, privacy: .public)")
             return []
         }
     }
@@ -157,15 +167,20 @@ struct FeedIconService: FeedIconResolving {
         return components?.url ?? url
     }
 
-    /// Quick HEAD request to verify a URL returns a 2xx response with image content.
+    /// Quick HEAD request to verify a URL returns a 2xx response.
     private func isDownloadable(_ url: URL) async -> Bool {
         do {
             var request = URLRequest(url: url, timeoutInterval: Self.iconFetchTimeout)
             request.httpMethod = "HEAD"
             let (_, response) = try await URLSession.shared.data(for: request)
             guard let httpResponse = response as? HTTPURLResponse else { return false }
-            return (200...299).contains(httpResponse.statusCode)
+            let ok = (200...299).contains(httpResponse.statusCode)
+            if !ok {
+                Self.logger.debug("HEAD check returned HTTP \(httpResponse.statusCode, privacy: .public) for \(url.absoluteString, privacy: .public)")
+            }
+            return ok
         } catch {
+            Self.logger.debug("HEAD check failed for \(url.absoluteString, privacy: .public): \(error, privacy: .public)")
             return false
         }
     }
@@ -225,7 +240,7 @@ struct FeedIconService: FeedIconResolving {
         }
 
         // BMP in ICO: starts with BITMAPINFOHEADER (40 bytes).
-        // Wrap it in a proper BMP file so CGImage can decode it.
+        // Wrap it in a proper BMP file so UIImage can decode it.
         if imageData.count > 40 {
             if let image = decodeBMPFromICO(Data(imageData), width: Int(sqrt(Double(bestArea)))) {
                 logger.debug("Decoded ICO image (BMP, \(bestArea)px area)")
@@ -239,7 +254,7 @@ struct FeedIconService: FeedIconResolving {
     /// Decodes a BMP image entry from an ICO file.
     /// ICO BMP entries omit the 14-byte BITMAPFILEHEADER and use doubled height
     /// (to account for the AND mask). This method prepends the file header and
-    /// fixes the height before passing to CGDataProvider.
+    /// fixes the height before decoding via `UIImage(data:)`.
     private static func decodeBMPFromICO(_ bmpData: Data, width: Int) -> UIImage? {
         guard bmpData.count >= 40 else { return nil }
 

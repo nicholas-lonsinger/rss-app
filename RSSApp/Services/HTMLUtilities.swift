@@ -54,8 +54,8 @@ enum HTMLUtilities {
         return URL(string: String(match.1))
     }
 
-    /// Extracts icon URLs from HTML `<link>` and `<meta>` tags, ordered by priority:
-    /// apple-touch-icon → shortcut icon / icon → og:image.
+    /// Extracts icon URLs from HTML `<link>` tags, ordered by priority:
+    /// apple-touch-icon → shortcut icon / icon.
     /// Relative hrefs are resolved against the provided base URL.
     static func extractIconURLs(from html: String, baseURL: URL) -> [URL] {
         var appleTouchIcons: [URL] = []
