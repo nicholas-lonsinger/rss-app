@@ -6,7 +6,7 @@ struct FeedRowView: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            FeedIconView(feedID: feed.id)
+            FeedIconView(feedID: feed.id, iconURL: feed.iconURL)
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(feed.title)

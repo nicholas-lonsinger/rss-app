@@ -3,6 +3,8 @@ import SwiftUI
 struct FeedIconView: View {
 
     let feedID: UUID
+    /// Passed to trigger SwiftUI re-evaluation when the icon URL changes after caching.
+    let iconURL: URL?
 
     private static let iconSize: CGFloat = 32
     private static let cornerRadius: CGFloat = 6
