@@ -476,6 +476,16 @@ struct RSSParsingServiceTests {
         #expect(entry.categories == ["swift", "ios", "development"])
     }
 
+    @Test("Atom category with term attribute and text content is not double-counted")
+    func atomCategoryDoubleCountPrevention() throws {
+        let data = Data(TestFixtures.atomCategoryDoubleCountXML.utf8)
+        let feed = try service.parse(data)
+        let entry = feed.articles[0]
+
+        #expect(entry.categories == ["tech", "swift"])
+        #expect(entry.categories.count == 2)
+    }
+
     @Test("RSS category text content is extracted")
     func rssCategoryText() throws {
         let data = Data(TestFixtures.rssCategoriesXML.utf8)
