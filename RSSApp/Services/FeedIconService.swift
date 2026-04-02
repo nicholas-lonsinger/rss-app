@@ -45,7 +45,7 @@ struct FeedIconService: FeedIconResolving {
 
         // Priority 1: Image URL from feed XML
         if let feedImageURL, feedImageURL.scheme == "http" || feedImageURL.scheme == "https" {
-            candidates.append(feedImageURL)
+            candidates.append(Self.normalizeIconURL(feedImageURL))
         }
 
         // Priority 2: Parse site homepage HTML for icon links
@@ -144,6 +144,17 @@ struct FeedIconService: FeedIconResolving {
             Self.logger.debug("Failed to fetch site HTML: \(error, privacy: .public)")
             return []
         }
+    }
+
+    /// Strips trailing slashes from icon URLs (e.g., `icon.png/` → `icon.png`).
+    private static func normalizeIconURL(_ url: URL) -> URL {
+        var path = url.path(percentEncoded: false)
+        while path.hasSuffix("/") && path != "/" {
+            path = String(path.dropLast())
+        }
+        var components = URLComponents(url: url, resolvingAgainstBaseURL: true)
+        components?.path = path
+        return components?.url ?? url
     }
 
     /// Quick HEAD request to verify a URL returns a 2xx response with image content.
