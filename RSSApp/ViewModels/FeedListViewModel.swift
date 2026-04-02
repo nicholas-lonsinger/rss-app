@@ -290,6 +290,12 @@ final class FeedListViewModel {
             }
         }
 
+        do {
+            try persistence.save()
+        } catch {
+            Self.logger.error("Failed to save after refresh: \(error, privacy: .public)")
+        }
+
         loadFeeds()
         Self.logger.notice("Refresh complete: \(self.feeds.count - failureCount, privacy: .public) updated, \(failureCount, privacy: .public) failed")
 

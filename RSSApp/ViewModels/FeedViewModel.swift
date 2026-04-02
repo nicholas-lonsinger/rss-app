@@ -51,6 +51,7 @@ final class FeedViewModel {
             let rssFeed = try await feedFetching.fetchFeed(from: feed.feedURL)
             feedTitle = rssFeed.title
             try persistence.upsertArticles(rssFeed.articles, for: feed)
+            try persistence.save()
             articles = try persistence.articles(for: feed)
             Self.logger.notice("Feed loaded: \(self.articles.count, privacy: .public) articles")
         } catch {

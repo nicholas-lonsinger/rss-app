@@ -114,4 +114,10 @@ final class MockFeedPersistenceService: FeedPersisting {
         persistent.article = article
         contentByArticleID[article.articleID] = persistent
     }
+
+    // MARK: - Persistence
+
+    func save() throws {
+        if let error = errorToThrow { throw error }
+    }
 }

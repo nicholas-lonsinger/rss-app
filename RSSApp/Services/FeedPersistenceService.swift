@@ -29,6 +29,10 @@ protocol FeedPersisting: Sendable {
 
     func cachedContent(for article: PersistentArticle) throws -> PersistentArticleContent?
     func cacheContent(_ content: ArticleContent, for article: PersistentArticle) throws
+
+    // MARK: Persistence
+
+    func save() throws
 }
 
 // MARK: - SwiftData Implementation
@@ -77,14 +81,12 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
         feed.lastRefreshDate = Date()
         feed.lastFetchError = nil
         feed.lastFetchErrorDate = nil
-        try modelContext.save()
         Self.logger.debug("Updated metadata for '\(title, privacy: .public)'")
     }
 
     func updateFeedError(_ feed: PersistentFeed, error: String?) throws {
         feed.lastFetchError = error
         feed.lastFetchErrorDate = error != nil ? Date() : nil
-        try modelContext.save()
         Self.logger.debug("Updated error state for '\(feed.title, privacy: .public)'")
     }
 
@@ -99,7 +101,6 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
     func updateFeedCacheHeaders(_ feed: PersistentFeed, etag: String?, lastModified: String?) throws {
         feed.etag = etag
         feed.lastModifiedHeader = lastModified
-        try modelContext.save()
         Self.logger.debug("Updated cache headers for '\(feed.title, privacy: .public)'")
     }
 
@@ -149,9 +150,6 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
             insertedCount += 1
         }
 
-        if insertedCount > 0 {
-            try modelContext.save()
-        }
         Self.logger.debug("Upserted articles for '\(feed.title, privacy: .public)': \(insertedCount, privacy: .public) new, \(articles.count - insertedCount, privacy: .public) existing")
     }
 
@@ -160,6 +158,10 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
         article.readDate = isRead ? Date() : nil
         try modelContext.save()
         Self.logger.debug("Marked article '\(article.title, privacy: .public)' as \(isRead ? "read" : "unread", privacy: .public)")
+    }
+
+    func save() throws {
+        try modelContext.save()
     }
 
     func unreadCount(for feed: PersistentFeed) throws -> Int {
