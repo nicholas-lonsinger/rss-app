@@ -3,16 +3,16 @@ import Foundation
 
 final class MockFeedIconService: FeedIconResolving, @unchecked Sendable {
 
-    var resolvedIconURL: URL?
+    var candidateURLs: [URL] = []
     var cacheResult = true
     var cachedFileURL: URL?
     var resolveCallCount = 0
     var cacheCallCount = 0
     var deleteCallCount = 0
 
-    func resolveIconURL(feedSiteURL: URL?, feedImageURL: URL?) async -> URL? {
+    func resolveIconCandidates(feedSiteURL: URL?, feedImageURL: URL?) async -> [URL] {
         resolveCallCount += 1
-        return resolvedIconURL
+        return candidateURLs
     }
 
     func cacheIcon(from remoteURL: URL, feedID: UUID) async -> Bool {

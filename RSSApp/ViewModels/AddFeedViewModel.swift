@@ -82,24 +82,23 @@ final class AddFeedViewModel {
             let feedImageURL = rssFeed.imageURL
             let persistenceRef = self.persistence
             Task {
-                guard let iconURL = await iconService.resolveIconURL(
+                let candidates = await iconService.resolveIconCandidates(
                     feedSiteURL: siteURL,
                     feedImageURL: feedImageURL
-                ) else {
-                    Self.logger.debug("No icon resolved for '\(feedTitle, privacy: .public)'")
-                    return
+                )
+                for candidate in candidates {
+                    let cached = await iconService.cacheIcon(from: candidate, feedID: feedID)
+                    if cached {
+                        do {
+                            try persistenceRef.updateFeedIcon(newFeed, iconURL: candidate)
+                            try persistenceRef.save()
+                        } catch {
+                            Self.logger.error("Failed to persist icon for '\(feedTitle, privacy: .public)': \(error, privacy: .public)")
+                        }
+                        return
+                    }
                 }
-                let cached = await iconService.cacheIcon(from: iconURL, feedID: feedID)
-                guard cached else {
-                    Self.logger.debug("Icon cache failed for '\(feedTitle, privacy: .public)'")
-                    return
-                }
-                do {
-                    try persistenceRef.updateFeedIcon(newFeed, iconURL: iconURL)
-                    try persistenceRef.save()
-                } catch {
-                    Self.logger.error("Failed to persist icon for '\(feedTitle, privacy: .public)': \(error, privacy: .public)")
-                }
+                Self.logger.debug("No icon cached for '\(feedTitle, privacy: .public)' (\(candidates.count, privacy: .public) candidates tried)")
             }
         } catch {
             errorMessage = "Could not load feed. Check the URL and try again."

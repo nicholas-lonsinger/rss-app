@@ -8,21 +8,29 @@ struct FeedIconServiceTests {
 
     let service = FeedIconService()
 
-    // MARK: - resolveIconURL
+    // MARK: - resolveIconCandidates
 
-    @Test("Returns nil when no URLs provided")
+    @Test("Returns empty when no URLs provided")
     func resolveWithNoURLs() async {
-        let result = await service.resolveIconURL(feedSiteURL: nil, feedImageURL: nil)
+        let result = await service.resolveIconCandidates(feedSiteURL: nil, feedImageURL: nil)
 
-        #expect(result == nil)
+        #expect(result.isEmpty)
     }
 
     @Test("Ignores feedImageURL with non-HTTP scheme")
     func resolveIgnoresDataScheme() async {
         let dataURL = URL(string: "data:image/png;base64,abc")!
-        let result = await service.resolveIconURL(feedSiteURL: nil, feedImageURL: dataURL)
+        let result = await service.resolveIconCandidates(feedSiteURL: nil, feedImageURL: dataURL)
 
-        #expect(result == nil)
+        #expect(result.isEmpty)
+    }
+
+    @Test("Includes feedImageURL as first candidate when HTTP")
+    func resolveIncludesFeedImageURL() async {
+        let imageURL = URL(string: "https://example.com/logo.png")!
+        let result = await service.resolveIconCandidates(feedSiteURL: nil, feedImageURL: imageURL)
+
+        #expect(result.first == imageURL)
     }
 
     // MARK: - cachedIconFileURL

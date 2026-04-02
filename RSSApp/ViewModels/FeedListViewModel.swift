@@ -277,22 +277,26 @@ final class FeedListViewModel {
                     } catch {
                         Self.logger.error("Failed to clear error state for '\(feed.title, privacy: .public)': \(error, privacy: .public)")
                     }
-                    await resolveAndCacheIconIfNeeded(
-                        for: feed,
-                        siteURL: Self.siteURL(from: feed.feedURL),
-                        feedImageURL: feed.iconURL
-                    )
+                    Task {
+                        await self.resolveAndCacheIconIfNeeded(
+                            for: feed,
+                            siteURL: Self.siteURL(from: feed.feedURL),
+                            feedImageURL: feed.iconURL
+                        )
+                    }
                     continue
                 }
                 do {
                     try persistence.updateFeedMetadata(feed, title: fetchResult.feed.title, description: fetchResult.feed.feedDescription)
                     try persistence.upsertArticles(fetchResult.feed.articles, for: feed)
                     try persistence.updateFeedCacheHeaders(feed, etag: fetchResult.etag, lastModified: fetchResult.lastModified)
-                    await resolveAndCacheIconIfNeeded(
-                        for: feed,
-                        siteURL: fetchResult.feed.link,
-                        feedImageURL: fetchResult.feed.imageURL
-                    )
+                    Task {
+                        await self.resolveAndCacheIconIfNeeded(
+                            for: feed,
+                            siteURL: fetchResult.feed.link,
+                            feedImageURL: fetchResult.feed.imageURL
+                        )
+                    }
                 } catch {
                     failureCount += 1
                     Self.logger.error("Failed to persist refresh for '\(feed.title, privacy: .public)': \(error, privacy: .public)")
@@ -322,6 +326,7 @@ final class FeedListViewModel {
     }
 
     /// Resolves and caches a feed icon if one is not already cached on disk.
+    /// Tries each candidate URL in priority order until one downloads and caches successfully.
     private func resolveAndCacheIconIfNeeded(
         for feed: PersistentFeed,
         siteURL: URL?,
@@ -331,22 +336,22 @@ final class FeedListViewModel {
             Self.logger.debug("Icon already cached for '\(feed.title, privacy: .public)'")
             return
         }
-        Self.logger.debug("Resolving icon for '\(feed.title, privacy: .public)'")
-        guard let iconURL = await feedIconService.resolveIconURL(
+        let candidates = await feedIconService.resolveIconCandidates(
             feedSiteURL: siteURL,
             feedImageURL: feedImageURL
-        ) else {
-            Self.logger.debug("No icon URL resolved for '\(feed.title, privacy: .public)'")
-            return
-        }
-        let cached = await feedIconService.cacheIcon(from: iconURL, feedID: feed.id)
-        if cached {
-            do {
-                try persistence.updateFeedIcon(feed, iconURL: iconURL)
-            } catch {
-                Self.logger.error("Failed to persist icon URL for '\(feed.title, privacy: .public)': \(error, privacy: .public)")
+        )
+        for candidate in candidates {
+            let cached = await feedIconService.cacheIcon(from: candidate, feedID: feed.id)
+            if cached {
+                do {
+                    try persistence.updateFeedIcon(feed, iconURL: candidate)
+                } catch {
+                    Self.logger.error("Failed to persist icon URL for '\(feed.title, privacy: .public)': \(error, privacy: .public)")
+                }
+                return
             }
         }
+        Self.logger.debug("No icon could be cached for '\(feed.title, privacy: .public)' (\(candidates.count, privacy: .public) candidates tried)")
     }
 
     /// Derives a site root URL from a feed URL (e.g., https://example.com/feed → https://example.com).

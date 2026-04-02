@@ -6,9 +6,10 @@ import UIKit
 
 protocol FeedIconResolving: Sendable {
 
-    /// Resolves an icon URL from multiple sources in priority order:
+    /// Returns candidate icon URLs from multiple sources in priority order:
     /// feed XML image → site HTML link tags → /favicon.ico fallback.
-    func resolveIconURL(feedSiteURL: URL?, feedImageURL: URL?) async -> URL?
+    /// Callers should try each URL until one successfully downloads.
+    func resolveIconCandidates(feedSiteURL: URL?, feedImageURL: URL?) async -> [URL]
 
     /// Downloads the image at `remoteURL`, normalizes it to PNG, and caches it
     /// to disk under the feed's UUID. Returns `true` on success.
@@ -37,10 +38,9 @@ struct FeedIconService: FeedIconResolving {
 
     // MARK: - FeedIconResolving
 
-    func resolveIconURL(feedSiteURL: URL?, feedImageURL: URL?) async -> URL? {
-        Self.logger.debug("resolveIconURL() feedImageURL=\(feedImageURL?.absoluteString ?? "nil", privacy: .public) siteURL=\(feedSiteURL?.absoluteString ?? "nil", privacy: .public)")
+    func resolveIconCandidates(feedSiteURL: URL?, feedImageURL: URL?) async -> [URL] {
+        Self.logger.debug("resolveIconCandidates() feedImageURL=\(feedImageURL?.absoluteString ?? "nil", privacy: .public) siteURL=\(feedSiteURL?.absoluteString ?? "nil", privacy: .public)")
 
-        // Build candidate URLs in priority order, then return the first one that works
         var candidates: [URL] = []
 
         // Priority 1: Image URL from feed XML
@@ -62,17 +62,8 @@ struct FeedIconService: FeedIconResolving {
             candidates.append(faviconURL)
         }
 
-        // Try each candidate — return the first one that responds with a valid image
-        for candidate in candidates {
-            if await isDownloadable(candidate) {
-                Self.logger.debug("Resolved icon: \(candidate.absoluteString, privacy: .public)")
-                return candidate
-            }
-            Self.logger.debug("Candidate failed: \(candidate.absoluteString, privacy: .public)")
-        }
-
-        Self.logger.debug("No icon URL could be resolved")
-        return nil
+        Self.logger.debug("Found \(candidates.count, privacy: .public) icon candidates")
+        return candidates
     }
 
     func cacheIcon(from remoteURL: URL, feedID: UUID) async -> Bool {
@@ -156,7 +147,8 @@ struct FeedIconService: FeedIconResolving {
         }
     }
 
-    /// Strips trailing slashes from icon URLs (e.g., `icon.png/` → `icon.png`).
+    /// Strips trailing slashes from icon URLs that some feeds incorrectly append
+    /// (e.g., `icon.png/` → `icon.png`).
     private static func normalizeIconURL(_ url: URL) -> URL {
         var path = url.path(percentEncoded: false)
         while path.hasSuffix("/") && path != "/" {
@@ -165,24 +157,6 @@ struct FeedIconService: FeedIconResolving {
         var components = URLComponents(url: url, resolvingAgainstBaseURL: true)
         components?.path = path
         return components?.url ?? url
-    }
-
-    /// Quick HEAD request to verify a URL returns a 2xx response.
-    private func isDownloadable(_ url: URL) async -> Bool {
-        do {
-            var request = URLRequest(url: url, timeoutInterval: Self.iconFetchTimeout)
-            request.httpMethod = "HEAD"
-            let (_, response) = try await URLSession.shared.data(for: request)
-            guard let httpResponse = response as? HTTPURLResponse else { return false }
-            let ok = (200...299).contains(httpResponse.statusCode)
-            if !ok {
-                Self.logger.debug("HEAD check returned HTTP \(httpResponse.statusCode, privacy: .public) for \(url.absoluteString, privacy: .public)")
-            }
-            return ok
-        } catch {
-            Self.logger.debug("HEAD check failed for \(url.absoluteString, privacy: .public): \(error, privacy: .public)")
-            return false
-        }
     }
 
     /// Decodes an ICO file by extracting the largest embedded image.
