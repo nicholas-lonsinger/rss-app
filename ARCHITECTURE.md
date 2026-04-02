@@ -28,7 +28,7 @@ RSSApp/
 │   ├── DOMSerializerConstants.swift    # Shared JS bridge constants (message handler name, serializer call)
 │   ├── FeedFetchingService.swift       # FeedFetching protocol + URLSession implementation
 │   ├── FeedStorageService.swift        # FeedStoring protocol + UserDefaults persistence for subscribed feeds
-│   ├── HTMLUtilities.swift             # HTML tag stripping, entity decoding, attribute escaping, image extraction
+│   ├── HTMLUtilities.swift             # HTML/XML escaping (text + attributes), tag stripping, entity decoding, image extraction
 │   ├── KeychainService.swift           # Keychain wrapper for secure API key storage
 │   ├── MetadataExtractor.swift         # Extracts article title/byline from meta tags and DOM elements
 │   ├── OPMLService.swift               # OPMLServing protocol + XMLParser-based OPML parser + XML generator
@@ -138,7 +138,7 @@ RSSAppTests/
 
 `RSSParsingService` wraps Foundation's `XMLParser` to parse both RSS 2.0 and Atom feeds with first-class support for each format. Handles Atom XHTML content reconstruction (serializing inner XML back to HTML when `type="xhtml"`), author extraction (RSS `<author>` text and Atom `<author><name>` nesting), categories (RSS `<category>` text and Atom `<category term>` attributes), Atom `<link rel="enclosure">` for media, and feed-level updated dates. Internally uses a synchronous `XMLParserDelegate` class marked `@unchecked Sendable` (safe because it is created and consumed within a single synchronous `parse()` call).
 
-`HTMLUtilities` provides static methods for stripping HTML tags/entities to plain text, escaping special characters in HTML/XML attribute values, and extracting the first `<img>` URL.
+`HTMLUtilities` provides static methods for stripping HTML tags/entities to plain text, escaping special characters in HTML text content and attribute values, and extracting the first `<img>` URL.
 
 **Native content extraction pipeline:** The app uses a custom Swift-native extraction pipeline (replacing Readability.js as of PR #3). The pipeline consists of:
 
@@ -303,7 +303,7 @@ RSSAppApp (@main)
 | Article | ArticleTests.swift | Creation, nil optionals, Identifiable, Hashable, equality |
 | SubscribedFeed | SubscribedFeedTests.swift | updatingMetadata preserves identity fields, does not mutate original |
 | DOMNode | DOMNodeTests.swift | Text/element accessors, tag name queries, tree traversal, visibility |
-| HTMLUtilities | HTMLUtilitiesTests.swift | Tag stripping, entity decoding (amp, lt, gt, quot, apos, nbsp), whitespace collapse, attribute escaping (amp, quot, lt, gt, no-op, multiple), image extraction (double/single quotes, multiple images, no images) |
+| HTMLUtilities | HTMLUtilitiesTests.swift | Tag stripping, entity decoding (amp, lt, gt, quot, apos, nbsp), whitespace collapse, HTML text escaping (amp, angle brackets, no-op), attribute escaping (amp, quot, lt, gt, no-op, multiple), image extraction (double/single quotes, multiple images, no images) |
 | RSSParsingService | RSSParsingServiceTests.swift | Channel info, article count, basic fields, pubDate, snippets, raw description, thumbnail sources (media:thumbnail, media:content, enclosure, img fallback), thumbnail priority, ID derivation (guid, link), empty channel, malformed XML, empty data, missing fields, empty title, long snippet truncation, Atom XHTML content reconstruction (content, summary, content-overrides-summary, snippet generation, thumbnail extraction), Atom/RSS author extraction, Atom category term attributes, RSS category text, Atom enclosure links, RSS lastBuildDate, Atom feed-level updated date, default author/categories |
 | KeychainService | KeychainServiceTests.swift | Save/load roundtrip, load when empty, delete clears value, overwrite updates value |
 | ClaudeAPIService | ClaudeAPIServiceTests.swift | Request headers, request body JSON encoding, SSE text delta parsing, non-delta event returns nil, malformed JSON returns nil, delta without text returns nil |

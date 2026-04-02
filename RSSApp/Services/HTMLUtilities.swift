@@ -29,6 +29,14 @@ enum HTMLUtilities {
         return result.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// Escapes special characters for use in HTML text content.
+    static func escapeHTML(_ text: String) -> String {
+        text
+            .replacingOccurrences(of: "&", with: "&amp;")
+            .replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;")
+    }
+
     /// Escapes special characters for use in an HTML/XML attribute value.
     static func escapeAttribute(_ value: String) -> String {
         value

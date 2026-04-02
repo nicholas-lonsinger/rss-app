@@ -372,6 +372,36 @@ struct RSSParsingServiceTests {
         #expect(!entry.articleDescription.contains("Should be ignored"))
     }
 
+    @Test("Atom XHTML text nodes are HTML-escaped in reconstruction")
+    func atomXHTMLTextEscaping() throws {
+        let xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <feed xmlns="http://www.w3.org/2005/Atom">
+                <title>Escape Feed</title>
+                <link rel="alternate" href="https://example.com" />
+                <id>https://example.com/escape-feed</id>
+                <updated>2026-04-01T00:00:00Z</updated>
+                <entry>
+                    <title>Escape Entry</title>
+                    <link rel="alternate" href="https://example.com/escape" />
+                    <id>escape-entry</id>
+                    <content type="xhtml">
+                        <div xmlns="http://www.w3.org/1999/xhtml">
+                            <p>Tom &amp; Jerry</p>
+                        </div>
+                    </content>
+                </entry>
+            </feed>
+            """
+        let data = Data(xml.utf8)
+        let feed = try service.parse(data)
+        let entry = feed.articles[0]
+
+        // The reconstructed HTML must re-escape the ampersand
+        #expect(entry.articleDescription.contains("&amp;"))
+        #expect(!entry.articleDescription.contains("Tom & Jerry"))
+    }
+
     @Test("Atom XHTML content generates non-empty snippet")
     func atomXHTMLSnippet() throws {
         let data = Data(TestFixtures.atomXHTMLContentXML.utf8)

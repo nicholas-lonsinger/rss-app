@@ -127,7 +127,7 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
                 for (key, value) in attributeDict where key != "xmlns" {
                     xhtmlBuffer += " \(key)=\"\(HTMLUtilities.escapeAttribute(value))\""
                 }
-                if Self.htmlVoidElements.contains(elementName) {
+                if Self.htmlVoidElements.contains(elementName.lowercased()) {
                     xhtmlBuffer += " />"
                 } else {
                     xhtmlBuffer += ">"
@@ -240,7 +240,9 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
 
     func parser(_ parser: XMLParser, foundCharacters string: String) {
         if xhtmlTarget != nil {
-            xhtmlBuffer += string
+            // XMLParser resolves entities before delivering text, so we must re-escape
+            // to produce valid HTML (e.g., "&amp;" → "&" from parser → "&amp;" in output).
+            xhtmlBuffer += HTMLUtilities.escapeHTML(string)
         } else {
             textBuffer += string
         }
@@ -249,7 +251,7 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
     func parser(_ parser: XMLParser, foundCDATA CDATABlock: Data) {
         if let string = String(data: CDATABlock, encoding: .utf8) {
             if xhtmlTarget != nil {
-                xhtmlBuffer += string
+                xhtmlBuffer += HTMLUtilities.escapeHTML(string)
             } else {
                 textBuffer += string
             }
@@ -297,7 +299,7 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
             }
             xhtmlDepth = max(0, newDepth)
             // Close tags for elements deeper than the wrapper <div>, skipping void elements
-            if xhtmlDepth > 0, !Self.htmlVoidElements.contains(elementName) {
+            if xhtmlDepth > 0, !Self.htmlVoidElements.contains(elementName.lowercased()) {
                 xhtmlBuffer += "</\(elementName)>"
             }
             return

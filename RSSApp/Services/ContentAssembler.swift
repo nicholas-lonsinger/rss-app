@@ -45,7 +45,7 @@ enum ContentAssembler {
     private static func assembleNode(_ node: DOMNode, html: inout String, text: inout String) {
         if node.isText {
             let content = node.txt ?? ""
-            html.append(escapeHTML(content))
+            html.append(HTMLUtilities.escapeHTML(content))
             text.append(content)
             return
         }
@@ -126,12 +126,6 @@ enum ContentAssembler {
 
     private static func isBlockElement(_ tag: String) -> Bool {
         blockElements.contains(tag)
-    }
-
-    private static func escapeHTML(_ text: String) -> String {
-        text.replacingOccurrences(of: "&", with: "&amp;")
-            .replacingOccurrences(of: "<", with: "&lt;")
-            .replacingOccurrences(of: ">", with: "&gt;")
     }
 
     /// Normalizes whitespace while preserving paragraph structure.

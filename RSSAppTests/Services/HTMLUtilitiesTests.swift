@@ -48,6 +48,23 @@ struct HTMLUtilitiesTests {
         #expect(HTMLUtilities.stripHTML(html) == "Hello World")
     }
 
+    // MARK: - escapeHTML
+
+    @Test("Escapes ampersand in HTML text")
+    func escapeHTMLAmpersand() {
+        #expect(HTMLUtilities.escapeHTML("Tom & Jerry") == "Tom &amp; Jerry")
+    }
+
+    @Test("Escapes angle brackets in HTML text")
+    func escapeHTMLAngleBrackets() {
+        #expect(HTMLUtilities.escapeHTML("a < b > c") == "a &lt; b &gt; c")
+    }
+
+    @Test("Passes through plain text in escapeHTML")
+    func escapeHTMLPlainText() {
+        #expect(HTMLUtilities.escapeHTML("hello world") == "hello world")
+    }
+
     // MARK: - escapeAttribute
 
     @Test("Escapes ampersand in attribute value")
