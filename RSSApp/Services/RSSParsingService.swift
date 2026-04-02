@@ -54,6 +54,11 @@ struct RSSParsingService: Sendable {
 // synchronously within a single parse() call and never escapes that scope.
 private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked Sendable {
 
+    private static let logger = Logger(
+        subsystem: "com.nicholas-lonsinger.rss-app",
+        category: "RSSParserDelegate"
+    )
+
     var foundChannel = false
     var channelTitle = ""
     var channelLink = ""
@@ -149,6 +154,8 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
             itemEnclosureURL = nil
             itemAuthor = ""
             itemCategories = []
+            isInsideAuthor = false
+            categoryHandledByAttribute = false
 
         case "author":
             if isInsideItem {
@@ -264,9 +271,19 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
                 let html = xhtmlBuffer.trimmingCharacters(in: .whitespacesAndNewlines)
                 switch target {
                 case .content:
-                    if !html.isEmpty { itemDescription = html }
+                    if !html.isEmpty {
+                        itemDescription = html
+                    } else {
+                        Self.logger.warning("XHTML content reconstruction produced empty result for '\(self.itemTitle, privacy: .public)'")
+                    }
                 case .summary:
-                    if itemDescription.isEmpty { itemDescription = html }
+                    if itemDescription.isEmpty {
+                        if !html.isEmpty {
+                            itemDescription = html
+                        } else {
+                            Self.logger.warning("XHTML summary reconstruction produced empty result for '\(self.itemTitle, privacy: .public)'")
+                        }
+                    }
                 }
                 xhtmlTarget = nil
                 xhtmlBuffer = ""
@@ -274,7 +291,11 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
                 textBuffer = ""
                 return
             }
-            xhtmlDepth = max(0, xhtmlDepth - 1)
+            let newDepth = xhtmlDepth - 1
+            if newDepth < 0 {
+                Self.logger.warning("XHTML depth underflow at </\(elementName, privacy: .public)> in '\(self.itemTitle, privacy: .public)'")
+            }
+            xhtmlDepth = max(0, newDepth)
             // Close tags for elements deeper than the wrapper <div>, skipping void elements
             if xhtmlDepth > 0, !Self.htmlVoidElements.contains(elementName) {
                 xhtmlBuffer += "</\(elementName)>"
