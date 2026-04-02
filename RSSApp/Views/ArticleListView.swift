@@ -2,7 +2,8 @@ import SwiftUI
 
 struct ArticleListView: View {
     let viewModel: FeedViewModel
-    @State private var selectedArticle: Article?
+    let persistence: FeedPersisting
+    @State private var selectedArticle: PersistentArticle?
 
     var body: some View {
         Group {
@@ -20,14 +21,26 @@ struct ArticleListView: View {
                     .buttonStyle(.bordered)
                 }
             } else {
-                List(viewModel.articles) { article in
+                List(viewModel.articles, id: \.articleID) { article in
                     Button {
+                        viewModel.markAsRead(article)
                         selectedArticle = article
                     } label: {
                         ArticleRowView(article: article)
                     }
                     .buttonStyle(.plain)
                     .disabled(article.link == nil)
+                    .swipeActions(edge: .leading) {
+                        Button {
+                            viewModel.toggleReadStatus(article)
+                        } label: {
+                            Label(
+                                article.isRead ? "Unread" : "Read",
+                                systemImage: article.isRead ? "envelope.badge" : "envelope.open"
+                            )
+                        }
+                        .tint(article.isRead ? .blue : .gray)
+                    }
                 }
                 .listStyle(.plain)
                 .refreshable { await viewModel.loadFeed() }
@@ -35,7 +48,7 @@ struct ArticleListView: View {
         }
         .navigationTitle(viewModel.feedTitle)
         .fullScreenCover(item: $selectedArticle) { article in
-            ArticleReaderView(article: article)
+            ArticleReaderView(article: article, persistence: persistence)
         }
         .task { await viewModel.loadFeed() }
     }

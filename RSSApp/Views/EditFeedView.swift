@@ -4,8 +4,8 @@ struct EditFeedView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var viewModel: EditFeedViewModel
 
-    init(feed: SubscribedFeed) {
-        _viewModel = State(initialValue: EditFeedViewModel(feed: feed))
+    init(feed: PersistentFeed, persistence: FeedPersisting) {
+        _viewModel = State(initialValue: EditFeedViewModel(feed: feed, persistence: persistence))
     }
 
     var body: some View {
@@ -54,8 +54,8 @@ struct EditFeedView: View {
                     Button("Cancel") { dismiss() }
                 }
             }
-            .onChange(of: viewModel.updatedFeed) { _, newValue in
-                if newValue != nil { dismiss() }
+            .onChange(of: viewModel.didSave) { _, newValue in
+                if newValue { dismiss() }
             }
         }
     }

@@ -1,7 +1,8 @@
 import SwiftUI
 
 struct ArticleReaderView: View {
-    let article: Article
+    let article: PersistentArticle
+    let persistence: FeedPersisting?
 
     @State private var showSummary = false
     @State private var showSettings = false
@@ -38,7 +39,12 @@ struct ArticleReaderView: View {
                     APIKeySettingsView()
                 }
                 .sheet(isPresented: $showSummary) {
-                    ArticleSummaryView(article: article, preExtractedContent: extractionState.content)
+                    ArticleSummaryView(
+                        article: article.toArticle(),
+                        preExtractedContent: extractionState.content,
+                        persistentArticle: article,
+                        persistence: persistence
+                    )
                 }
         }
     }

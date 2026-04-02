@@ -13,18 +13,18 @@ final class AddFeedViewModel {
     var urlInput: String = ""
     var isValidating = false
     var errorMessage: String?
-    var addedFeed: SubscribedFeed?
+    var didAddFeed = false
 
     var canSubmit: Bool {
         !urlInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isValidating
     }
 
     private let feedFetching: FeedFetching
-    private let feedStorage: FeedStoring
+    private let persistence: FeedPersisting
 
-    init(feedFetching: FeedFetching = FeedFetchingService(), feedStorage: FeedStoring = FeedStorageService()) {
+    init(feedFetching: FeedFetching = FeedFetchingService(), persistence: FeedPersisting) {
         self.feedFetching = feedFetching
-        self.feedStorage = feedStorage
+        self.persistence = persistence
     }
 
     func addFeed() async {
@@ -41,18 +41,15 @@ final class AddFeedViewModel {
             return
         }
 
-        var existingFeeds: [SubscribedFeed]
         do {
-            existingFeeds = try feedStorage.loadFeeds()
+            if try persistence.feedExists(url: url) {
+                errorMessage = "You are already subscribed to this feed."
+                Self.logger.info("Duplicate feed URL: '\(url, privacy: .public)'")
+                return
+            }
         } catch {
             errorMessage = "Unable to load existing feeds. Please try again."
-            Self.logger.error("Failed to load feeds for duplicate check: \(error, privacy: .public)")
-            return
-        }
-
-        if existingFeeds.contains(where: { $0.url == url }) {
-            errorMessage = "You are already subscribed to this feed."
-            Self.logger.info("Duplicate feed URL: '\(url, privacy: .public)'")
+            Self.logger.error("Failed to check for duplicate: \(error, privacy: .public)")
             return
         }
 
@@ -61,16 +58,13 @@ final class AddFeedViewModel {
 
         do {
             let rssFeed = try await feedFetching.fetchFeed(from: url)
-            let subscribedFeed = SubscribedFeed(
-                id: UUID(),
+            let newFeed = PersistentFeed(
                 title: rssFeed.title,
-                url: url,
-                feedDescription: rssFeed.feedDescription,
-                addedDate: Date()
+                feedURL: url,
+                feedDescription: rssFeed.feedDescription
             )
-            existingFeeds.append(subscribedFeed)
-            try feedStorage.saveFeeds(existingFeeds)
-            addedFeed = subscribedFeed
+            try persistence.addFeed(newFeed)
+            didAddFeed = true
             Self.logger.notice("Added feed '\(rssFeed.title, privacy: .public)' from \(url, privacy: .public)")
         } catch {
             errorMessage = "Could not load feed. Check the URL and try again."

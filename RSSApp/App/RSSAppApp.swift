@@ -1,10 +1,48 @@
 import SwiftUI
+import SwiftData
 
 @main
 struct RSSAppApp: App {
+
+    let modelContainer: ModelContainer
+
+    init() {
+        let isTestEnvironment = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+        let schema = Schema([
+            PersistentFeed.self,
+            PersistentArticle.self,
+            PersistentArticleContent.self,
+        ])
+        let configuration: ModelConfiguration
+        if isTestEnvironment {
+            configuration = ModelConfiguration(
+                "app-host-test-store",
+                schema: schema,
+                isStoredInMemoryOnly: true
+            )
+        } else {
+            configuration = ModelConfiguration(
+                schema: schema,
+                isStoredInMemoryOnly: false
+            )
+        }
+        do {
+            modelContainer = try ModelContainer(for: schema, configurations: configuration)
+        } catch {
+            fatalError("Failed to create ModelContainer: \(error)")
+        }
+
+        if !isTestEnvironment {
+            UserDefaultsMigrationService.migrateIfNeeded(
+                modelContext: modelContainer.mainContext
+            )
+        }
+    }
+
     var body: some Scene {
         WindowGroup {
             ContentView()
         }
+        .modelContainer(modelContainer)
     }
 }

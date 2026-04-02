@@ -10,29 +10,29 @@ final class FeedListViewModel {
         category: "FeedListViewModel"
     )
 
-    private(set) var feeds: [SubscribedFeed] = []
+    private(set) var feeds: [PersistentFeed] = []
     private(set) var isRefreshing = false
     var errorMessage: String?
     var opmlImportResult: OPMLImportResult?
     var opmlExportURL: URL?
 
-    private let feedStorage: FeedStoring
+    private let persistence: FeedPersisting
     private let opmlService: OPMLServing
     private let feedFetching: FeedFetching
 
     init(
-        feedStorage: FeedStoring = FeedStorageService(),
+        persistence: FeedPersisting,
         opmlService: OPMLServing = OPMLService(),
         feedFetching: FeedFetching = FeedFetchingService()
     ) {
-        self.feedStorage = feedStorage
+        self.persistence = persistence
         self.opmlService = opmlService
         self.feedFetching = feedFetching
     }
 
     func loadFeeds() {
         do {
-            feeds = try feedStorage.loadFeeds()
+            feeds = try persistence.allFeeds()
             errorMessage = nil
             Self.logger.debug("Loaded \(self.feeds.count, privacy: .public) feeds")
         } catch {
@@ -41,11 +41,11 @@ final class FeedListViewModel {
         }
     }
 
-    func removeFeed(_ feed: SubscribedFeed) {
+    func removeFeed(_ feed: PersistentFeed) {
         let previousFeeds = feeds
         feeds.removeAll { $0.id == feed.id }
         do {
-            try feedStorage.saveFeeds(feeds)
+            try persistence.deleteFeed(feed)
             Self.logger.notice("Removed feed '\(feed.title, privacy: .public)'")
         } catch {
             feeds = previousFeeds
@@ -59,14 +59,23 @@ final class FeedListViewModel {
         let removed = offsets.map { feeds[$0] }
         feeds.remove(atOffsets: offsets)
         do {
-            try feedStorage.saveFeeds(feeds)
             for feed in removed {
+                try persistence.deleteFeed(feed)
                 Self.logger.notice("Removed feed '\(feed.title, privacy: .public)'")
             }
         } catch {
             feeds = previousFeeds
             errorMessage = "Unable to save changes."
             Self.logger.error("Failed to persist feed removal: \(error, privacy: .public)")
+        }
+    }
+
+    func unreadCount(for feed: PersistentFeed) -> Int {
+        do {
+            return try persistence.unreadCount(for: feed)
+        } catch {
+            Self.logger.warning("Failed to fetch unread count for '\(feed.title, privacy: .public)': \(error, privacy: .public)")
+            return 0
         }
     }
 
@@ -89,47 +98,45 @@ final class FeedListViewModel {
             return
         }
 
-        var updatedFeeds = feeds
-        var seenURLs = Set(updatedFeeds.map(\.url))
         var addedCount = 0
         var skippedCount = 0
 
         for entry in entries {
-            if seenURLs.contains(entry.feedURL) {
-                skippedCount += 1
-                Self.logger.debug("Skipped duplicate: \(entry.feedURL.absoluteString, privacy: .public)")
-            } else {
-                seenURLs.insert(entry.feedURL)
-                updatedFeeds.append(SubscribedFeed(
-                    id: UUID(),
-                    title: entry.title,
-                    url: entry.feedURL,
-                    feedDescription: entry.description,
-                    addedDate: Date()
-                ))
-                addedCount += 1
+            do {
+                if try persistence.feedExists(url: entry.feedURL) {
+                    skippedCount += 1
+                    Self.logger.debug("Skipped duplicate: \(entry.feedURL.absoluteString, privacy: .public)")
+                } else {
+                    let newFeed = PersistentFeed(
+                        title: entry.title,
+                        feedURL: entry.feedURL,
+                        feedDescription: entry.description
+                    )
+                    try persistence.addFeed(newFeed)
+                    addedCount += 1
+                }
+            } catch {
+                errorMessage = "Unable to save imported feeds."
+                Self.logger.error("Failed to persist OPML import: \(error, privacy: .public)")
+                loadFeeds()
+                return
             }
         }
 
-        do {
-            try feedStorage.saveFeeds(updatedFeeds)
-            feeds = updatedFeeds
-            opmlImportResult = OPMLImportResult(
-                addedCount: addedCount,
-                skippedCount: skippedCount
-            )
-            errorMessage = nil
-            Self.logger.notice("OPML import: added \(addedCount, privacy: .public), skipped \(skippedCount, privacy: .public)")
-        } catch {
-            errorMessage = "Unable to save imported feeds."
-            Self.logger.error("Failed to persist OPML import: \(error, privacy: .public)")
-        }
+        loadFeeds()
+        opmlImportResult = OPMLImportResult(
+            addedCount: addedCount,
+            skippedCount: skippedCount
+        )
+        errorMessage = nil
+        Self.logger.notice("OPML import: added \(addedCount, privacy: .public), skipped \(skippedCount, privacy: .public)")
     }
 
     func exportOPML() {
         Self.logger.debug("exportOPML() called")
         do {
-            let data = try opmlService.generateOPML(from: feeds)
+            let subscribedFeeds = feeds.map { $0.toSubscribedFeed() }
+            let data = try opmlService.generateOPML(from: subscribedFeeds)
             let tempURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent("RSS Subscriptions.opml")
             try data.write(to: tempURL)
@@ -182,26 +189,31 @@ final class FeedListViewModel {
         let logger = Self.logger
         let maxConcurrency = 6
 
-        let results: [(UUID, Result<RSSFeed, any Error>)]
+        let results: [(UUID, Result<FeedFetchResult?, any Error>)]
         do {
             results = try await withThrowingTaskGroup(
-            of: (UUID, Result<RSSFeed, any Error>).self,
-            returning: [(UUID, Result<RSSFeed, any Error>)].self
+            of: (UUID, Result<FeedFetchResult?, any Error>).self,
+            returning: [(UUID, Result<FeedFetchResult?, any Error>)].self
         ) { group in
-            var collected: [(UUID, Result<RSSFeed, any Error>)] = []
+            var collected: [(UUID, Result<FeedFetchResult?, any Error>)] = []
             var iterator = feedsToRefresh.makeIterator()
 
-            func enqueueNext(_ group: inout ThrowingTaskGroup<(UUID, Result<RSSFeed, any Error>), any Error>, _ iterator: inout IndexingIterator<[SubscribedFeed]>) -> Bool {
+            func enqueueNext(_ group: inout ThrowingTaskGroup<(UUID, Result<FeedFetchResult?, any Error>), any Error>, _ iterator: inout IndexingIterator<[PersistentFeed]>) -> Bool {
                 guard let feed = iterator.next() else { return false }
+                let feedID = feed.id
+                let feedURL = feed.feedURL
+                let feedTitle = feed.title
+                let feedEtag = feed.etag
+                let feedLastModified = feed.lastModifiedHeader
                 group.addTask {
                     do {
-                        let rssFeed = try await feedFetching.fetchFeed(from: feed.url)
-                        return (feed.id, .success(rssFeed))
+                        let result = try await feedFetching.fetchFeed(from: feedURL, etag: feedEtag, lastModified: feedLastModified)
+                        return (feedID, .success(result))
                     } catch is CancellationError {
                         throw CancellationError()
                     } catch {
-                        logger.warning("Failed to refresh '\(feed.title, privacy: .public)' (\(feed.url.absoluteString, privacy: .public)): \(error, privacy: .public)")
-                        return (feed.id, .failure(error))
+                        logger.warning("Failed to refresh '\(feedTitle, privacy: .public)' (\(feedURL.absoluteString, privacy: .public)): \(error, privacy: .public)")
+                        return (feedID, .failure(error))
                     }
                 }
                 return true
@@ -223,36 +235,41 @@ final class FeedListViewModel {
             return
         }
 
-        var updatedFeeds = feeds
-        let idToIndex = Dictionary(uniqueKeysWithValues: updatedFeeds.enumerated().map { ($1.id, $0) })
+        let idToFeed = Dictionary(uniqueKeysWithValues: feeds.map { ($0.id, $0) })
         var failureCount = 0
         for (id, result) in results {
-            guard let index = idToIndex[id] else { continue }
+            guard let feed = idToFeed[id] else { continue }
             switch result {
-            case .success(let rssFeed):
-                updatedFeeds[index] = updatedFeeds[index].updatingMetadata(
-                    title: rssFeed.title,
-                    feedDescription: rssFeed.feedDescription
-                )
+            case .success(let fetchResult):
+                guard let fetchResult else {
+                    // 304 Not Modified — feed is unchanged, just clear error state
+                    do {
+                        try persistence.updateFeedError(feed, error: nil)
+                    } catch {
+                        Self.logger.error("Failed to clear error state for '\(feed.title, privacy: .public)': \(error, privacy: .public)")
+                    }
+                    continue
+                }
+                do {
+                    try persistence.updateFeedMetadata(feed, title: fetchResult.feed.title, description: fetchResult.feed.feedDescription)
+                    try persistence.upsertArticles(fetchResult.feed.articles, for: feed)
+                    try persistence.updateFeedCacheHeaders(feed, etag: fetchResult.etag, lastModified: fetchResult.lastModified)
+                } catch {
+                    failureCount += 1
+                    Self.logger.error("Failed to persist refresh for '\(feed.title, privacy: .public)': \(error, privacy: .public)")
+                }
             case .failure(let error):
                 failureCount += 1
-                updatedFeeds[index] = updatedFeeds[index].updatingError(Self.errorDescription(for: error))
+                do {
+                    try persistence.updateFeedError(feed, error: Self.errorDescription(for: error))
+                } catch {
+                    Self.logger.error("Failed to persist error state for '\(feed.title, privacy: .public)': \(error, privacy: .public)")
+                }
             }
         }
 
-        if updatedFeeds != feeds {
-            let previousFeeds = feeds
-            feeds = updatedFeeds
-            do {
-                try feedStorage.saveFeeds(updatedFeeds)
-            } catch {
-                feeds = previousFeeds
-                errorMessage = "Unable to save updated feeds."
-                Self.logger.error("Failed to persist refreshed feeds: \(error, privacy: .public)")
-                return
-            }
-        }
-        Self.logger.notice("Refresh complete: \(updatedFeeds.count - failureCount, privacy: .public) updated, \(failureCount, privacy: .public) failed")
+        loadFeeds()
+        Self.logger.notice("Refresh complete: \(self.feeds.count - failureCount, privacy: .public) updated, \(failureCount, privacy: .public) failed")
 
         if failureCount > 0 {
             errorMessage = "\(failureCount) of \(feedsToRefresh.count) feed(s) could not be updated."

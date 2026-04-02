@@ -1,4 +1,5 @@
 import Foundation
+import SwiftData
 @testable import RSSApp
 
 enum TestFixtures {
@@ -424,6 +425,68 @@ enum TestFixtures {
             feedURL: feedURL,
             siteURL: siteURL,
             description: description
+        )
+    }
+
+    // MARK: - Persistent Model Factories
+
+    static func makePersistentFeed(
+        id: UUID = UUID(),
+        title: String = "Test Feed",
+        feedURL: URL = URL(string: "https://example.com/feed")!,
+        feedDescription: String = "A test feed",
+        addedDate: Date = Date(timeIntervalSince1970: 1_711_800_000),
+        lastFetchError: String? = nil,
+        lastFetchErrorDate: Date? = nil
+    ) -> PersistentFeed {
+        PersistentFeed(
+            id: id,
+            title: title,
+            feedURL: feedURL,
+            feedDescription: feedDescription,
+            addedDate: addedDate,
+            lastFetchError: lastFetchError,
+            lastFetchErrorDate: lastFetchErrorDate
+        )
+    }
+
+    static func makePersistentArticle(
+        articleID: String = "test-article-id",
+        title: String = "Test Article",
+        link: URL? = URL(string: "https://example.com/article"),
+        articleDescription: String = "<p>Test description</p>",
+        snippet: String = "Test description",
+        publishedDate: Date? = Date(timeIntervalSince1970: 1_711_800_000),
+        thumbnailURL: URL? = URL(string: "https://example.com/thumb.jpg"),
+        author: String? = nil,
+        categories: [String] = [],
+        isRead: Bool = false
+    ) -> PersistentArticle {
+        PersistentArticle(
+            articleID: articleID,
+            title: title,
+            link: link,
+            articleDescription: articleDescription,
+            snippet: snippet,
+            publishedDate: publishedDate,
+            thumbnailURL: thumbnailURL,
+            author: author,
+            categories: categories,
+            isRead: isRead
+        )
+    }
+
+    static func makeArticleContent(
+        title: String = "Test Article",
+        byline: String? = "Test Author",
+        htmlContent: String = "<p>Test content</p>",
+        textContent: String = "Test content"
+    ) -> ArticleContent {
+        ArticleContent(
+            title: title,
+            byline: byline,
+            htmlContent: htmlContent,
+            textContent: textContent
         )
     }
 }

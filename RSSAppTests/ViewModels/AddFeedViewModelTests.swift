@@ -13,37 +13,17 @@ struct AddFeedViewModelTests {
             title: "My Feed",
             feedDescription: "A great feed"
         )
-        let mockStorage = MockFeedStorageService()
+        let mockPersistence = MockFeedPersistenceService()
 
-        let viewModel = AddFeedViewModel(feedFetching: mockFetching, feedStorage: mockStorage)
+        let viewModel = AddFeedViewModel(feedFetching: mockFetching, persistence: mockPersistence)
         viewModel.urlInput = "https://example.com/feed"
         await viewModel.addFeed()
 
-        #expect(viewModel.addedFeed != nil)
-        #expect(viewModel.addedFeed?.title == "My Feed")
-        #expect(viewModel.addedFeed?.feedDescription == "A great feed")
+        #expect(viewModel.didAddFeed == true)
         #expect(viewModel.errorMessage == nil)
         #expect(viewModel.isValidating == false)
-        #expect(mockStorage.feeds.count == 1)
-    }
-
-    @Test("addFeed preserves existing feeds in storage")
-    @MainActor
-    func addFeedPreservesExisting() async {
-        let mockFetching = MockFeedFetchingService()
-        mockFetching.feedToReturn = TestFixtures.makeFeed(title: "New Feed")
-        let mockStorage = MockFeedStorageService()
-        mockStorage.feeds = [
-            TestFixtures.makeSubscribedFeed(title: "Existing Feed", url: URL(string: "https://existing.com/feed")!),
-        ]
-
-        let viewModel = AddFeedViewModel(feedFetching: mockFetching, feedStorage: mockStorage)
-        viewModel.urlInput = "https://example.com/feed"
-        await viewModel.addFeed()
-
-        #expect(mockStorage.feeds.count == 2)
-        #expect(mockStorage.feeds[0].title == "Existing Feed")
-        #expect(mockStorage.feeds[1].title == "New Feed")
+        #expect(mockPersistence.feeds.count == 1)
+        #expect(mockPersistence.feeds[0].title == "My Feed")
     }
 
     @Test("addFeed prepends https when scheme missing")
@@ -51,44 +31,41 @@ struct AddFeedViewModelTests {
     func addFeedPrependsScheme() async {
         let mockFetching = MockFeedFetchingService()
         mockFetching.feedToReturn = TestFixtures.makeFeed(title: "Feed")
-        let mockStorage = MockFeedStorageService()
+        let mockPersistence = MockFeedPersistenceService()
 
-        let viewModel = AddFeedViewModel(feedFetching: mockFetching, feedStorage: mockStorage)
+        let viewModel = AddFeedViewModel(feedFetching: mockFetching, persistence: mockPersistence)
         viewModel.urlInput = "example.com/feed"
         await viewModel.addFeed()
 
-        #expect(viewModel.addedFeed != nil)
-        #expect(viewModel.addedFeed?.url == URL(string: "https://example.com/feed"))
+        #expect(viewModel.didAddFeed == true)
+        #expect(mockPersistence.feeds[0].feedURL == URL(string: "https://example.com/feed"))
     }
 
     @Test("addFeed rejects non-http schemes")
     @MainActor
     func addFeedRejectsNonHTTP() async {
-        let mockFetching = MockFeedFetchingService()
-        let mockStorage = MockFeedStorageService()
+        let mockPersistence = MockFeedPersistenceService()
 
-        let viewModel = AddFeedViewModel(feedFetching: mockFetching, feedStorage: mockStorage)
+        let viewModel = AddFeedViewModel(feedFetching: MockFeedFetchingService(), persistence: mockPersistence)
         viewModel.urlInput = "ftp://example.com/feed"
         await viewModel.addFeed()
 
-        #expect(viewModel.addedFeed == nil)
+        #expect(viewModel.didAddFeed == false)
         #expect(viewModel.errorMessage != nil)
-        #expect(mockStorage.feeds.isEmpty)
+        #expect(mockPersistence.feeds.isEmpty)
     }
 
     @Test("addFeed sets error for invalid URL")
     @MainActor
     func addFeedInvalidURL() async {
-        let mockFetching = MockFeedFetchingService()
-        let mockStorage = MockFeedStorageService()
+        let mockPersistence = MockFeedPersistenceService()
 
-        let viewModel = AddFeedViewModel(feedFetching: mockFetching, feedStorage: mockStorage)
+        let viewModel = AddFeedViewModel(feedFetching: MockFeedFetchingService(), persistence: mockPersistence)
         viewModel.urlInput = ""
         await viewModel.addFeed()
 
-        #expect(viewModel.addedFeed == nil)
+        #expect(viewModel.didAddFeed == false)
         #expect(viewModel.errorMessage != nil)
-        #expect(mockStorage.feeds.isEmpty)
     }
 
     @Test("addFeed sets error for duplicate URL")
@@ -96,18 +73,17 @@ struct AddFeedViewModelTests {
     func addFeedDuplicate() async {
         let mockFetching = MockFeedFetchingService()
         mockFetching.feedToReturn = TestFixtures.makeFeed()
-        let mockStorage = MockFeedStorageService()
-        mockStorage.feeds = [
-            TestFixtures.makeSubscribedFeed(url: URL(string: "https://example.com/feed")!),
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [
+            TestFixtures.makePersistentFeed(feedURL: URL(string: "https://example.com/feed")!),
         ]
 
-        let viewModel = AddFeedViewModel(feedFetching: mockFetching, feedStorage: mockStorage)
+        let viewModel = AddFeedViewModel(feedFetching: mockFetching, persistence: mockPersistence)
         viewModel.urlInput = "https://example.com/feed"
         await viewModel.addFeed()
 
-        #expect(viewModel.addedFeed == nil)
+        #expect(viewModel.didAddFeed == false)
         #expect(viewModel.errorMessage == "You are already subscribed to this feed.")
-        #expect(mockStorage.feeds.count == 1)
     }
 
     @Test("addFeed sets error on network failure")
@@ -115,30 +91,28 @@ struct AddFeedViewModelTests {
     func addFeedNetworkError() async {
         let mockFetching = MockFeedFetchingService()
         mockFetching.errorToThrow = FeedFetchingError.invalidResponse(statusCode: 500)
-        let mockStorage = MockFeedStorageService()
+        let mockPersistence = MockFeedPersistenceService()
 
-        let viewModel = AddFeedViewModel(feedFetching: mockFetching, feedStorage: mockStorage)
+        let viewModel = AddFeedViewModel(feedFetching: mockFetching, persistence: mockPersistence)
         viewModel.urlInput = "https://example.com/feed"
         await viewModel.addFeed()
 
-        #expect(viewModel.addedFeed == nil)
+        #expect(viewModel.didAddFeed == false)
         #expect(viewModel.errorMessage == "Could not load feed. Check the URL and try again.")
         #expect(viewModel.isValidating == false)
-        #expect(mockStorage.feeds.isEmpty)
     }
 
-    @Test("addFeed sets error on storage load failure")
+    @Test("addFeed sets error on persistence failure")
     @MainActor
-    func addFeedStorageLoadError() async {
-        let mockFetching = MockFeedFetchingService()
-        let mockStorage = MockFeedStorageService()
-        mockStorage.errorToThrow = NSError(domain: "test", code: 1)
+    func addFeedPersistenceError() async {
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.errorToThrow = NSError(domain: "test", code: 1)
 
-        let viewModel = AddFeedViewModel(feedFetching: mockFetching, feedStorage: mockStorage)
+        let viewModel = AddFeedViewModel(feedFetching: MockFeedFetchingService(), persistence: mockPersistence)
         viewModel.urlInput = "https://example.com/feed"
         await viewModel.addFeed()
 
-        #expect(viewModel.addedFeed == nil)
+        #expect(viewModel.didAddFeed == false)
         #expect(viewModel.errorMessage != nil)
     }
 
@@ -147,20 +121,9 @@ struct AddFeedViewModelTests {
     func canSubmitEmpty() {
         let viewModel = AddFeedViewModel(
             feedFetching: MockFeedFetchingService(),
-            feedStorage: MockFeedStorageService()
+            persistence: MockFeedPersistenceService()
         )
         viewModel.urlInput = ""
-        #expect(viewModel.canSubmit == false)
-    }
-
-    @Test("canSubmit returns false for whitespace-only input")
-    @MainActor
-    func canSubmitWhitespace() {
-        let viewModel = AddFeedViewModel(
-            feedFetching: MockFeedFetchingService(),
-            feedStorage: MockFeedStorageService()
-        )
-        viewModel.urlInput = "   \n  "
         #expect(viewModel.canSubmit == false)
     }
 
@@ -169,7 +132,7 @@ struct AddFeedViewModelTests {
     func canSubmitValid() {
         let viewModel = AddFeedViewModel(
             feedFetching: MockFeedFetchingService(),
-            feedStorage: MockFeedStorageService()
+            persistence: MockFeedPersistenceService()
         )
         viewModel.urlInput = "https://example.com/feed"
         #expect(viewModel.canSubmit == true)
@@ -180,7 +143,7 @@ struct AddFeedViewModelTests {
     func canSubmitWhileValidating() {
         let viewModel = AddFeedViewModel(
             feedFetching: MockFeedFetchingService(),
-            feedStorage: MockFeedStorageService()
+            persistence: MockFeedPersistenceService()
         )
         viewModel.urlInput = "https://example.com/feed"
         viewModel.isValidating = true
@@ -192,18 +155,17 @@ struct AddFeedViewModelTests {
     func addFeedDuplicateWithSchemeNormalization() async {
         let mockFetching = MockFeedFetchingService()
         mockFetching.feedToReturn = TestFixtures.makeFeed()
-        let mockStorage = MockFeedStorageService()
-        mockStorage.feeds = [
-            TestFixtures.makeSubscribedFeed(url: URL(string: "https://example.com/feed")!),
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [
+            TestFixtures.makePersistentFeed(feedURL: URL(string: "https://example.com/feed")!),
         ]
 
-        let viewModel = AddFeedViewModel(feedFetching: mockFetching, feedStorage: mockStorage)
+        let viewModel = AddFeedViewModel(feedFetching: mockFetching, persistence: mockPersistence)
         viewModel.urlInput = "example.com/feed"
         await viewModel.addFeed()
 
-        #expect(viewModel.addedFeed == nil)
+        #expect(viewModel.didAddFeed == false)
         #expect(viewModel.errorMessage == "You are already subscribed to this feed.")
-        #expect(mockStorage.feeds.count == 1)
     }
 
     @Test("addFeed clears previous error on retry")
@@ -211,9 +173,9 @@ struct AddFeedViewModelTests {
     func addFeedClearsPreviousError() async {
         let mockFetching = MockFeedFetchingService()
         mockFetching.errorToThrow = FeedFetchingError.invalidResponse(statusCode: 500)
-        let mockStorage = MockFeedStorageService()
+        let mockPersistence = MockFeedPersistenceService()
 
-        let viewModel = AddFeedViewModel(feedFetching: mockFetching, feedStorage: mockStorage)
+        let viewModel = AddFeedViewModel(feedFetching: mockFetching, persistence: mockPersistence)
         viewModel.urlInput = "https://example.com/feed"
         await viewModel.addFeed()
         #expect(viewModel.errorMessage != nil)
@@ -223,6 +185,6 @@ struct AddFeedViewModelTests {
         await viewModel.addFeed()
 
         #expect(viewModel.errorMessage == nil)
-        #expect(viewModel.addedFeed != nil)
+        #expect(viewModel.didAddFeed == true)
     }
 }

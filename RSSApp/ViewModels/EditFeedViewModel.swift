@@ -13,25 +13,25 @@ final class EditFeedViewModel {
     var urlInput: String
     private(set) var isValidating = false
     private(set) var errorMessage: String?
-    private(set) var updatedFeed: SubscribedFeed?
+    private(set) var didSave = false
 
     var canSubmit: Bool {
         !urlInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isValidating
     }
 
-    private let feed: SubscribedFeed
+    private let feed: PersistentFeed
     private let feedFetching: FeedFetching
-    private let feedStorage: FeedStoring
+    private let persistence: FeedPersisting
 
     init(
-        feed: SubscribedFeed,
+        feed: PersistentFeed,
         feedFetching: FeedFetching = FeedFetchingService(),
-        feedStorage: FeedStoring = FeedStorageService()
+        persistence: FeedPersisting
     ) {
         self.feed = feed
-        self.urlInput = feed.url.absoluteString
+        self.urlInput = feed.feedURL.absoluteString
         self.feedFetching = feedFetching
-        self.feedStorage = feedStorage
+        self.persistence = persistence
     }
 
     func saveFeed() async {
@@ -50,25 +50,22 @@ final class EditFeedViewModel {
         }
 
         // No change — dismiss without saving
-        if url == feed.url {
+        if url == feed.feedURL {
             Self.logger.debug("URL unchanged, dismissing without save")
-            updatedFeed = feed
+            didSave = true
             return
         }
 
         // Check for duplicates against other feeds
-        var existingFeeds: [SubscribedFeed]
         do {
-            existingFeeds = try feedStorage.loadFeeds()
+            if try persistence.feedExists(url: url) {
+                errorMessage = "Another feed already uses this URL."
+                Self.logger.info("Duplicate feed URL: '\(url, privacy: .public)'")
+                return
+            }
         } catch {
             errorMessage = "Unable to load existing feeds. Please try again."
-            Self.logger.error("Failed to load feeds: \(error, privacy: .public)")
-            return
-        }
-
-        if existingFeeds.contains(where: { $0.url == url && $0.id != feed.id }) {
-            errorMessage = "Another feed already uses this URL."
-            Self.logger.info("Duplicate feed URL: '\(url, privacy: .public)'")
+            Self.logger.error("Failed to check for duplicate: \(error, privacy: .public)")
             return
         }
 
@@ -84,26 +81,16 @@ final class EditFeedViewModel {
             return
         }
 
-        let updated = feed
-            .updatingURL(url)
-            .updatingMetadata(title: rssFeed.title, feedDescription: rssFeed.feedDescription)
-
-        guard let index = existingFeeds.firstIndex(where: { $0.id == feed.id }) else {
-            errorMessage = "This feed no longer exists."
-            Self.logger.warning("Feed \(self.feed.id, privacy: .public) not found in storage during edit save")
-            return
-        }
-        existingFeeds[index] = updated
-
         do {
-            try feedStorage.saveFeeds(existingFeeds)
+            try persistence.updateFeedURL(feed, newURL: url)
+            try persistence.updateFeedMetadata(feed, title: rssFeed.title, description: rssFeed.feedDescription)
         } catch {
             errorMessage = "Unable to save changes. Please try again."
             Self.logger.error("Failed to persist edited feed: \(error, privacy: .public)")
             return
         }
 
-        updatedFeed = updated
+        didSave = true
         Self.logger.notice("Updated feed '\(rssFeed.title, privacy: .public)' URL to \(url, privacy: .public)")
     }
 }
