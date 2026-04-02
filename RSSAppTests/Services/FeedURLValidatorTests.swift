@@ -64,4 +64,34 @@ struct FeedURLValidatorTests {
         let result = FeedURLValidator.validate("https://")
         #expect(result == .failure(.invalidURL))
     }
+
+    @Test("mailto scheme without :// gets https prepended and passes")
+    func mailtoScheme() {
+        // mailto: has no "://" so the validator prepends https://
+        let result = FeedURLValidator.validate("mailto:user@example.com")
+        if case .success = result { } else {
+            Issue.record("Expected success since mailto: lacks :// and gets https:// prepended")
+        }
+    }
+
+    @Test("URL with port succeeds")
+    func urlWithPort() {
+        let result = FeedURLValidator.validate("https://example.com:8080/feed")
+        #expect(result == .success(URL(string: "https://example.com:8080/feed")!))
+    }
+
+    @Test("URL with fragment succeeds")
+    func urlWithFragment() {
+        let result = FeedURLValidator.validate("https://example.com/feed#section")
+        #expect(result == .success(URL(string: "https://example.com/feed#section")!))
+    }
+
+    @Test("Double scheme https://https:// parses as valid URL")
+    func doubleScheme() {
+        // URL(string:) parses "https://https://example.com" with host "https" — not rejected
+        let result = FeedURLValidator.validate("https://https://example.com")
+        if case .success = result { } else {
+            Issue.record("Expected success since URL parses with host 'https'")
+        }
+    }
 }
