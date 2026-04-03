@@ -11,6 +11,7 @@ final class FeedListViewModel {
     private var unreadCounts: [UUID: Int] = [:]
     private(set) var isRefreshing = false
     var errorMessage: String?
+    var importExportErrorMessage: String?
     var opmlImportResult: OPMLImportResult?
     var opmlExportURL: URL?
 
@@ -113,13 +114,14 @@ final class FeedListViewModel {
     }
 
     func importOPML(from data: Data) {
+        importExportErrorMessage = nil
         Self.logger.debug("importOPML() called with \(data.count, privacy: .public) bytes")
 
         let entries: [OPMLFeedEntry]
         do {
             entries = try opmlService.parseOPML(data)
         } catch {
-            errorMessage = "Unable to import feeds. The file may be invalid."
+            importExportErrorMessage = "Unable to import feeds. The file may be invalid."
             Self.logger.error("OPML parse failed: \(error, privacy: .public)")
             return
         }
@@ -142,7 +144,7 @@ final class FeedListViewModel {
                     addedCount += 1
                 }
             } catch {
-                errorMessage = "Unable to save imported feeds."
+                importExportErrorMessage = "Unable to save imported feeds."
                 Self.logger.error("Failed to persist OPML import: \(error, privacy: .public)")
                 loadFeeds()
                 return
@@ -154,11 +156,12 @@ final class FeedListViewModel {
             addedCount: addedCount,
             skippedCount: skippedCount
         )
-        errorMessage = nil
+        importExportErrorMessage = nil
         Self.logger.notice("OPML import: added \(addedCount, privacy: .public), skipped \(skippedCount, privacy: .public)")
     }
 
     func exportOPML() {
+        importExportErrorMessage = nil
         Self.logger.debug("exportOPML() called")
         do {
             let subscribedFeeds = feeds.map { $0.toSubscribedFeed() }
@@ -168,7 +171,7 @@ final class FeedListViewModel {
             try data.write(to: tempURL)
             opmlExportURL = tempURL
         } catch {
-            errorMessage = "Unable to export feeds."
+            importExportErrorMessage = "Unable to export feeds."
             Self.logger.error("OPML export failed: \(error, privacy: .public)")
         }
     }
@@ -195,7 +198,7 @@ final class FeedListViewModel {
         do {
             return try Data(contentsOf: url)
         } catch {
-            errorMessage = "Unable to read the selected file."
+            importExportErrorMessage = "Unable to read the selected file."
             Self.logger.error("Failed to read OPML file: \(error, privacy: .public)")
             return nil
         }

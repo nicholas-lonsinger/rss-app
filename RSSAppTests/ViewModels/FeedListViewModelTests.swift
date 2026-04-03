@@ -115,6 +115,7 @@ struct FeedListViewModelTests {
         #expect(viewModel.feeds.count == 2)
         #expect(viewModel.feeds[0].title == "First")
         #expect(viewModel.errorMessage != nil)
+        #expect(viewModel.importExportErrorMessage == nil)
     }
 
     // MARK: - Icon Cache Cleanup
@@ -285,7 +286,7 @@ struct FeedListViewModelTests {
         let viewModel = FeedListViewModel(persistence: mockPersistence, opmlService: mockOPML)
         viewModel.importOPML(from: Data())
 
-        #expect(viewModel.errorMessage != nil)
+        #expect(viewModel.importExportErrorMessage != nil)
     }
 
     // MARK: - OPML Export
@@ -305,7 +306,7 @@ struct FeedListViewModelTests {
         viewModel.exportOPML()
 
         #expect(viewModel.opmlExportURL != nil)
-        #expect(viewModel.errorMessage == nil)
+        #expect(viewModel.importExportErrorMessage == nil)
     }
 
     @Test("exportOPML sets error on failure")
@@ -321,7 +322,7 @@ struct FeedListViewModelTests {
         viewModel.exportOPML()
 
         #expect(viewModel.opmlExportURL == nil)
-        #expect(viewModel.errorMessage != nil)
+        #expect(viewModel.importExportErrorMessage != nil)
     }
 
     // MARK: - Refresh
@@ -369,6 +370,7 @@ struct FeedListViewModelTests {
         await viewModel.refreshAllFeeds()
 
         #expect(viewModel.errorMessage == "1 of 1 feed(s) could not be updated.")
+        #expect(viewModel.importExportErrorMessage == nil)
     }
 
     @Test("refreshAllFeeds handles partial failures")
@@ -491,7 +493,7 @@ struct FeedListViewModelTests {
         #expect(viewModel.feeds.count == 2)
         #expect(viewModel.opmlImportResult?.addedCount == 2)
         #expect(viewModel.opmlImportResult?.skippedCount == 0)
-        #expect(viewModel.errorMessage == nil)
+        #expect(viewModel.importExportErrorMessage == nil)
     }
 
     @Test("importOPML skips duplicate feeds")
@@ -630,6 +632,106 @@ struct FeedListViewModelTests {
         // Only the first feed should have been added — import aborts on second
         #expect(viewModel.feeds.count == 1)
         #expect(viewModel.opmlImportResult == nil)
+        #expect(viewModel.importExportErrorMessage != nil)
+        #expect(viewModel.errorMessage == nil)
+    }
+
+    // MARK: - Error Isolation
+
+    @Test("importOPML error does not set errorMessage")
+    @MainActor
+    func importOPMLErrorDoesNotSetErrorMessage() {
+        let mockPersistence = MockFeedPersistenceService()
+        let mockOPML = MockOPMLService()
+        mockOPML.errorToThrow = NSError(domain: "test", code: 1)
+
+        let viewModel = FeedListViewModel(persistence: mockPersistence, opmlService: mockOPML)
+        viewModel.importOPML(from: Data())
+
+        #expect(viewModel.importExportErrorMessage != nil)
+        #expect(viewModel.errorMessage == nil)
+    }
+
+    @Test("exportOPML error does not set errorMessage")
+    @MainActor
+    func exportOPMLErrorDoesNotSetErrorMessage() {
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [TestFixtures.makePersistentFeed()]
+        let mockOPML = MockOPMLService()
+        mockOPML.errorToThrow = NSError(domain: "test", code: 1)
+
+        let viewModel = FeedListViewModel(persistence: mockPersistence, opmlService: mockOPML)
+        viewModel.loadFeeds()
+        viewModel.exportOPML()
+
+        #expect(viewModel.importExportErrorMessage != nil)
+        #expect(viewModel.errorMessage == nil)
+    }
+
+    @Test("feed load error does not set importExportErrorMessage")
+    @MainActor
+    func feedLoadErrorDoesNotSetImportExportErrorMessage() {
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.errorToThrow = NSError(domain: "test", code: 1)
+
+        let viewModel = FeedListViewModel(persistence: mockPersistence)
+        viewModel.loadFeeds()
+
+        #expect(viewModel.errorMessage != nil)
+        #expect(viewModel.importExportErrorMessage == nil)
+    }
+
+    @Test("feed removal error does not set importExportErrorMessage")
+    @MainActor
+    func feedRemovalErrorDoesNotSetImportExportErrorMessage() {
+        let feed = TestFixtures.makePersistentFeed(title: "Feed")
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+
+        let viewModel = FeedListViewModel(persistence: mockPersistence)
+        viewModel.loadFeeds()
+
+        mockPersistence.errorToThrow = NSError(domain: "test", code: 1)
+        viewModel.removeFeed(feed)
+
+        #expect(viewModel.errorMessage != nil)
+        #expect(viewModel.importExportErrorMessage == nil)
+    }
+
+    @Test("importOPML clears stale importExportErrorMessage before processing")
+    @MainActor
+    func importOPMLClearsStaleError() {
+        let mockPersistence = MockFeedPersistenceService()
+        let mockOPML = MockOPMLService()
+        mockOPML.entriesToReturn = [
+            TestFixtures.makeOPMLFeedEntry(title: "Feed A", feedURL: URL(string: "https://a.com/feed")!),
+        ]
+
+        let viewModel = FeedListViewModel(persistence: mockPersistence, opmlService: mockOPML)
+        // Simulate stale error from a previous operation
+        viewModel.importExportErrorMessage = "Previous error"
+        viewModel.importOPML(from: Data())
+
+        #expect(viewModel.importExportErrorMessage == nil)
+        #expect(viewModel.opmlImportResult?.addedCount == 1)
+    }
+
+    @Test("exportOPML clears stale importExportErrorMessage before processing")
+    @MainActor
+    func exportOPMLClearsStaleError() {
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [TestFixtures.makePersistentFeed()]
+        let mockOPML = MockOPMLService()
+        mockOPML.dataToReturn = Data("opml-content".utf8)
+
+        let viewModel = FeedListViewModel(persistence: mockPersistence, opmlService: mockOPML)
+        viewModel.loadFeeds()
+        // Simulate stale error from a previous operation
+        viewModel.importExportErrorMessage = "Previous error"
+        viewModel.exportOPML()
+
+        #expect(viewModel.importExportErrorMessage == nil)
+        #expect(viewModel.opmlExportURL != nil)
     }
 
     // MARK: - Icon Resolution During Refresh
