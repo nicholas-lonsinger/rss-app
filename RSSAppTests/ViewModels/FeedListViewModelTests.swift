@@ -115,6 +115,7 @@ struct FeedListViewModelTests {
         #expect(viewModel.feeds.count == 2)
         #expect(viewModel.feeds[0].title == "First")
         #expect(viewModel.errorMessage != nil)
+        #expect(viewModel.importExportErrorMessage == nil)
     }
 
     // MARK: - Icon Cache Cleanup
@@ -369,6 +370,7 @@ struct FeedListViewModelTests {
         await viewModel.refreshAllFeeds()
 
         #expect(viewModel.errorMessage == "1 of 1 feed(s) could not be updated.")
+        #expect(viewModel.importExportErrorMessage == nil)
     }
 
     @Test("refreshAllFeeds handles partial failures")
@@ -630,6 +632,8 @@ struct FeedListViewModelTests {
         // Only the first feed should have been added — import aborts on second
         #expect(viewModel.feeds.count == 1)
         #expect(viewModel.opmlImportResult == nil)
+        #expect(viewModel.importExportErrorMessage != nil)
+        #expect(viewModel.errorMessage == nil)
     }
 
     // MARK: - Error Isolation
@@ -692,6 +696,42 @@ struct FeedListViewModelTests {
 
         #expect(viewModel.errorMessage != nil)
         #expect(viewModel.importExportErrorMessage == nil)
+    }
+
+    @Test("importOPML clears stale importExportErrorMessage before processing")
+    @MainActor
+    func importOPMLClearsStaleError() {
+        let mockPersistence = MockFeedPersistenceService()
+        let mockOPML = MockOPMLService()
+        mockOPML.entriesToReturn = [
+            TestFixtures.makeOPMLFeedEntry(title: "Feed A", feedURL: URL(string: "https://a.com/feed")!),
+        ]
+
+        let viewModel = FeedListViewModel(persistence: mockPersistence, opmlService: mockOPML)
+        // Simulate stale error from a previous operation
+        viewModel.importExportErrorMessage = "Previous error"
+        viewModel.importOPML(from: Data())
+
+        #expect(viewModel.importExportErrorMessage == nil)
+        #expect(viewModel.opmlImportResult?.addedCount == 1)
+    }
+
+    @Test("exportOPML clears stale importExportErrorMessage before processing")
+    @MainActor
+    func exportOPMLClearsStaleError() {
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [TestFixtures.makePersistentFeed()]
+        let mockOPML = MockOPMLService()
+        mockOPML.dataToReturn = Data("opml-content".utf8)
+
+        let viewModel = FeedListViewModel(persistence: mockPersistence, opmlService: mockOPML)
+        viewModel.loadFeeds()
+        // Simulate stale error from a previous operation
+        viewModel.importExportErrorMessage = "Previous error"
+        viewModel.exportOPML()
+
+        #expect(viewModel.importExportErrorMessage == nil)
+        #expect(viewModel.opmlExportURL != nil)
     }
 
     // MARK: - Icon Resolution During Refresh

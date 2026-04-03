@@ -114,6 +114,7 @@ final class FeedListViewModel {
     }
 
     func importOPML(from data: Data) {
+        importExportErrorMessage = nil
         Self.logger.debug("importOPML() called with \(data.count, privacy: .public) bytes")
 
         let entries: [OPMLFeedEntry]
@@ -160,6 +161,7 @@ final class FeedListViewModel {
     }
 
     func exportOPML() {
+        importExportErrorMessage = nil
         Self.logger.debug("exportOPML() called")
         do {
             let subscribedFeeds = feeds.map { $0.toSubscribedFeed() }
