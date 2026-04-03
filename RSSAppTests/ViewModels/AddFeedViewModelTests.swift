@@ -197,8 +197,7 @@ struct AddFeedViewModelTests {
         )
         let mockPersistence = MockFeedPersistenceService()
         let mockIconService = MockFeedIconService()
-        mockIconService.candidateURLs = [URL(string: "https://example.com/icon.png")!]
-        mockIconService.cacheResult = true
+        mockIconService.resolveAndCacheResult = URL(string: "https://example.com/icon.png")
 
         let viewModel = AddFeedViewModel(
             feedFetching: mockFetching,
@@ -212,8 +211,7 @@ struct AddFeedViewModelTests {
         for _ in 0..<10 { await Task.yield() }
 
         #expect(viewModel.didAddFeed == true)
-        #expect(mockIconService.resolveCallCount == 1)
-        #expect(mockIconService.cacheCallCount == 1)
+        #expect(mockIconService.resolveAndCacheCallCount == 1)
     }
 
     @Test("addFeed does not trigger icon resolution on fetch failure")
@@ -233,8 +231,7 @@ struct AddFeedViewModelTests {
         await viewModel.addFeed()
 
         #expect(viewModel.didAddFeed == false)
-        #expect(mockIconService.resolveCallCount == 0)
-        #expect(mockIconService.cacheCallCount == 0)
+        #expect(mockIconService.resolveAndCacheCallCount == 0)
     }
 
     @Test("addFeed clears previous error on retry")
