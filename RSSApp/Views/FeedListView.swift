@@ -128,7 +128,8 @@ struct FeedListView: View {
                     NavigationLink(value: feed.id) {
                         FeedRowView(
                             feed: feed,
-                            unreadCount: viewModel.unreadCount(for: feed)
+                            unreadCount: viewModel.unreadCount(for: feed),
+                            iconService: viewModel.feedIconService
                         )
                     }
                     .swipeActions(edge: .leading) {

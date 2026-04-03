@@ -6,6 +6,7 @@ struct FeedIconView: View {
     // RATIONALE: iconURL is not read directly — it exists so SwiftUI detects a property
     // change and re-evaluates the body when the icon becomes available after caching.
     let iconURL: URL?
+    let iconService: FeedIconResolving
 
     @State private var iconImage: UIImage?
 
@@ -27,7 +28,7 @@ struct FeedIconView: View {
         }
         .frame(width: Self.iconSize, height: Self.iconSize)
         .task(id: iconURL) {
-            guard let fileURL = FeedIconService().cachedIconFileURL(for: feedID) else {
+            guard let fileURL = iconService.cachedIconFileURL(for: feedID) else {
                 iconImage = nil
                 return
             }

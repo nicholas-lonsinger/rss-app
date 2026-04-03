@@ -20,7 +20,7 @@ final class FeedListViewModel {
     private let persistence: FeedPersisting
     private let opmlService: OPMLServing
     private let feedFetching: FeedFetching
-    private let feedIconService: FeedIconResolving
+    let feedIconService: FeedIconResolving
 
     init(
         persistence: FeedPersisting,

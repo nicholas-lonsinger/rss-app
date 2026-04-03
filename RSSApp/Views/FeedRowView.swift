@@ -3,10 +3,11 @@ import SwiftUI
 struct FeedRowView: View {
     let feed: PersistentFeed
     let unreadCount: Int
+    let iconService: FeedIconResolving
 
     var body: some View {
         HStack(spacing: 10) {
-            FeedIconView(feedID: feed.id, iconURL: feed.iconURL)
+            FeedIconView(feedID: feed.id, iconURL: feed.iconURL, iconService: iconService)
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(feed.title)
