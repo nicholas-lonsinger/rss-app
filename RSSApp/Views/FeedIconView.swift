@@ -21,9 +21,12 @@ struct FeedIconView: View {
                     .aspectRatio(contentMode: .fit)
                     .clipShape(RoundedRectangle(cornerRadius: Self.cornerRadius))
             } else {
-                Image(systemName: "globe")
-                    .font(.title2)
-                    .foregroundStyle(.secondary)
+                RoundedRectangle(cornerRadius: Self.cornerRadius)
+                    .fill(Color(.tertiarySystemFill))
+                    .overlay {
+                        Image(systemName: "globe")
+                            .foregroundStyle(.secondary)
+                    }
             }
         }
         .frame(width: Self.iconSize, height: Self.iconSize)
