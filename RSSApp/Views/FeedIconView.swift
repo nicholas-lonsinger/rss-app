@@ -34,6 +34,9 @@ struct FeedIconView: View {
                 iconImage = nil
                 return
             }
+            // RATIONALE: Calls FeedIconService.hasVisibleContent directly rather than through
+            // the FeedIconResolving protocol because it is a pure static utility with no I/O
+            // or state — protocol abstraction would add complexity with no testability benefit.
             let image = await Task.detached(priority: .userInitiated) { () -> UIImage? in
                 guard let img = UIImage(contentsOfFile: fileURL.path(percentEncoded: false)),
                       FeedIconService.hasVisibleContent(img) else {

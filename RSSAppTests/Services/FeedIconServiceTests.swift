@@ -96,9 +96,26 @@ struct FeedIconServiceTests {
         #expect(FeedIconService.hasVisibleContent(image))
     }
 
-    @Test("Accepts opaque JPEG-like image without alpha")
+    @Test("Rejects image below visibility threshold")
     @MainActor
-    func hasVisibleContentAcceptsOpaqueJPEG() {
+    func hasVisibleContentRejectsBelowThreshold() {
+        // 20x20 = 400 pixels; 3 opaque pixels = 0.75%, below the 1% threshold
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: 20, height: 20), format: format)
+        let image = renderer.image { context in
+            UIColor.clear.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 20, height: 20))
+            UIColor.red.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 3, height: 1))
+        }
+
+        #expect(!FeedIconService.hasVisibleContent(image))
+    }
+
+    @Test("Accepts opaque image without alpha channel")
+    @MainActor
+    func hasVisibleContentAcceptsOpaqueNoAlpha() {
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1
         format.opaque = true

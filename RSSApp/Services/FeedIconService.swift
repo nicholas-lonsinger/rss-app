@@ -283,9 +283,14 @@ struct FeedIconService: FeedIconResolving {
     }
 
     /// Returns `false` if the image is fully or mostly transparent (e.g., a tracking pixel
-    /// or placeholder favicon). Icons must have at least 1% of pixels with meaningful opacity.
+    /// or placeholder favicon). Pixels with alpha > 25 (out of 255) are considered visible;
+    /// at least 1% of pixels must be visible for the image to pass.
+    /// Returns `true` when inspection fails (safe default: accept rather than reject).
     static func hasVisibleContent(_ image: UIImage) -> Bool {
-        guard let cgImage = image.cgImage else { return false }
+        guard let cgImage = image.cgImage else {
+            logger.warning("hasVisibleContent: image has no CGImage backing — accepting as visible")
+            return true
+        }
         let width = cgImage.width
         let height = cgImage.height
         guard width > 0, height > 0 else { return false }
@@ -302,7 +307,10 @@ struct FeedIconService: FeedIconResolving {
             bytesPerRow: bytesPerRow,
             space: CGColorSpaceCreateDeviceRGB(),
             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ) else { return false }
+        ) else {
+            logger.warning("hasVisibleContent: CGContext creation failed for \(width)x\(height) image — accepting as visible")
+            return true
+        }
 
         context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
 
