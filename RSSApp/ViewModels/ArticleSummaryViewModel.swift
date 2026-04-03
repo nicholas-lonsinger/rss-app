@@ -6,10 +6,7 @@ import os
 @Observable
 final class ArticleSummaryViewModel {
 
-    private static let logger = Logger(
-        subsystem: Logger.appSubsystem,
-        category: "ArticleSummaryViewModel"
-    )
+    private static let logger = Logger(category: "ArticleSummaryViewModel")
 
     enum State {
         case idle

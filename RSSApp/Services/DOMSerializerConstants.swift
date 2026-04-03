@@ -8,10 +8,7 @@ import os
 /// `ArticleReaderWebView` and `ArticleExtractionService`.
 enum DOMSerializerConstants {
 
-    private static let logger = Logger(
-        subsystem: Logger.appSubsystem,
-        category: "DOMSerializerConstants"
-    )
+    private static let logger = Logger(category: "DOMSerializerConstants")
 
     /// WKScriptMessageHandler name registered for early extraction.
     static let messageHandlerName = "domSerialized"

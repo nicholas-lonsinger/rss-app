@@ -5,10 +5,7 @@ import os
 @Observable
 final class FeedListViewModel {
 
-    private static let logger = Logger(
-        subsystem: Logger.appSubsystem,
-        category: "FeedListViewModel"
-    )
+    private static let logger = Logger(category: "FeedListViewModel")
 
     private(set) var feeds: [PersistentFeed] = []
     private var unreadCounts: [UUID: Int] = [:]

@@ -9,10 +9,7 @@ protocol FeedStoring: Sendable {
 // RATIONALE: @unchecked Sendable because UserDefaults is thread-safe but not marked Sendable in Swift 6.
 struct FeedStorageService: FeedStoring, @unchecked Sendable {
 
-    private static let logger = Logger(
-        subsystem: Logger.appSubsystem,
-        category: "FeedStorageService"
-    )
+    private static let logger = Logger(category: "FeedStorageService")
 
     private static let storageKey = "subscribedFeeds"
 

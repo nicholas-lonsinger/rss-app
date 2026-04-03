@@ -14,10 +14,7 @@ protocol OPMLServing: Sendable {
 
 struct OPMLService: OPMLServing {
 
-    private static let logger = Logger(
-        subsystem: Logger.appSubsystem,
-        category: "OPMLService"
-    )
+    private static let logger = Logger(category: "OPMLService")
 
     func parseOPML(_ data: Data) throws -> [OPMLFeedEntry] {
         Self.logger.debug("parseOPML() called with \(data.count, privacy: .public) bytes")
@@ -105,10 +102,7 @@ struct OPMLService: OPMLServing {
 // synchronously within a single parseOPML() call and never escapes that scope.
 private final class OPMLParserDelegate: NSObject, XMLParserDelegate, @unchecked Sendable {
 
-    private static let logger = Logger(
-        subsystem: Logger.appSubsystem,
-        category: "OPMLParserDelegate"
-    )
+    private static let logger = Logger(category: "OPMLParserDelegate")
 
     var foundBody = false
     var entries: [OPMLFeedEntry] = []

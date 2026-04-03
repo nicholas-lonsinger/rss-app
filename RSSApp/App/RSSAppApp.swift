@@ -5,10 +5,7 @@ import os
 @main
 struct RSSAppApp: App {
 
-    private static let logger = Logger(
-        subsystem: Logger.appSubsystem,
-        category: "RSSAppApp"
-    )
+    private static let logger = Logger(category: "RSSAppApp")
 
     let modelContainer: ModelContainer
 

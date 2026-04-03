@@ -62,7 +62,7 @@ The app uses Apple's `os.Logger` (subsystem `com.nicholas-lonsinger.rss-app`) wi
 | `.fault` | Programming errors: impossible states, compile-time-known inputs that failed lookup. Paired with `assertionFailure`. | Persisted to disk; always visible; never redacted |
 
 **Guidelines:**
-- Every new service or view model should declare its own `private static let logger = Logger(subsystem: "com.nicholas-lonsinger.rss-app", category: "ComponentName")`
+- Every new service or view model should declare its own `private static let logger = Logger(category: "ComponentName")`
 - State transitions and irreversible actions should be `.notice`
 - Method entry points in complex flows should have `.debug` logs with relevant parameter values
 - Do not use `print()`, `NSLog()`, or file-based logging

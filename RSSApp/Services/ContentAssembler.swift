@@ -9,10 +9,7 @@ import os
 /// - `textContent`: plain text with paragraph breaks preserved and whitespace normalized
 enum ContentAssembler {
 
-    private static let logger = Logger(
-        subsystem: Logger.appSubsystem,
-        category: "ContentAssembler"
-    )
+    private static let logger = Logger(category: "ContentAssembler")
 
     /// Tags to preserve in the output HTML (content-carrying elements).
     private static let preservedTags: Set<String> = [

@@ -6,10 +6,7 @@ import os
 @Observable
 final class DiscussionViewModel {
 
-    private static let logger = Logger(
-        subsystem: Logger.appSubsystem,
-        category: "DiscussionViewModel"
-    )
+    private static let logger = Logger(category: "DiscussionViewModel")
 
     private static let apiKeyAccount = "anthropic-api-key"
 

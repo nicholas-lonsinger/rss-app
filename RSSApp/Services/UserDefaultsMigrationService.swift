@@ -5,10 +5,7 @@ import os
 @MainActor
 struct UserDefaultsMigrationService {
 
-    private static let logger = Logger(
-        subsystem: Logger.appSubsystem,
-        category: "UserDefaultsMigrationService"
-    )
+    private static let logger = Logger(category: "UserDefaultsMigrationService")
 
     private static let migrationKey = "swiftdata_migration_complete_v1"
 
