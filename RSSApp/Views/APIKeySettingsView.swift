@@ -8,7 +8,7 @@ struct APIKeySettingsView: View {
     private static let account = "anthropic-api-key"
 
     /// Whether an API key is currently stored in the Keychain.
-    var hasAPIKey: Bool {
+    private var hasAPIKey: Bool {
         keychainService.load(for: Self.account) != nil
     }
 

@@ -66,7 +66,7 @@ RSSApp/
 │   ├── FeedIconView.swift              # Feed icon display — loads cached PNG from disk, fallback globe placeholder
 │   ├── FeedListView.swift              # Subscribed feed list — NavigationStack root with add/remove, settings gear, unread badges
 │   ├── FeedRowView.swift               # Single feed row — icon, title, description, unread count badge
-│   └── SettingsView.swift              # Top-level settings page with NavigationStack push to API Key and Import/Export sub-screens
+│   └── SettingsView.swift              # Top-level settings page with NavigationLink rows pushing API Key and Import/Export sub-screens
 └── Resources/
     ├── domSerializer.js                # Bundled DOM serializer — walks DOM tree, emits JSON for Swift extraction
     └── Assets.xcassets/                # App icons and image assets
@@ -123,7 +123,7 @@ RSSAppTests/
     └── FeedViewModelTests.swift            # Load success/failure, state transitions
 ```
 
-**Total: 52 source files + 1 resource, 38 test source files + 1 fixture.**
+**Total: 55 source files + 1 resource, 41 test source files + 1 fixture.**
 
 ## Component Map
 
@@ -251,7 +251,7 @@ All view models are `@MainActor @Observable`.
 
 `ArticleDiscussionView` is a sheet. It shows a `ScrollViewReader`-driven chat list with user (blue, right-aligned) and assistant (grey, left-aligned) message bubbles, and a text input bar. When no API key is configured, a `ContentUnavailableView` prompt replaces the chat.
 
-`SettingsView` is the top-level settings page, pushed from `FeedListView` via the gear toolbar icon. Uses NavigationStack push navigation with rows for API Key (pushes `APIKeySettingsView`) and Import/Export (pushes `ImportExportView`). `ImportExportView` (defined in the same file) hosts the OPML import/export functionality previously in the `FeedListView` toolbar menu.
+`SettingsView` is the top-level settings page, pushed from `FeedListView` via the gear toolbar icon using a `NavigationLink` within `FeedListView`'s `NavigationStack`. Contains `NavigationLink` rows for API Key (pushes `APIKeySettingsView`) and Import/Export (pushes `ImportExportView`). `ImportExportView` (defined in the same file) hosts the OPML import/export functionality previously in the `FeedListView` toolbar menu.
 
 `APIKeySettingsView` provides a `TextField` for pasting an Anthropic API key, Save/Remove buttons, and a status indicator. Saved keys go directly to `KeychainService`. Designed to be pushed from `SettingsView` or presented as a sheet (wrapped in `NavigationStack` by the caller when used as a sheet).
 

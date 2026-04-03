@@ -4,12 +4,8 @@ import os
 
 struct SettingsView: View {
 
-    private static let logger = Logger(category: "SettingsView")
-
     let persistence: FeedPersisting
     let viewModel: FeedListViewModel
-
-    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         List {
@@ -127,11 +123,13 @@ struct ImportExportView: View {
     private func handleFileImport(_ result: Result<URL, any Error>) {
         switch result {
         case .success(let url):
+            Self.logger.debug("File selected for import: \(url.lastPathComponent, privacy: .public)")
             Task {
                 await viewModel.importOPMLAndRefresh(from: url)
             }
-        case .failure:
-            viewModel.errorMessage = "Unable to open the file picker."
+        case .failure(let error):
+            Self.logger.error("File import failed: \(error, privacy: .public)")
+            viewModel.errorMessage = "Unable to access the selected file."
         }
     }
 }
