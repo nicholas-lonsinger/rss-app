@@ -184,6 +184,59 @@ struct AddFeedViewModelTests {
         #expect(viewModel.errorMessage == "You are already subscribed to this feed.")
     }
 
+    // MARK: - Icon Resolution
+
+    @Test("addFeed triggers icon resolution on success")
+    @MainActor
+    func addFeedTriggersIconResolution() async {
+        let mockFetching = MockFeedFetchingService()
+        mockFetching.feedToReturn = TestFixtures.makeFeed(
+            title: "My Feed",
+            link: URL(string: "https://example.com"),
+            imageURL: URL(string: "https://example.com/logo.png")
+        )
+        let mockPersistence = MockFeedPersistenceService()
+        let mockIconService = MockFeedIconService()
+        mockIconService.candidateURLs = [URL(string: "https://example.com/icon.png")!]
+        mockIconService.cacheResult = true
+
+        let viewModel = AddFeedViewModel(
+            feedFetching: mockFetching,
+            persistence: mockPersistence,
+            feedIconService: mockIconService
+        )
+        viewModel.urlInput = "https://example.com/feed"
+        await viewModel.addFeed()
+
+        // Allow fire-and-forget icon resolution task to complete
+        for _ in 0..<10 { await Task.yield() }
+
+        #expect(viewModel.didAddFeed == true)
+        #expect(mockIconService.resolveCallCount == 1)
+        #expect(mockIconService.cacheCallCount == 1)
+    }
+
+    @Test("addFeed does not trigger icon resolution on fetch failure")
+    @MainActor
+    func addFeedSkipsIconResolutionOnFailure() async {
+        let mockFetching = MockFeedFetchingService()
+        mockFetching.errorToThrow = FeedFetchingError.invalidResponse(statusCode: 500)
+        let mockPersistence = MockFeedPersistenceService()
+        let mockIconService = MockFeedIconService()
+
+        let viewModel = AddFeedViewModel(
+            feedFetching: mockFetching,
+            persistence: mockPersistence,
+            feedIconService: mockIconService
+        )
+        viewModel.urlInput = "https://example.com/feed"
+        await viewModel.addFeed()
+
+        #expect(viewModel.didAddFeed == false)
+        #expect(mockIconService.resolveCallCount == 0)
+        #expect(mockIconService.cacheCallCount == 0)
+    }
+
     @Test("addFeed clears previous error on retry")
     @MainActor
     func addFeedClearsPreviousError() async {

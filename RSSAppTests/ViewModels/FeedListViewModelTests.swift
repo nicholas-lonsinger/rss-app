@@ -117,6 +117,46 @@ struct FeedListViewModelTests {
         #expect(viewModel.errorMessage != nil)
     }
 
+    // MARK: - Icon Cache Cleanup
+
+    @Test("removeFeed deletes cached icon")
+    @MainActor
+    func removeFeedDeletesCachedIcon() {
+        let feed = TestFixtures.makePersistentFeed(title: "Remove Me")
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+        let mockIconService = MockFeedIconService()
+
+        let viewModel = FeedListViewModel(
+            persistence: mockPersistence,
+            feedIconService: mockIconService
+        )
+        viewModel.loadFeeds()
+        viewModel.removeFeed(feed)
+
+        #expect(mockIconService.deleteCallCount == 1)
+    }
+
+    @Test("removeFeed at IndexSet deletes cached icons for each removed feed")
+    @MainActor
+    func removeFeedAtIndexSetDeletesCachedIcons() {
+        let feed1 = TestFixtures.makePersistentFeed(title: "First")
+        let feed2 = TestFixtures.makePersistentFeed(title: "Second")
+        let feed3 = TestFixtures.makePersistentFeed(title: "Third")
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed1, feed2, feed3]
+        let mockIconService = MockFeedIconService()
+
+        let viewModel = FeedListViewModel(
+            persistence: mockPersistence,
+            feedIconService: mockIconService
+        )
+        viewModel.loadFeeds()
+        viewModel.removeFeed(at: IndexSet([0, 2]))
+
+        #expect(mockIconService.deleteCallCount == 2)
+    }
+
     // MARK: - Unread Counts
 
     @Test("loadFeeds populates unread counts")
@@ -590,6 +630,61 @@ struct FeedListViewModelTests {
         // Only the first feed should have been added — import aborts on second
         #expect(viewModel.feeds.count == 1)
         #expect(viewModel.opmlImportResult == nil)
+    }
+
+    // MARK: - Icon Resolution During Refresh
+
+    @Test("refreshAllFeeds resolves icons for fetched feeds")
+    @MainActor
+    func refreshAllFeedsResolvesIcons() async {
+        let url = URL(string: "https://example.com/feed")!
+        let feed = TestFixtures.makePersistentFeed(feedURL: url)
+
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+        let mockFetching = MockFeedFetchingService()
+        mockFetching.feedsByURL = [url: TestFixtures.makeFeed()]
+        let mockIconService = MockFeedIconService()
+
+        let viewModel = FeedListViewModel(
+            persistence: mockPersistence,
+            feedFetching: mockFetching,
+            feedIconService: mockIconService
+        )
+        viewModel.loadFeeds()
+        await viewModel.refreshAllFeeds()
+
+        // Allow fire-and-forget icon resolution tasks to complete
+        for _ in 0..<10 { await Task.yield() }
+
+        #expect(mockIconService.resolveCallCount == 1)
+    }
+
+    @Test("refreshAllFeeds skips icon resolution when icon already cached")
+    @MainActor
+    func refreshAllFeedsSkipsIconWhenCached() async {
+        let url = URL(string: "https://example.com/feed")!
+        let feed = TestFixtures.makePersistentFeed(feedURL: url)
+
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+        let mockFetching = MockFeedFetchingService()
+        mockFetching.feedsByURL = [url: TestFixtures.makeFeed()]
+        let mockIconService = MockFeedIconService()
+        mockIconService.cachedFileURL = URL(filePath: "/tmp/cached-icon.png")
+
+        let viewModel = FeedListViewModel(
+            persistence: mockPersistence,
+            feedFetching: mockFetching,
+            feedIconService: mockIconService
+        )
+        viewModel.loadFeeds()
+        await viewModel.refreshAllFeeds()
+
+        // Allow fire-and-forget icon resolution tasks to complete
+        for _ in 0..<10 { await Task.yield() }
+
+        #expect(mockIconService.resolveCallCount == 0)
     }
 
     // MARK: - 304 Not Modified
