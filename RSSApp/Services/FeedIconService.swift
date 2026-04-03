@@ -30,10 +30,7 @@ protocol FeedIconResolving: Sendable {
 
 struct FeedIconService: FeedIconResolving {
 
-    private static let logger = Logger(
-        subsystem: Logger.appSubsystem,
-        category: "FeedIconService"
-    )
+    private static let logger = Logger(category: "FeedIconService")
 
     private static let iconCacheDirectoryName = "feed-icons"
     private static let htmlFetchTimeout: TimeInterval = 10

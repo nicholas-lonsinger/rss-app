@@ -11,10 +11,7 @@ protocol ContentExtracting: Sendable {
 /// Pipeline: site-specific extractors → metadata extraction → candidate scoring → content assembly.
 struct ContentExtractor: ContentExtracting {
 
-    private static let logger = Logger(
-        subsystem: Logger.appSubsystem,
-        category: "ContentExtractor"
-    )
+    private static let logger = Logger(category: "ContentExtractor")
 
     /// Site-specific extractors checked before the generic algorithm.
     private let siteExtractors: [any SiteSpecificExtracting]

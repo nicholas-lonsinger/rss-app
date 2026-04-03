@@ -5,10 +5,7 @@ import os
 @Observable
 final class FeedViewModel {
 
-    private static let logger = Logger(
-        subsystem: Logger.appSubsystem,
-        category: "FeedViewModel"
-    )
+    private static let logger = Logger(category: "FeedViewModel")
 
     var articles: [PersistentArticle] = []
     var feedTitle: String = "Feed"

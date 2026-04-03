@@ -16,10 +16,7 @@ struct ArticleReaderWebView: UIViewRepresentable {
     /// Raw RSS description HTML used as fallback when all extraction strategies fail.
     let fallbackHTML: String
 
-    private static let logger = Logger(
-        subsystem: Logger.appSubsystem,
-        category: "ArticleReaderWebView"
-    )
+    private static let logger = Logger(category: "ArticleReaderWebView")
 
     func makeCoordinator() -> Coordinator {
         Coordinator(extractionState: extractionState, fallbackHTML: fallbackHTML)
@@ -64,10 +61,7 @@ struct ArticleReaderWebView: UIViewRepresentable {
     // MARK: - Coordinator
 
     final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
-        private static let logger = Logger(
-            subsystem: Logger.appSubsystem,
-            category: "ArticleReaderWebView.Coordinator"
-        )
+        private static let logger = Logger(category: "ArticleReaderWebView.Coordinator")
 
         private let extractionState: ReaderExtractionState
         private let fallbackHTML: String

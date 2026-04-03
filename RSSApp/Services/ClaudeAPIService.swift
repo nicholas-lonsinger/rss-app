@@ -17,10 +17,7 @@ enum ClaudeAPIError: Error, Sendable {
 
 struct ClaudeAPIService: ClaudeAPIServicing {
 
-    private static let logger = Logger(
-        subsystem: Logger.appSubsystem,
-        category: "ClaudeAPIService"
-    )
+    private static let logger = Logger(category: "ClaudeAPIService")
 
     private static let apiURL = "https://api.anthropic.com/v1/messages"
     private static let model = "claude-sonnet-4-6"

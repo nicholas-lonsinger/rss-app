@@ -7,10 +7,7 @@ enum FeedURLValidationError: Error {
 
 enum FeedURLValidator {
 
-    private static let logger = Logger(
-        subsystem: Logger.appSubsystem,
-        category: "FeedURLValidator"
-    )
+    private static let logger = Logger(category: "FeedURLValidator")
 
     /// Normalizes and validates a raw URL input string for feed subscription.
     /// Trims whitespace, prepends `https://` if no scheme is present, then validates

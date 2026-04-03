@@ -11,10 +11,7 @@ import os
 /// 4. Select the top-scoring candidate
 enum CandidateScorer {
 
-    private static let logger = Logger(
-        subsystem: Logger.appSubsystem,
-        category: "CandidateScorer"
-    )
+    private static let logger = Logger(category: "CandidateScorer")
 
     // MARK: - Public API
 

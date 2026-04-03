@@ -8,10 +8,7 @@ import os
 /// 2. DOM elements (`<h1>`, byline class patterns)
 enum MetadataExtractor {
 
-    private static let logger = Logger(
-        subsystem: Logger.appSubsystem,
-        category: "MetadataExtractor"
-    )
+    private static let logger = Logger(category: "MetadataExtractor")
 
     struct Metadata: Sendable {
         let title: String

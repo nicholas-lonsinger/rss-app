@@ -41,10 +41,7 @@ protocol FeedPersisting: Sendable {
 @MainActor
 final class SwiftDataFeedPersistenceService: FeedPersisting {
 
-    private static let logger = Logger(
-        subsystem: Logger.appSubsystem,
-        category: "FeedPersistenceService"
-    )
+    private static let logger = Logger(category: "FeedPersistenceService")
 
     private let modelContext: ModelContext
 

@@ -15,10 +15,7 @@ enum KeychainError: Error, Sendable {
 
 struct KeychainService: KeychainServicing {
 
-    private static let logger = Logger(
-        subsystem: Logger.appSubsystem,
-        category: "KeychainService"
-    )
+    private static let logger = Logger(category: "KeychainService")
 
     let service: String
 

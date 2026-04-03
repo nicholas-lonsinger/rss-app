@@ -8,10 +8,7 @@ enum RSSParsingError: Error, Sendable {
 
 struct RSSParsingService: Sendable {
 
-    private static let logger = Logger(
-        subsystem: Logger.appSubsystem,
-        category: "RSSParsingService"
-    )
+    private static let logger = Logger(category: "RSSParsingService")
 
     static let snippetMaxLength = 200
 
@@ -62,10 +59,7 @@ struct RSSParsingService: Sendable {
 // synchronously within a single parse() call and never escapes that scope.
 private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked Sendable {
 
-    private static let logger = Logger(
-        subsystem: Logger.appSubsystem,
-        category: "RSSParserDelegate"
-    )
+    private static let logger = Logger(category: "RSSParserDelegate")
 
     var foundChannel = false
     var channelTitle = ""

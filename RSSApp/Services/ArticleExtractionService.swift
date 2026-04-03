@@ -19,10 +19,7 @@ enum ArticleExtractionError: Error, Sendable {
 @MainActor
 final class ArticleExtractionService: ArticleExtracting {
 
-    private static let logger = Logger(
-        subsystem: Logger.appSubsystem,
-        category: "ArticleExtractionService"
-    )
+    private static let logger = Logger(category: "ArticleExtractionService")
 
     private let contentExtractor: any ContentExtracting
 
@@ -132,10 +129,7 @@ final class ArticleExtractionService: ArticleExtracting {
 /// and its lifecycle is bounded by the single extraction call.
 private final class ExtractionCoordinator: NSObject, WKNavigationDelegate, @unchecked Sendable {
 
-    private static let logger = Logger(
-        subsystem: Logger.appSubsystem,
-        category: "ExtractionCoordinator"
-    )
+    private static let logger = Logger(category: "ExtractionCoordinator")
 
     private let contentExtractor: any ContentExtracting
     fileprivate var continuation: CheckedContinuation<ArticleContent?, Error>?

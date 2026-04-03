@@ -5,10 +5,7 @@ import os
 @Observable
 final class EditFeedViewModel {
 
-    private static let logger = Logger(
-        subsystem: Logger.appSubsystem,
-        category: "EditFeedViewModel"
-    )
+    private static let logger = Logger(category: "EditFeedViewModel")
 
     var urlInput: String
     private(set) var isValidating = false
