@@ -13,6 +13,7 @@ struct FeedListView: View {
     @State private var lastViewedFeedID: PersistentFeed.ID?
 
     private let persistence: FeedPersisting
+    private let thumbnailService: ArticleThumbnailCaching = ArticleThumbnailService()
 
     // .opml is not a system-declared UTType on all iOS versions; .xml is the guaranteed fallback.
     private static let opmlContentTypes: [UTType] = {
@@ -36,7 +37,8 @@ struct FeedListView: View {
                     if let feed = viewModel.feeds.first(where: { $0.id == feedID }) {
                         ArticleListView(
                             viewModel: FeedViewModel(feed: feed, persistence: persistence),
-                            persistence: persistence
+                            persistence: persistence,
+                            thumbnailService: thumbnailService
                         )
                         .onAppear { lastViewedFeedID = feedID }
                     } else {

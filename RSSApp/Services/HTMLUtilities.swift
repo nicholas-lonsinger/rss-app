@@ -54,6 +54,23 @@ enum HTMLUtilities {
         return URL(string: String(match.1))
     }
 
+    /// Extracts the `og:image` URL from an HTML page's `<meta>` tags.
+    static func extractOGImageURL(from html: String) -> URL? {
+        // Match <meta property="og:image" content="..."> with either attribute order
+        let pattern1 = ##/<meta\s[^>]*?property=["']og:image["'][^>]*?content=["']([^"']+)["']/##
+            .ignoresCase()
+        let pattern2 = ##/<meta\s[^>]*?content=["']([^"']+)["'][^>]*?property=["']og:image["']/##
+            .ignoresCase()
+
+        if let match = html.firstMatch(of: pattern1) {
+            return URL(string: String(match.1))
+        }
+        if let match = html.firstMatch(of: pattern2) {
+            return URL(string: String(match.1))
+        }
+        return nil
+    }
+
     /// Extracts icon URLs from HTML `<link>` tags, ordered by priority:
     /// apple-touch-icon → shortcut icon / icon.
     /// Relative hrefs are resolved against the provided base URL.

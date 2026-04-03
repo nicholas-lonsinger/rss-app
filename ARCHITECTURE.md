@@ -31,12 +31,13 @@ RSSApp/
 │   ├── ContentExtractor.swift          # ContentExtracting protocol + extraction pipeline orchestrator
 │   ├── DOMSerializerConstants.swift    # Shared JS bridge constants (message handler name, serializer call)
 │   ├── FeedFetchingService.swift       # FeedFetching protocol + URLSession implementation
+│   ├── ArticleThumbnailService.swift   # ArticleThumbnailCaching protocol + thumbnail download, resize-to-120px, JPEG disk caching
 │   ├── FeedIconService.swift           # FeedIconResolving protocol + icon URL resolution (feed XML → site HTML → /favicon.ico) and file-system caching
 │   ├── FeedPersistenceService.swift    # FeedPersisting protocol + SwiftData implementation (feeds, articles, content cache, read/unread)
 │   ├── FeedStorageService.swift        # FeedStoring protocol + UserDefaults persistence — retained for migration only
 │   ├── FeedURLValidator.swift          # Shared URL normalization + validation (trim, scheme prepend, HTTP/HTTPS + host check)
 │   ├── UserDefaultsMigrationService.swift # One-time migration from UserDefaults SubscribedFeed list to SwiftData PersistentFeed
-│   ├── HTMLUtilities.swift             # HTML/XML escaping (text + attributes), tag stripping, entity decoding, image extraction, icon URL extraction
+│   ├── HTMLUtilities.swift             # HTML/XML escaping (text + attributes), tag stripping, entity decoding, image extraction, og:image extraction, icon URL extraction
 │   ├── KeychainService.swift           # Keychain wrapper for secure API key storage
 │   ├── MetadataExtractor.swift         # Extracts article title/byline from meta tags and DOM elements
 │   ├── OPMLService.swift               # OPMLServing protocol + XMLParser-based OPML parser + XML generator
@@ -59,6 +60,7 @@ RSSApp/
 │   ├── ArticleReaderView.swift         # Full-screen reader — WKWebView + discuss/settings toolbar
 │   ├── ArticleReaderWebView.swift      # UIViewRepresentable wrapping WKWebView with DOM serializer injection
 │   ├── ArticleRowView.swift            # Single article row — thumbnail, title, snippet, date, read/unread styling
+│   ├── ArticleThumbnailView.swift     # Article thumbnail display — loads cached JPEG from disk, fallback photo placeholder
 │   ├── ArticleSummaryView.swift        # Extracted article summary sheet — extracted content + discuss
 │   ├── ContentView.swift               # Root view — creates SwiftDataFeedPersistenceService from modelContext, hosts FeedListView
 │   ├── FeedIconView.swift              # Feed icon display — loads cached PNG from disk, fallback globe placeholder
@@ -81,6 +83,7 @@ RSSAppTests/
 │   └── WebViewTestHelpers.swift        # WKWebView-based serialization helpers for integration tests
 ├── Mocks/
 │   ├── MockArticleExtractionService.swift  # ArticleExtracting mock with injectable content/errors
+│   ├── MockArticleThumbnailService.swift   # ArticleThumbnailCaching mock with injectable cache results
 │   ├── MockClaudeAPIService.swift          # ClaudeAPIServicing mock with injectable chunks/errors
 │   ├── MockContentExtractor.swift          # ContentExtracting mock with injectable results
 │   ├── MockFeedFetchingService.swift       # FeedFetching mock with injectable results/errors
@@ -94,6 +97,7 @@ RSSAppTests/
 │   ├── DOMNodeTests.swift              # DOMNode accessors, text/element queries, tree traversal
 │   └── SubscribedFeedTests.swift       # updatingMetadata preserves identity, does not mutate
 ├── Services/
+│   ├── ArticleThumbnailServiceTests.swift # Thumbnail cache miss, delete safety, filename hashing
 │   ├── CandidateScorerTests.swift      # Content node identification, scoring, pruning
 │   ├── ClaudeAPIServiceTests.swift     # Request encoding, SSE parsing, error handling
 │   ├── ContentAssemblerTests.swift     # HTML/text assembly from DOM subtrees
@@ -103,7 +107,7 @@ RSSAppTests/
 │   ├── FeedIconServiceTests.swift      # Icon resolution, caching, HTMLUtilities icon extraction
 │   ├── FeedPersistenceServiceTests.swift # SwiftData CRUD, upsert, read/unread, content cache, cascade delete
 │   ├── FeedStorageServiceTests.swift   # Save/load roundtrip, add/remove, empty state (legacy UserDefaults)
-│   ├── HTMLUtilitiesTests.swift        # Tag stripping, entity decoding, image extraction
+│   ├── HTMLUtilitiesTests.swift        # Tag stripping, entity decoding, image extraction, og:image extraction
 │   ├── UserDefaultsMigrationTests.swift # Migration from UserDefaults to SwiftData, idempotency, ID preservation
 │   ├── KeychainServiceTests.swift      # Save/load/delete/overwrite roundtrips
 │   ├── OPMLServiceTests.swift          # Parse flat/nested/empty OPML, generate + round-trip, XML escaping
@@ -164,7 +168,7 @@ RSSAppTests/
 
 ### Services
 
-**Files:** `ArticleExtractionService.swift`, `CandidateScorer.swift`, `ClaudeAPIService.swift`, `ContentAssembler.swift`, `ContentExtractor.swift`, `DOMSerializerConstants.swift`, `FeedFetchingService.swift`, `FeedIconService.swift`, `FeedPersistenceService.swift`, `FeedStorageService.swift`, `FeedURLValidator.swift`, `HTMLUtilities.swift`, `KeychainService.swift`, `MetadataExtractor.swift`, `OPMLService.swift`, `RSSParsingService.swift`, `SiteSpecificExtracting.swift`
+**Files:** `ArticleExtractionService.swift`, `ArticleThumbnailService.swift`, `CandidateScorer.swift`, `ClaudeAPIService.swift`, `ContentAssembler.swift`, `ContentExtractor.swift`, `DOMSerializerConstants.swift`, `FeedFetchingService.swift`, `FeedIconService.swift`, `FeedPersistenceService.swift`, `FeedStorageService.swift`, `FeedURLValidator.swift`, `HTMLUtilities.swift`, `KeychainService.swift`, `MetadataExtractor.swift`, `OPMLService.swift`, `RSSParsingService.swift`, `SiteSpecificExtracting.swift`
 
 `FeedFetching` is a protocol defining `fetchFeed(from:) async throws -> RSSFeed`. `FeedFetchingService` fetches data via `URLSession.shared` and delegates parsing to `RSSParsingService`.
 
@@ -172,7 +176,9 @@ RSSAppTests/
 
 `FeedIconResolving` is a `Sendable` protocol. `FeedIconService` resolves feed icon URLs through a multi-step priority chain: feed XML image URL → site homepage HTML meta tags (apple-touch-icon, link rel="icon") → `/favicon.ico` fallback. Downloads the resolved image, normalizes it to PNG (resizing if larger than 128px), and caches it to the file system at `{cachesDirectory}/feed-icons/{feedID}.png`. Provides cache lookup and cleanup methods. Used by `FeedListViewModel` during refresh and `AddFeedViewModel` during feed add.
 
-`HTMLUtilities` provides static methods for stripping HTML tags/entities to plain text, escaping special characters in HTML text content and attribute values, extracting the first `<img>` URL, and extracting icon/favicon URLs from HTML `<link>` and `<meta>` tags (used by `FeedIconService`).
+`ArticleThumbnailCaching` is a `Sendable` protocol. `ArticleThumbnailService` downloads article thumbnail images, resizes them to 120×120px (aspect-fill + center-crop), and caches them as JPEG to `{cachesDirectory}/article-thumbnails/{SHA256(articleID)}.jpg`. Uses a two-step resolution: direct thumbnail URL from the feed → `og:image` meta tag from the article's web page (for feeds like TechCrunch that don't include images in RSS). `ArticleThumbnailView` resolves and caches thumbnails on-demand off the main thread, with self-healing for corrupt cache entries.
+
+`HTMLUtilities` provides static methods for stripping HTML tags/entities to plain text, escaping special characters in HTML text content and attribute values, extracting the first `<img>` URL, extracting `og:image` URLs from `<meta property="og:image">` tags (used by `ArticleThumbnailService`), and extracting icon/favicon URLs from HTML `<link>` and `<meta>` tags (used by `FeedIconService`).
 
 **Native content extraction pipeline:** The app uses a custom Swift-native extraction pipeline (replacing Readability.js as of PR #3). The pipeline consists of:
 
@@ -218,7 +224,7 @@ All view models are `@MainActor @Observable`.
 
 ### Views
 
-**Files:** `ActivityShareView.swift`, `AddFeedView.swift`, `APIKeySettingsView.swift`, `ArticleDiscussionView.swift`, `ArticleListView.swift`, `ArticleReaderView.swift`, `ArticleReaderWebView.swift`, `ArticleRowView.swift`, `ArticleSummaryView.swift`, `ContentView.swift`, `FeedIconView.swift`, `FeedListView.swift`, `FeedRowView.swift`
+**Files:** `ActivityShareView.swift`, `AddFeedView.swift`, `APIKeySettingsView.swift`, `ArticleDiscussionView.swift`, `ArticleListView.swift`, `ArticleReaderView.swift`, `ArticleReaderWebView.swift`, `ArticleRowView.swift`, `ArticleSummaryView.swift`, `ArticleThumbnailView.swift`, `ContentView.swift`, `FeedIconView.swift`, `FeedListView.swift`, `FeedRowView.swift`
 
 `ContentView` creates a `SwiftDataFeedPersistenceService` from the `@Environment(\.modelContext)` and passes it to `FeedListView`.
 
@@ -356,7 +362,7 @@ RSSAppApp (@main)
 | Article | ArticleTests.swift | Creation, nil optionals, Identifiable, Hashable, equality |
 | SubscribedFeed | SubscribedFeedTests.swift | updatingMetadata preserves identity and clears error, does not mutate original, updatingError sets fields, updatingURL changes URL and clears error, Codable roundtrip with error fields, backward compatibility (missing error fields decode as nil) |
 | DOMNode | DOMNodeTests.swift | Text/element accessors, tag name queries, tree traversal, visibility |
-| HTMLUtilities | HTMLUtilitiesTests.swift | Tag stripping, entity decoding (amp, lt, gt, quot, apos, nbsp), whitespace collapse, HTML text escaping (amp, angle brackets, no-op), attribute escaping (amp, quot, lt, gt, no-op, multiple), image extraction (double/single quotes, multiple images, no images) |
+| HTMLUtilities | HTMLUtilitiesTests.swift | Tag stripping, entity decoding (amp, lt, gt, quot, apos, nbsp), whitespace collapse, HTML text escaping (amp, angle brackets, no-op), attribute escaping (amp, quot, lt, gt, no-op, multiple), image extraction (double/single quotes, multiple images, no images), og:image extraction (basic, reversed attributes, missing, case-insensitive, empty) |
 | RSSParsingService | RSSParsingServiceTests.swift | Channel info, article count, basic fields, pubDate, snippets, raw description, thumbnail sources (media:thumbnail, media:content, enclosure, img fallback), thumbnail priority, ID derivation (guid, link), empty channel, malformed XML, empty data, missing fields, empty title, long snippet truncation, Atom XHTML content reconstruction (content, summary, content-overrides-summary, snippet generation, thumbnail extraction), Atom/RSS author extraction, Atom category term attributes, RSS category text, Atom enclosure links, RSS lastBuildDate, Atom feed-level updated date, default author/categories |
 | KeychainService | KeychainServiceTests.swift | Save/load roundtrip, load when empty, delete clears value, overwrite updates value |
 | ClaudeAPIService | ClaudeAPIServiceTests.swift | Request headers, request body JSON encoding, SSE text delta parsing, non-delta event returns nil, malformed JSON returns nil, delta without text returns nil |
