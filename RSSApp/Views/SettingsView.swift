@@ -87,9 +87,9 @@ struct ImportExportView: View {
             Text(importResultMessage(result))
         }
         .alert("Error", isPresented: $showError) {
-            Button("OK") { viewModel.errorMessage = nil }
+            Button("OK") { viewModel.importExportErrorMessage = nil }
         } message: {
-            Text(viewModel.errorMessage ?? "")
+            Text(viewModel.importExportErrorMessage ?? "")
         }
         .onChange(of: viewModel.opmlExportURL) { _, newValue in
             if newValue != nil {
@@ -101,7 +101,7 @@ struct ImportExportView: View {
                 showImportResult = true
             }
         }
-        .onChange(of: viewModel.errorMessage) { _, newValue in
+        .onChange(of: viewModel.importExportErrorMessage) { _, newValue in
             if newValue != nil {
                 showError = true
             }
@@ -129,7 +129,7 @@ struct ImportExportView: View {
             }
         case .failure(let error):
             Self.logger.error("File import failed: \(error, privacy: .public)")
-            viewModel.errorMessage = "Unable to access the selected file."
+            viewModel.importExportErrorMessage = "Unable to access the selected file."
         }
     }
 }
