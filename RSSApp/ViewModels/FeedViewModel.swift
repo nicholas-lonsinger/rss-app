@@ -98,10 +98,10 @@ final class FeedViewModel {
         let service = self.thumbnailService
 
         // Extract Sendable values before crossing isolation boundary
-        let thumbnailsToFetch: [(articleID: String, url: URL)] = articles.prefix(20).compactMap { article in
-            guard let url = article.thumbnailURL,
-                  service.cachedThumbnailFileURL(for: article.articleID) == nil else { return nil }
-            return (article.articleID, url)
+        let thumbnailsToFetch: [(articleID: String, thumbnailURL: URL?, articleLink: URL?)] = articles.prefix(20).compactMap { article in
+            guard service.cachedThumbnailFileURL(for: article.articleID) == nil,
+                  article.thumbnailURL != nil || article.link != nil else { return nil }
+            return (article.articleID, article.thumbnailURL, article.link)
         }
 
         guard !thumbnailsToFetch.isEmpty else { return }
@@ -112,7 +112,11 @@ final class FeedViewModel {
             await withTaskGroup(of: Void.self) { group in
                 for item in thumbnailsToFetch {
                     group.addTask {
-                        _ = await service.cacheThumbnail(from: item.url, articleID: item.articleID)
+                        _ = await service.resolveAndCacheThumbnail(
+                            thumbnailURL: item.thumbnailURL,
+                            articleLink: item.articleLink,
+                            articleID: item.articleID
+                        )
                     }
                 }
             }

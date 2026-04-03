@@ -6,6 +6,7 @@ struct ArticleThumbnailView: View {
     // RATIONALE: thumbnailURL is not read directly — it exists so SwiftUI detects a property
     // change and re-evaluates the body when the thumbnail URL becomes available after parsing.
     let thumbnailURL: URL?
+    let articleLink: URL?
     let thumbnailService: ArticleThumbnailCaching
 
     @State private var thumbnailImage: UIImage?
@@ -41,13 +42,17 @@ struct ArticleThumbnailView: View {
             return
         }
 
-        // Cache miss: download, resize, cache, then load
-        guard let url = thumbnailURL else {
+        // Cache miss: resolve (direct URL → og:image fallback), cache, then load
+        guard thumbnailURL != nil || articleLink != nil else {
             thumbnailImage = nil
             return
         }
 
-        let cached = await thumbnailService.cacheThumbnail(from: url, articleID: articleID)
+        let cached = await thumbnailService.resolveAndCacheThumbnail(
+            thumbnailURL: thumbnailURL,
+            articleLink: articleLink,
+            articleID: articleID
+        )
         guard cached, let fileURL = thumbnailService.cachedThumbnailFileURL(for: articleID) else {
             thumbnailImage = nil
             return

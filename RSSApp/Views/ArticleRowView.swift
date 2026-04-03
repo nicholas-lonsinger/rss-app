@@ -9,6 +9,7 @@ struct ArticleRowView: View {
             ArticleThumbnailView(
                 articleID: article.articleID,
                 thumbnailURL: article.thumbnailURL,
+                articleLink: article.link,
                 thumbnailService: thumbnailService
             )
 

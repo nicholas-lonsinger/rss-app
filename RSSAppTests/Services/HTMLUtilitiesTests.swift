@@ -129,4 +129,54 @@ struct HTMLUtilitiesTests {
     func emptyStringNoImage() {
         #expect(HTMLUtilities.extractFirstImageURL(from: "") == nil)
     }
+
+    // MARK: - extractOGImageURL
+
+    @Test("Extracts og:image URL from meta tag")
+    func extractOGImageBasic() {
+        let html = """
+            <html><head>
+            <meta property="og:image" content="https://example.com/photo.jpg">
+            </head></html>
+            """
+        let url = HTMLUtilities.extractOGImageURL(from: html)
+        #expect(url?.absoluteString == "https://example.com/photo.jpg")
+    }
+
+    @Test("Extracts og:image with content before property attribute")
+    func extractOGImageReversedAttributes() {
+        let html = """
+            <html><head>
+            <meta content="https://example.com/photo.jpg" property="og:image">
+            </head></html>
+            """
+        let url = HTMLUtilities.extractOGImageURL(from: html)
+        #expect(url?.absoluteString == "https://example.com/photo.jpg")
+    }
+
+    @Test("Returns nil when no og:image meta tag present")
+    func extractOGImageMissing() {
+        let html = """
+            <html><head>
+            <meta property="og:title" content="My Title">
+            </head></html>
+            """
+        #expect(HTMLUtilities.extractOGImageURL(from: html) == nil)
+    }
+
+    @Test("Case-insensitive matching for og:image property")
+    func extractOGImageCaseInsensitive() {
+        let html = """
+            <html><head>
+            <meta Property="OG:IMAGE" Content="https://example.com/img.png">
+            </head></html>
+            """
+        let url = HTMLUtilities.extractOGImageURL(from: html)
+        #expect(url?.absoluteString == "https://example.com/img.png")
+    }
+
+    @Test("Returns nil for empty HTML")
+    func extractOGImageEmptyHTML() {
+        #expect(HTMLUtilities.extractOGImageURL(from: "") == nil)
+    }
 }

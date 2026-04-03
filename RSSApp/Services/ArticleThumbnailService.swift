@@ -11,6 +11,11 @@ protocol ArticleThumbnailCaching: Sendable {
     /// and caches it to disk under a hash of the article ID. Returns `true` on success.
     func cacheThumbnail(from remoteURL: URL, articleID: String) async -> Bool
 
+    /// Resolves and caches a thumbnail: tries `thumbnailURL` first, then fetches
+    /// the article page at `articleLink` to extract `og:image` as a fallback.
+    /// Returns `true` if a thumbnail was cached from either source.
+    func resolveAndCacheThumbnail(thumbnailURL: URL?, articleLink: URL?, articleID: String) async -> Bool
+
     /// Returns the local file URL for a cached thumbnail, or `nil` if not cached.
     func cachedThumbnailFileURL(for articleID: String) -> URL?
 
@@ -69,6 +74,23 @@ struct ArticleThumbnailService: ArticleThumbnailCaching {
         }
     }
 
+    func resolveAndCacheThumbnail(thumbnailURL: URL?, articleLink: URL?, articleID: String) async -> Bool {
+        // Priority 1: Direct thumbnail URL from feed
+        if let thumbnailURL {
+            let cached = await cacheThumbnail(from: thumbnailURL, articleID: articleID)
+            if cached { return true }
+        }
+
+        // Priority 2: Fetch article page and extract og:image
+        if let articleLink {
+            if let ogImageURL = await resolveOGImage(from: articleLink) {
+                return await cacheThumbnail(from: ogImageURL, articleID: articleID)
+            }
+        }
+
+        return false
+    }
+
     func cachedThumbnailFileURL(for articleID: String) -> URL? {
         let fileURL = thumbnailFileURL(for: articleID)
         return FileManager.default.fileExists(atPath: fileURL.path(percentEncoded: false)) ? fileURL : nil
@@ -103,6 +125,31 @@ struct ArticleThumbnailService: ArticleThumbnailCaching {
                 y: ((targetSize.height - scaledSize.height) / 2).rounded()
             )
             image.draw(in: CGRect(origin: origin, size: scaledSize))
+        }
+    }
+
+    // MARK: - OG Image Resolution
+
+    private static let htmlFetchTimeout: TimeInterval = 10
+
+    /// Fetches an article page and extracts the `og:image` meta tag URL.
+    private func resolveOGImage(from articleLink: URL) async -> URL? {
+        Self.logger.debug("Resolving og:image from \(articleLink.absoluteString, privacy: .public)")
+
+        do {
+            let request = URLRequest(url: articleLink, timeoutInterval: Self.htmlFetchTimeout)
+            let (data, response) = try await URLSession.shared.data(for: request)
+
+            guard let httpResponse = response as? HTTPURLResponse,
+                  (200...299).contains(httpResponse.statusCode) else {
+                return nil
+            }
+
+            guard let html = String(data: data, encoding: .utf8) else { return nil }
+            return HTMLUtilities.extractOGImageURL(from: html)
+        } catch {
+            Self.logger.debug("Failed to fetch article page for og:image: \(error, privacy: .public)")
+            return nil
         }
     }
 

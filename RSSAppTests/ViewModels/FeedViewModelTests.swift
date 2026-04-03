@@ -281,16 +281,16 @@ struct FeedViewModelTests {
         // Prefetch runs in a detached task — give it a moment to complete
         try await Task.sleep(for: .milliseconds(100))
 
-        #expect(mockThumbnails.cacheCallCount > 0)
+        #expect(mockThumbnails.resolveCallCount > 0)
     }
 
-    @Test("loadFeed does not prefetch when articles lack thumbnailURL")
+    @Test("loadFeed does not prefetch when articles lack both thumbnailURL and link")
     @MainActor
     func loadFeedNoPrefetchWithoutThumbnails() async throws {
         let feed = TestFixtures.makePersistentFeed(feedURL: URL(string: "https://example.com/feed")!)
         let mockFetching = MockFeedFetchingService()
         mockFetching.feedToReturn = TestFixtures.makeFeed(articles: [
-            TestFixtures.makeArticle(id: "1", title: "No Thumb", thumbnailURL: nil),
+            TestFixtures.makeArticle(id: "1", title: "No Thumb", link: nil, thumbnailURL: nil),
         ])
         let mockPersistence = MockFeedPersistenceService()
         mockPersistence.feeds = [feed]
@@ -306,6 +306,6 @@ struct FeedViewModelTests {
 
         try await Task.sleep(for: .milliseconds(100))
 
-        #expect(mockThumbnails.cacheCallCount == 0)
+        #expect(mockThumbnails.resolveCallCount == 0)
     }
 }
