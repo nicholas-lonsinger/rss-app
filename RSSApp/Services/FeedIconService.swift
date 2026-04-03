@@ -89,6 +89,12 @@ struct FeedIconService: FeedIconResolving {
 
             // Normalize: resize if too large, convert to PNG
             let normalized = normalizeImage(image)
+
+            guard Self.hasVisibleContent(normalized) else {
+                Self.logger.warning("Image has no visible content (\(data.count, privacy: .public) bytes) from \(remoteURL.absoluteString, privacy: .public)")
+                return false
+            }
+
             guard let pngData = normalized.pngData() else {
                 Self.logger.warning("Failed to generate PNG data from image")
                 return false
@@ -274,6 +280,53 @@ struct FeedIconService: FeedIconResolving {
         bmpFile.append(bmpData.dropFirst(40))
 
         return UIImage(data: bmpFile)
+    }
+
+    /// Returns `false` if the image is fully or mostly transparent (e.g., a tracking pixel
+    /// or placeholder favicon). Pixels with alpha > 25 (out of 255) are considered visible;
+    /// at least 1% of pixels must be visible for the image to pass.
+    /// Returns `true` when inspection fails (safe default: accept rather than reject).
+    static func hasVisibleContent(_ image: UIImage) -> Bool {
+        guard let cgImage = image.cgImage else {
+            logger.warning("hasVisibleContent: image has no CGImage backing — accepting as visible")
+            return true
+        }
+        let width = cgImage.width
+        let height = cgImage.height
+        guard width > 0, height > 0 else { return false }
+
+        let bytesPerPixel = 4
+        let bytesPerRow = width * bytesPerPixel
+        var pixelData = [UInt8](repeating: 0, count: height * bytesPerRow)
+
+        return pixelData.withUnsafeMutableBytes { ptr in
+            guard let context = CGContext(
+                data: ptr.baseAddress,
+                width: width,
+                height: height,
+                bitsPerComponent: 8,
+                bytesPerRow: bytesPerRow,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            ) else {
+                logger.warning("hasVisibleContent: CGContext creation failed for \(width)x\(height) image — accepting as visible")
+                return true
+            }
+
+            context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+
+            let totalPixels = width * height
+            var opaquePixels = 0
+            let alphaThreshold: UInt8 = 25
+
+            for i in stride(from: 3, to: ptr.count, by: bytesPerPixel) {
+                if ptr[i] > alphaThreshold {
+                    opaquePixels += 1
+                }
+            }
+
+            return Double(opaquePixels) / Double(totalPixels) >= 0.01
+        }
     }
 
     private func normalizeImage(_ image: UIImage) -> UIImage {

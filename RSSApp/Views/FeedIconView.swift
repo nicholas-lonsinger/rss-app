@@ -15,18 +15,17 @@ struct FeedIconView: View {
 
     var body: some View {
         ZStack {
+            RoundedRectangle(cornerRadius: Self.cornerRadius)
+                .fill(Color(.tertiarySystemFill))
+
             if let iconImage {
                 Image(uiImage: iconImage)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
                     .clipShape(RoundedRectangle(cornerRadius: Self.cornerRadius))
             } else {
-                RoundedRectangle(cornerRadius: Self.cornerRadius)
-                    .fill(Color(.tertiarySystemFill))
-                    .overlay {
-                        Image(systemName: "globe")
-                            .foregroundStyle(.secondary)
-                    }
+                Image(systemName: "globe")
+                    .foregroundStyle(.secondary)
             }
         }
         .frame(width: Self.iconSize, height: Self.iconSize)
@@ -35,8 +34,17 @@ struct FeedIconView: View {
                 iconImage = nil
                 return
             }
-            let image = await Task.detached(priority: .userInitiated) {
-                UIImage(contentsOfFile: fileURL.path(percentEncoded: false))
+            // RATIONALE: Calls FeedIconService.hasVisibleContent directly rather than through
+            // the FeedIconResolving protocol because it is a pure static utility with no I/O
+            // or state — protocol abstraction would add complexity with no testability benefit.
+            let image = await Task.detached(priority: .userInitiated) { [iconService] () -> UIImage? in
+                guard let img = UIImage(contentsOfFile: fileURL.path(percentEncoded: false)),
+                      FeedIconService.hasVisibleContent(img) else {
+                    // Cached icon is corrupt or transparent — remove so next refresh retries
+                    iconService.deleteCachedIcon(for: feedID)
+                    return nil
+                }
+                return img
             }.value
             iconImage = image
         }
