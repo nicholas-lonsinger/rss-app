@@ -8,6 +8,8 @@ final class MockFeedIconService: FeedIconResolving, @unchecked Sendable {
     var cachedFileURL: URL?
     var resolveCallCount = 0
     var cacheCallCount = 0
+    var resolveAndCacheCallCount = 0
+    var resolveAndCacheResult: URL?
     var deleteCallCount = 0
 
     func resolveIconCandidates(feedSiteURL: URL?, feedImageURL: URL?) async -> [URL] {
@@ -22,6 +24,11 @@ final class MockFeedIconService: FeedIconResolving, @unchecked Sendable {
 
     func cachedIconFileURL(for feedID: UUID) -> URL? {
         cachedFileURL
+    }
+
+    func resolveAndCacheIcon(feedSiteURL: URL?, feedImageURL: URL?, feedID: UUID) async -> URL? {
+        resolveAndCacheCallCount += 1
+        return resolveAndCacheResult
     }
 
     func deleteCachedIcon(for feedID: UUID) {

@@ -657,7 +657,7 @@ struct FeedListViewModelTests {
         // Allow fire-and-forget icon resolution tasks to complete
         for _ in 0..<10 { await Task.yield() }
 
-        #expect(mockIconService.resolveCallCount == 1)
+        #expect(mockIconService.resolveAndCacheCallCount == 1)
     }
 
     @Test("refreshAllFeeds skips icon resolution when icon already cached")
@@ -684,7 +684,7 @@ struct FeedListViewModelTests {
         // Allow fire-and-forget icon resolution tasks to complete
         for _ in 0..<10 { await Task.yield() }
 
-        #expect(mockIconService.resolveCallCount == 0)
+        #expect(mockIconService.resolveAndCacheCallCount == 0)
     }
 
     // MARK: - 304 Not Modified

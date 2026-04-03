@@ -18,6 +18,10 @@ protocol FeedIconResolving: Sendable {
     /// Returns the local file URL for a cached icon, or `nil` if not cached.
     func cachedIconFileURL(for feedID: UUID) -> URL?
 
+    /// Resolves candidate icon URLs and caches the first one that downloads successfully.
+    /// Returns the remote URL of the cached icon, or `nil` if no candidate could be cached.
+    func resolveAndCacheIcon(feedSiteURL: URL?, feedImageURL: URL?, feedID: UUID) async -> URL?
+
     /// Deletes the cached icon file for the given feed.
     func deleteCachedIcon(for feedID: UUID)
 }
@@ -108,6 +112,18 @@ struct FeedIconService: FeedIconResolving {
     func cachedIconFileURL(for feedID: UUID) -> URL? {
         let fileURL = iconFileURL(for: feedID)
         return FileManager.default.fileExists(atPath: fileURL.path(percentEncoded: false)) ? fileURL : nil
+    }
+
+    func resolveAndCacheIcon(feedSiteURL: URL?, feedImageURL: URL?, feedID: UUID) async -> URL? {
+        let candidates = await resolveIconCandidates(feedSiteURL: feedSiteURL, feedImageURL: feedImageURL)
+        for candidate in candidates {
+            let cached = await cacheIcon(from: candidate, feedID: feedID)
+            if cached {
+                return candidate
+            }
+        }
+        Self.logger.debug("No icon cached for feed \(feedID.uuidString, privacy: .public) (\(candidates.count, privacy: .public) candidates tried)")
+        return nil
     }
 
     // RATIONALE: Uses removeItem (permanent delete) rather than trashItem because these are
