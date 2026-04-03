@@ -2,23 +2,15 @@ import SwiftUI
 
 struct ArticleRowView: View {
     let article: PersistentArticle
+    let thumbnailService: ArticleThumbnailCaching
 
     var body: some View {
         HStack(spacing: 8) {
-            AsyncImage(url: article.thumbnailURL) { phase in
-                switch phase {
-                case .success(let image):
-                    image
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                case .failure:
-                    placeholderImage
-                default:
-                    ProgressView()
-                }
-            }
-            .frame(width: 60, height: 60)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
+            ArticleThumbnailView(
+                articleID: article.articleID,
+                thumbnailURL: article.thumbnailURL,
+                thumbnailService: thumbnailService
+            )
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(article.title)
@@ -42,8 +34,4 @@ struct ArticleRowView: View {
         .padding(.vertical, 4)
     }
 
-    private var placeholderImage: some View {
-        Image(systemName: "photo")
-            .foregroundStyle(.secondary)
-    }
 }

@@ -34,9 +34,11 @@ struct FeedListView: View {
                 .navigationTitle("Feeds")
                 .navigationDestination(for: PersistentFeed.ID.self) { feedID in
                     if let feed = viewModel.feeds.first(where: { $0.id == feedID }) {
+                        let feedViewModel = FeedViewModel(feed: feed, persistence: persistence)
                         ArticleListView(
-                            viewModel: FeedViewModel(feed: feed, persistence: persistence),
-                            persistence: persistence
+                            viewModel: feedViewModel,
+                            persistence: persistence,
+                            thumbnailService: feedViewModel.thumbnailService
                         )
                         .onAppear { lastViewedFeedID = feedID }
                     } else {

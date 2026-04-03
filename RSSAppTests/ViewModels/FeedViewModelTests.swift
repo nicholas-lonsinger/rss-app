@@ -254,4 +254,58 @@ struct FeedViewModelTests {
 
         #expect(viewModel.errorMessage != nil)
     }
+
+    // MARK: - Thumbnail Prefetching
+
+    @Test("loadFeed triggers thumbnail prefetch for articles with thumbnailURL")
+    @MainActor
+    func loadFeedPrefetchesThumbnails() async throws {
+        let feed = TestFixtures.makePersistentFeed(feedURL: URL(string: "https://example.com/feed")!)
+        let mockFetching = MockFeedFetchingService()
+        mockFetching.feedToReturn = TestFixtures.makeFeed(articles: [
+            TestFixtures.makeArticle(id: "1", title: "Article 1", thumbnailURL: URL(string: "https://example.com/thumb1.jpg")),
+            TestFixtures.makeArticle(id: "2", title: "Article 2", thumbnailURL: URL(string: "https://example.com/thumb2.jpg")),
+        ])
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+        let mockThumbnails = MockArticleThumbnailService()
+
+        let viewModel = FeedViewModel(
+            feed: feed,
+            feedFetching: mockFetching,
+            persistence: mockPersistence,
+            thumbnailService: mockThumbnails
+        )
+        await viewModel.loadFeed()
+
+        // Prefetch runs in a detached task — give it a moment to complete
+        try await Task.sleep(for: .milliseconds(100))
+
+        #expect(mockThumbnails.cacheCallCount > 0)
+    }
+
+    @Test("loadFeed does not prefetch when articles lack thumbnailURL")
+    @MainActor
+    func loadFeedNoPrefetchWithoutThumbnails() async throws {
+        let feed = TestFixtures.makePersistentFeed(feedURL: URL(string: "https://example.com/feed")!)
+        let mockFetching = MockFeedFetchingService()
+        mockFetching.feedToReturn = TestFixtures.makeFeed(articles: [
+            TestFixtures.makeArticle(id: "1", title: "No Thumb", thumbnailURL: nil),
+        ])
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+        let mockThumbnails = MockArticleThumbnailService()
+
+        let viewModel = FeedViewModel(
+            feed: feed,
+            feedFetching: mockFetching,
+            persistence: mockPersistence,
+            thumbnailService: mockThumbnails
+        )
+        await viewModel.loadFeed()
+
+        try await Task.sleep(for: .milliseconds(100))
+
+        #expect(mockThumbnails.cacheCallCount == 0)
+    }
 }

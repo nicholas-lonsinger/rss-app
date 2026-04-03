@@ -31,6 +31,7 @@ RSSApp/
 │   ├── ContentExtractor.swift          # ContentExtracting protocol + extraction pipeline orchestrator
 │   ├── DOMSerializerConstants.swift    # Shared JS bridge constants (message handler name, serializer call)
 │   ├── FeedFetchingService.swift       # FeedFetching protocol + URLSession implementation
+│   ├── ArticleThumbnailService.swift   # ArticleThumbnailCaching protocol + thumbnail download, resize-to-120px, JPEG disk caching
 │   ├── FeedIconService.swift           # FeedIconResolving protocol + icon URL resolution (feed XML → site HTML → /favicon.ico) and file-system caching
 │   ├── FeedPersistenceService.swift    # FeedPersisting protocol + SwiftData implementation (feeds, articles, content cache, read/unread)
 │   ├── FeedStorageService.swift        # FeedStoring protocol + UserDefaults persistence — retained for migration only
@@ -59,6 +60,7 @@ RSSApp/
 │   ├── ArticleReaderView.swift         # Full-screen reader — WKWebView + discuss/settings toolbar
 │   ├── ArticleReaderWebView.swift      # UIViewRepresentable wrapping WKWebView with DOM serializer injection
 │   ├── ArticleRowView.swift            # Single article row — thumbnail, title, snippet, date, read/unread styling
+│   ├── ArticleThumbnailView.swift     # Article thumbnail display — loads cached JPEG from disk, fallback photo placeholder
 │   ├── ArticleSummaryView.swift        # Extracted article summary sheet — extracted content + discuss
 │   ├── ContentView.swift               # Root view — creates SwiftDataFeedPersistenceService from modelContext, hosts FeedListView
 │   ├── FeedIconView.swift              # Feed icon display — loads cached PNG from disk, fallback globe placeholder
@@ -81,6 +83,7 @@ RSSAppTests/
 │   └── WebViewTestHelpers.swift        # WKWebView-based serialization helpers for integration tests
 ├── Mocks/
 │   ├── MockArticleExtractionService.swift  # ArticleExtracting mock with injectable content/errors
+│   ├── MockArticleThumbnailService.swift   # ArticleThumbnailCaching mock with injectable cache results
 │   ├── MockClaudeAPIService.swift          # ClaudeAPIServicing mock with injectable chunks/errors
 │   ├── MockContentExtractor.swift          # ContentExtracting mock with injectable results
 │   ├── MockFeedFetchingService.swift       # FeedFetching mock with injectable results/errors
@@ -94,6 +97,7 @@ RSSAppTests/
 │   ├── DOMNodeTests.swift              # DOMNode accessors, text/element queries, tree traversal
 │   └── SubscribedFeedTests.swift       # updatingMetadata preserves identity, does not mutate
 ├── Services/
+│   ├── ArticleThumbnailServiceTests.swift # Thumbnail cache miss, delete safety, filename hashing
 │   ├── CandidateScorerTests.swift      # Content node identification, scoring, pruning
 │   ├── ClaudeAPIServiceTests.swift     # Request encoding, SSE parsing, error handling
 │   ├── ContentAssemblerTests.swift     # HTML/text assembly from DOM subtrees
@@ -164,13 +168,15 @@ RSSAppTests/
 
 ### Services
 
-**Files:** `ArticleExtractionService.swift`, `CandidateScorer.swift`, `ClaudeAPIService.swift`, `ContentAssembler.swift`, `ContentExtractor.swift`, `DOMSerializerConstants.swift`, `FeedFetchingService.swift`, `FeedIconService.swift`, `FeedPersistenceService.swift`, `FeedStorageService.swift`, `FeedURLValidator.swift`, `HTMLUtilities.swift`, `KeychainService.swift`, `MetadataExtractor.swift`, `OPMLService.swift`, `RSSParsingService.swift`, `SiteSpecificExtracting.swift`
+**Files:** `ArticleExtractionService.swift`, `ArticleThumbnailService.swift`, `CandidateScorer.swift`, `ClaudeAPIService.swift`, `ContentAssembler.swift`, `ContentExtractor.swift`, `DOMSerializerConstants.swift`, `FeedFetchingService.swift`, `FeedIconService.swift`, `FeedPersistenceService.swift`, `FeedStorageService.swift`, `FeedURLValidator.swift`, `HTMLUtilities.swift`, `KeychainService.swift`, `MetadataExtractor.swift`, `OPMLService.swift`, `RSSParsingService.swift`, `SiteSpecificExtracting.swift`
 
 `FeedFetching` is a protocol defining `fetchFeed(from:) async throws -> RSSFeed`. `FeedFetchingService` fetches data via `URLSession.shared` and delegates parsing to `RSSParsingService`.
 
 `RSSParsingService` wraps Foundation's `XMLParser` to parse both RSS 2.0 and Atom feeds with first-class support for each format. Handles Atom XHTML content reconstruction (serializing inner XML back to HTML when `type="xhtml"`), author extraction (RSS `<author>` text and Atom `<author><name>` nesting), categories (RSS `<category>` text and Atom `<category term>` attributes), Atom `<link rel="enclosure">` for media, feed-level updated dates, and channel-level image URLs (RSS `<image><url>`, Atom `<logo>`, Atom `<icon>`). Internally uses a synchronous `XMLParserDelegate` class marked `@unchecked Sendable` (safe because it is created and consumed within a single synchronous `parse()` call).
 
 `FeedIconResolving` is a `Sendable` protocol. `FeedIconService` resolves feed icon URLs through a multi-step priority chain: feed XML image URL → site homepage HTML meta tags (apple-touch-icon, link rel="icon") → `/favicon.ico` fallback. Downloads the resolved image, normalizes it to PNG (resizing if larger than 128px), and caches it to the file system at `{cachesDirectory}/feed-icons/{feedID}.png`. Provides cache lookup and cleanup methods. Used by `FeedListViewModel` during refresh and `AddFeedViewModel` during feed add.
+
+`ArticleThumbnailCaching` is a `Sendable` protocol. `ArticleThumbnailService` downloads article thumbnail images, resizes them to 120×120px (aspect-fill + center-crop), and caches them as JPEG to `{cachesDirectory}/article-thumbnails/{SHA256(articleID)}.jpg`. `ArticleThumbnailView` loads cached thumbnails off the main thread and triggers cache-miss downloads. `FeedViewModel` prefetches thumbnails for the first 20 articles after loading a feed.
 
 `HTMLUtilities` provides static methods for stripping HTML tags/entities to plain text, escaping special characters in HTML text content and attribute values, extracting the first `<img>` URL, and extracting icon/favicon URLs from HTML `<link>` and `<meta>` tags (used by `FeedIconService`).
 
@@ -218,7 +224,7 @@ All view models are `@MainActor @Observable`.
 
 ### Views
 
-**Files:** `ActivityShareView.swift`, `AddFeedView.swift`, `APIKeySettingsView.swift`, `ArticleDiscussionView.swift`, `ArticleListView.swift`, `ArticleReaderView.swift`, `ArticleReaderWebView.swift`, `ArticleRowView.swift`, `ArticleSummaryView.swift`, `ContentView.swift`, `FeedIconView.swift`, `FeedListView.swift`, `FeedRowView.swift`
+**Files:** `ActivityShareView.swift`, `AddFeedView.swift`, `APIKeySettingsView.swift`, `ArticleDiscussionView.swift`, `ArticleListView.swift`, `ArticleReaderView.swift`, `ArticleReaderWebView.swift`, `ArticleRowView.swift`, `ArticleSummaryView.swift`, `ArticleThumbnailView.swift`, `ContentView.swift`, `FeedIconView.swift`, `FeedListView.swift`, `FeedRowView.swift`
 
 `ContentView` creates a `SwiftDataFeedPersistenceService` from the `@Environment(\.modelContext)` and passes it to `FeedListView`.
 

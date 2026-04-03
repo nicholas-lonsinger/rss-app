@@ -3,6 +3,7 @@ import SwiftUI
 struct ArticleListView: View {
     let viewModel: FeedViewModel
     let persistence: FeedPersisting
+    let thumbnailService: ArticleThumbnailCaching
     @State private var selectedArticle: PersistentArticle?
 
     var body: some View {
@@ -26,7 +27,7 @@ struct ArticleListView: View {
                         viewModel.markAsRead(article)
                         selectedArticle = article
                     } label: {
-                        ArticleRowView(article: article)
+                        ArticleRowView(article: article, thumbnailService: thumbnailService)
                     }
                     .buttonStyle(.plain)
                     .disabled(article.link == nil)
