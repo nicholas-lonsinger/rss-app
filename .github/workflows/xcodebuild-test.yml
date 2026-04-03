@@ -5,6 +5,7 @@ on:
     types: [opened, synchronize, reopened]
   push:
     branches: [main]
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
@@ -13,7 +14,7 @@ concurrency:
 jobs:
   build-and-test:
     runs-on: macos-26
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -32,11 +33,18 @@ jobs:
           fi
           xcodebuild -version
 
+      - name: Ensure iOS Simulator runtime
+        run: |
+          # Download the iOS platform if the runtime is not fully installed.
+          # On macos-26 runners, simctl can list devices even when the runtime
+          # is incomplete, causing xcodebuild to fail with "Unable to find a
+          # destination matching the provided destination specifier."
+          xcodebuild -downloadPlatform iOS || echo "::warning::Platform download returned non-zero (may already be installed)"
+
       - name: Resolve simulator destination
         id: sim
         run: |
           # List available iPhone simulators and pick the first one.
-          # Avoids hardcoding a device name that may not exist on all runner images.
           DEST=$(xcrun simctl list devices available -j \
             | python3 -c "
           import json, sys
@@ -55,11 +63,11 @@ jobs:
             xcrun simctl list devices available
             exit 1
           fi
-          echo "dest=platform=iOS Simulator,name=$DEST" >> "$GITHUB_OUTPUT"
           echo "Using simulator: $DEST"
 
-          # Ensure the simulator is booted — xcodebuild sometimes fails to find
-          # available-but-shutdown simulators on CI runners.
+          # Resolve UDID — using id= is more reliable than name= because
+          # xcodebuild destination matching by name can fail when the runtime
+          # is partially available.
           UDID=$(xcrun simctl list devices available -j \
             | python3 -c "
           import json, sys
@@ -72,11 +80,25 @@ jobs:
                   if d['name'] == name:
                       print(d['udid'])
                       sys.exit(0)
-          " || true)
-          if [ -n "$UDID" ]; then
-            echo "Booting simulator $UDID..."
-            xcrun simctl boot "$UDID" 2>/dev/null || true
+          sys.exit(1)
+          ")
+          echo "Resolved UDID: $UDID"
+
+          # Boot the simulator before xcodebuild tries to use it.
+          echo "Booting simulator $UDID..."
+          xcrun simctl boot "$UDID" 2>/dev/null || true
+
+          # Verify xcodebuild can actually resolve this destination.
+          # This catches the case where simctl reports the device but the
+          # runtime is not fully installed.
+          echo "Verifying destination is usable..."
+          if ! xcodebuild -project RSSApp.xcodeproj -scheme RSSApp \
+            -destination "platform=iOS Simulator,id=$UDID" \
+            -showdestinations 2>&1 | grep -q "$UDID"; then
+            echo "::warning::UDID destination check did not find $UDID in showdestinations, proceeding anyway"
           fi
+
+          echo "dest=platform=iOS Simulator,id=$UDID" >> "$GITHUB_OUTPUT"
 
       - name: Build for testing
         env:
