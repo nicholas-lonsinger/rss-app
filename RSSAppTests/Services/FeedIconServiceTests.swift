@@ -49,6 +49,68 @@ struct FeedIconServiceTests {
         service.deleteCachedIcon(for: UUID())
     }
 
+    // MARK: - hasVisibleContent
+
+    @Test("Rejects fully transparent image")
+    @MainActor
+    func hasVisibleContentRejectsTransparent() {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: 16, height: 16), format: format)
+        let image = renderer.image { context in
+            UIColor.clear.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 16, height: 16))
+        }
+
+        #expect(!FeedIconService.hasVisibleContent(image))
+    }
+
+    @Test("Accepts fully opaque image")
+    @MainActor
+    func hasVisibleContentAcceptsOpaque() {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: 16, height: 16), format: format)
+        let image = renderer.image { context in
+            UIColor.red.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 16, height: 16))
+        }
+
+        #expect(FeedIconService.hasVisibleContent(image))
+    }
+
+    @Test("Accepts image with small visible region above threshold")
+    @MainActor
+    func hasVisibleContentAcceptsPartiallyVisible() {
+        // 10x10 image with 1 opaque pixel = 1% — at threshold
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: 10, height: 10), format: format)
+        let image = renderer.image { context in
+            UIColor.clear.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 10, height: 10))
+            UIColor.red.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 1, height: 1))
+        }
+
+        #expect(FeedIconService.hasVisibleContent(image))
+    }
+
+    @Test("Accepts opaque JPEG-like image without alpha")
+    @MainActor
+    func hasVisibleContentAcceptsOpaqueJPEG() {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = true
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: 32, height: 32), format: format)
+        let image = renderer.image { context in
+            UIColor.blue.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 32, height: 32))
+        }
+
+        #expect(FeedIconService.hasVisibleContent(image))
+    }
+
     // MARK: - ICO Decoding
 
     @Test("Decodes ICO file with embedded PNG")

@@ -89,6 +89,12 @@ struct FeedIconService: FeedIconResolving {
 
             // Normalize: resize if too large, convert to PNG
             let normalized = normalizeImage(image)
+
+            guard Self.hasVisibleContent(normalized) else {
+                Self.logger.warning("Image has no visible content (\(data.count, privacy: .public) bytes) from \(remoteURL.absoluteString, privacy: .public)")
+                return false
+            }
+
             guard let pngData = normalized.pngData() else {
                 Self.logger.warning("Failed to generate PNG data from image")
                 return false
@@ -274,6 +280,43 @@ struct FeedIconService: FeedIconResolving {
         bmpFile.append(bmpData.dropFirst(40))
 
         return UIImage(data: bmpFile)
+    }
+
+    /// Returns `false` if the image is fully or mostly transparent (e.g., a tracking pixel
+    /// or placeholder favicon). Icons must have at least 1% of pixels with meaningful opacity.
+    static func hasVisibleContent(_ image: UIImage) -> Bool {
+        guard let cgImage = image.cgImage else { return false }
+        let width = cgImage.width
+        let height = cgImage.height
+        guard width > 0, height > 0 else { return false }
+
+        let bytesPerPixel = 4
+        let bytesPerRow = width * bytesPerPixel
+        var pixelData = [UInt8](repeating: 0, count: height * bytesPerRow)
+
+        guard let context = CGContext(
+            data: &pixelData,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: bytesPerRow,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return false }
+
+        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+
+        let totalPixels = width * height
+        var opaquePixels = 0
+        let alphaThreshold: UInt8 = 25
+
+        for i in stride(from: 3, to: pixelData.count, by: bytesPerPixel) {
+            if pixelData[i] > alphaThreshold {
+                opaquePixels += 1
+            }
+        }
+
+        return Double(opaquePixels) / Double(totalPixels) >= 0.01
     }
 
     private func normalizeImage(_ image: UIImage) -> UIImage {
