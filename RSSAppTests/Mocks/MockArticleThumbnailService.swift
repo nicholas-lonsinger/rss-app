@@ -1,6 +1,8 @@
 import Foundation
 @testable import RSSApp
 
+// RATIONALE: @unchecked Sendable is safe because the mock is only used in sequential
+// test methods within a single test actor — no concurrent mutation occurs.
 final class MockArticleThumbnailService: ArticleThumbnailCaching, @unchecked Sendable {
 
     var cacheResult = true

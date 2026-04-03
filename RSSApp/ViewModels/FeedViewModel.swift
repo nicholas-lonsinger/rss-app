@@ -12,8 +12,6 @@ final class FeedViewModel {
     var isLoading = false
     var errorMessage: String?
 
-    let thumbnailService: ArticleThumbnailCaching
-
     private let feedFetching: FeedFetching
     private let persistence: FeedPersisting
     private let feed: PersistentFeed
@@ -21,13 +19,11 @@ final class FeedViewModel {
     init(
         feed: PersistentFeed,
         feedFetching: FeedFetching = FeedFetchingService(),
-        persistence: FeedPersisting,
-        thumbnailService: ArticleThumbnailCaching = ArticleThumbnailService()
+        persistence: FeedPersisting
     ) {
         self.feed = feed
         self.feedFetching = feedFetching
         self.persistence = persistence
-        self.thumbnailService = thumbnailService
         self.feedTitle = feed.title
     }
 
@@ -61,7 +57,6 @@ final class FeedViewModel {
                 try persistence.save()
                 articles = try persistence.articles(for: feed)
                 Self.logger.notice("Feed loaded: \(self.articles.count, privacy: .public) articles")
-                prefetchThumbnails()
             } else {
                 Self.logger.debug("Feed unchanged (304) for '\(self.feed.title, privacy: .public)'")
             }
@@ -89,37 +84,6 @@ final class FeedViewModel {
         } catch {
             errorMessage = "Unable to save read status."
             Self.logger.error("Failed to toggle read status: \(error, privacy: .public)")
-        }
-    }
-
-    // MARK: - Thumbnail Prefetching
-
-    private func prefetchThumbnails() {
-        let service = self.thumbnailService
-
-        // Extract Sendable values before crossing isolation boundary
-        let thumbnailsToFetch: [(articleID: String, thumbnailURL: URL?, articleLink: URL?)] = articles.prefix(20).compactMap { article in
-            guard service.cachedThumbnailFileURL(for: article.articleID) == nil,
-                  article.thumbnailURL != nil || article.link != nil else { return nil }
-            return (article.articleID, article.thumbnailURL, article.link)
-        }
-
-        guard !thumbnailsToFetch.isEmpty else { return }
-
-        Self.logger.debug("Prefetching \(thumbnailsToFetch.count, privacy: .public) thumbnails")
-
-        Task.detached(priority: .utility) {
-            await withTaskGroup(of: Void.self) { group in
-                for item in thumbnailsToFetch {
-                    group.addTask {
-                        _ = await service.resolveAndCacheThumbnail(
-                            thumbnailURL: item.thumbnailURL,
-                            articleLink: item.articleLink,
-                            articleID: item.articleID
-                        )
-                    }
-                }
-            }
         }
     }
 }

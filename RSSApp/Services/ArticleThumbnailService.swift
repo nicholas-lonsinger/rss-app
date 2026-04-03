@@ -75,6 +75,8 @@ struct ArticleThumbnailService: ArticleThumbnailCaching {
     }
 
     func resolveAndCacheThumbnail(thumbnailURL: URL?, articleLink: URL?, articleID: String) async -> Bool {
+        Self.logger.debug("resolveAndCacheThumbnail() thumbnailURL=\(thumbnailURL?.absoluteString ?? "nil", privacy: .public) articleLink=\(articleLink?.absoluteString ?? "nil", privacy: .public) articleID=\(articleID, privacy: .public)")
+
         // Priority 1: Direct thumbnail URL from feed
         if let thumbnailURL {
             let cached = await cacheThumbnail(from: thumbnailURL, articleID: articleID)
@@ -96,9 +98,18 @@ struct ArticleThumbnailService: ArticleThumbnailCaching {
         return FileManager.default.fileExists(atPath: fileURL.path(percentEncoded: false)) ? fileURL : nil
     }
 
+    // RATIONALE: Uses removeItem (permanent delete) rather than trashItem because these are
+    // ephemeral cache files in the Caches directory that the system can already purge at will.
     func deleteCachedThumbnail(for articleID: String) {
         let fileURL = thumbnailFileURL(for: articleID)
-        try? FileManager.default.removeItem(at: fileURL)
+        do {
+            try FileManager.default.removeItem(at: fileURL)
+            Self.logger.debug("Deleted cached thumbnail for article \(articleID, privacy: .public)")
+        } catch let error as CocoaError where error.code == .fileNoSuchFile {
+            // File already absent — nothing to clean up
+        } catch {
+            Self.logger.warning("Failed to delete cached thumbnail for article \(articleID, privacy: .public): \(error, privacy: .public)")
+        }
     }
 
     // MARK: - Image Processing
@@ -107,8 +118,8 @@ struct ArticleThumbnailService: ArticleThumbnailCaching {
     private func cropAndResize(_ image: UIImage) -> UIImage {
         let targetSize = CGSize(width: Self.thumbnailDimension, height: Self.thumbnailDimension)
 
-        // Images already at or below target size don't need processing
-        guard image.size.width > targetSize.width || image.size.height > targetSize.height else {
+        let isSquare = abs(image.size.width - image.size.height) < 1
+        guard image.size.width > targetSize.width || image.size.height > targetSize.height || !isSquare else {
             return image
         }
 
@@ -142,13 +153,18 @@ struct ArticleThumbnailService: ArticleThumbnailCaching {
 
             guard let httpResponse = response as? HTTPURLResponse,
                   (200...299).contains(httpResponse.statusCode) else {
+                let code = (response as? HTTPURLResponse)?.statusCode ?? -1
+                Self.logger.warning("Article page fetch returned HTTP \(code, privacy: .public) for \(articleLink.absoluteString, privacy: .public)")
                 return nil
             }
 
-            guard let html = String(data: data, encoding: .utf8) else { return nil }
+            guard let html = String(data: data, encoding: .utf8) else {
+                Self.logger.warning("Article page response is not valid UTF-8 from \(articleLink.absoluteString, privacy: .public)")
+                return nil
+            }
             return HTMLUtilities.extractOGImageURL(from: html)
         } catch {
-            Self.logger.debug("Failed to fetch article page for og:image: \(error, privacy: .public)")
+            Self.logger.warning("Failed to fetch article page for og:image: \(error, privacy: .public)")
             return nil
         }
     }
