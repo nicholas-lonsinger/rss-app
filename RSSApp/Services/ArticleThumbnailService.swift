@@ -118,8 +118,8 @@ struct ArticleThumbnailService: ArticleThumbnailCaching {
     private func cropAndResize(_ image: UIImage) -> UIImage {
         let targetSize = CGSize(width: Self.thumbnailDimension, height: Self.thumbnailDimension)
 
-        let isSquare = abs(image.size.width - image.size.height) < 1
-        guard image.size.width > targetSize.width || image.size.height > targetSize.height || !isSquare else {
+        // Only skip if already the correct size and square
+        guard image.size != targetSize else {
             return image
         }
 
@@ -143,13 +143,16 @@ struct ArticleThumbnailService: ArticleThumbnailCaching {
 
     private static let htmlFetchTimeout: TimeInterval = 10
 
-    /// Fetches an article page and extracts the `og:image` meta tag URL.
+    /// The og:image meta tag is in the `<head>`, so we only need the first portion of the page.
+    private static let htmlHeadMaxBytes = 51_200 // 50 KB
+
+    /// Fetches the beginning of an article page and extracts the `og:image` meta tag URL.
     private func resolveOGImage(from articleLink: URL) async -> URL? {
         Self.logger.debug("Resolving og:image from \(articleLink.absoluteString, privacy: .public)")
 
         do {
             let request = URLRequest(url: articleLink, timeoutInterval: Self.htmlFetchTimeout)
-            let (data, response) = try await URLSession.shared.data(for: request)
+            let (bytes, response) = try await URLSession.shared.bytes(for: request)
 
             guard let httpResponse = response as? HTTPURLResponse,
                   (200...299).contains(httpResponse.statusCode) else {
@@ -158,7 +161,15 @@ struct ArticleThumbnailService: ArticleThumbnailCaching {
                 return nil
             }
 
-            guard let html = String(data: data, encoding: .utf8) else {
+            // Read only the first portion — og:image is in <head>, no need for the full body
+            var collected = Data()
+            collected.reserveCapacity(Self.htmlHeadMaxBytes)
+            for try await byte in bytes {
+                collected.append(byte)
+                if collected.count >= Self.htmlHeadMaxBytes { break }
+            }
+
+            guard let html = String(data: collected, encoding: .utf8) else {
                 Self.logger.warning("Article page response is not valid UTF-8 from \(articleLink.absoluteString, privacy: .public)")
                 return nil
             }
@@ -178,8 +189,12 @@ struct ArticleThumbnailService: ArticleThumbnailCaching {
     }
 
     private var cacheDirectory: URL {
-        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent(Self.cacheDirectoryName)
+        guard let cachesURL = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else {
+            Self.logger.fault("System caches directory not available")
+            assertionFailure("System caches directory not available")
+            return URL.temporaryDirectory.appendingPathComponent(Self.cacheDirectoryName)
+        }
+        return cachesURL.appendingPathComponent(Self.cacheDirectoryName)
     }
 
     private func ensureCacheDirectoryExists() throws {
