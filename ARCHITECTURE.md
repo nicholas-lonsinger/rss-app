@@ -54,18 +54,19 @@ RSSApp/
 │   ├── ActivityShareView.swift          # UIViewControllerRepresentable wrapping UIActivityViewController
 │   ├── AddFeedView.swift               # Sheet for adding a new feed — URL input + validation
 │   ├── EditFeedView.swift              # Sheet for editing a feed URL — pre-populated input + validation
-│   ├── APIKeySettingsView.swift        # Keychain API key entry/removal UI
+│   ├── APIKeySettingsView.swift        # Keychain API key entry/removal UI (pushed from SettingsView or presented as sheet)
 │   ├── ArticleDiscussionView.swift     # Chat sheet — message bubbles + streaming input
 │   ├── ArticleListView.swift           # Feed article list with loading/error/content states
-│   ├── ArticleReaderView.swift         # Full-screen reader — WKWebView + discuss/settings toolbar
+│   ├── ArticleReaderView.swift         # Full-screen reader — WKWebView + AI sparkles toolbar (API key → summary, no key → API key settings)
 │   ├── ArticleReaderWebView.swift      # UIViewRepresentable wrapping WKWebView with DOM serializer injection
 │   ├── ArticleRowView.swift            # Single article row — thumbnail, title, snippet, date, read/unread styling
 │   ├── ArticleThumbnailView.swift     # Article thumbnail display — loads cached JPEG from disk, fallback photo placeholder
 │   ├── ArticleSummaryView.swift        # Extracted article summary sheet — extracted content + discuss
 │   ├── ContentView.swift               # Root view — creates SwiftDataFeedPersistenceService from modelContext, hosts FeedListView
 │   ├── FeedIconView.swift              # Feed icon display — loads cached PNG from disk, fallback globe placeholder
-│   ├── FeedListView.swift              # Subscribed feed list — NavigationStack root with add/remove, unread badges
-│   └── FeedRowView.swift               # Single feed row — icon, title, description, unread count badge
+│   ├── FeedListView.swift              # Subscribed feed list — NavigationStack root with add/remove, settings gear, unread badges
+│   ├── FeedRowView.swift               # Single feed row — icon, title, description, unread count badge
+│   └── SettingsView.swift              # Top-level settings page with NavigationLink rows pushing API Key and Import/Export sub-screens
 └── Resources/
     ├── domSerializer.js                # Bundled DOM serializer — walks DOM tree, emits JSON for Swift extraction
     └── Assets.xcassets/                # App icons and image assets
@@ -122,7 +123,7 @@ RSSAppTests/
     └── FeedViewModelTests.swift            # Load success/failure, state transitions
 ```
 
-**Total: 51 source files + 1 resource, 38 test source files + 1 fixture.**
+**Total: 55 source files + 1 resource, 41 test source files + 1 fixture.**
 
 ## Component Map
 
@@ -224,11 +225,11 @@ All view models are `@MainActor @Observable`.
 
 ### Views
 
-**Files:** `ActivityShareView.swift`, `AddFeedView.swift`, `APIKeySettingsView.swift`, `ArticleDiscussionView.swift`, `ArticleListView.swift`, `ArticleReaderView.swift`, `ArticleReaderWebView.swift`, `ArticleRowView.swift`, `ArticleSummaryView.swift`, `ArticleThumbnailView.swift`, `ContentView.swift`, `FeedIconView.swift`, `FeedListView.swift`, `FeedRowView.swift`
+**Files:** `ActivityShareView.swift`, `AddFeedView.swift`, `APIKeySettingsView.swift`, `ArticleDiscussionView.swift`, `ArticleListView.swift`, `ArticleReaderView.swift`, `ArticleReaderWebView.swift`, `ArticleRowView.swift`, `ArticleSummaryView.swift`, `ArticleThumbnailView.swift`, `ContentView.swift`, `FeedIconView.swift`, `FeedListView.swift`, `FeedRowView.swift`, `SettingsView.swift`
 
 `ContentView` creates a `SwiftDataFeedPersistenceService` from the `@Environment(\.modelContext)` and passes it to `FeedListView`.
 
-`FeedListView` is the `NavigationStack` root. Accepts a `FeedPersisting` instance and creates `FeedListViewModel`. Shows the list of subscribed feeds using `FeedRowView` rows with `NavigationLink(value: PersistentFeed.id)`. Empty state shows a `ContentUnavailableView` prompting the user to add a feed. Toolbar has add (+) and a menu (ellipsis.circle) with import feeds, export feeds, and settings options. Uses `.navigationDestination(for: UUID.self)` to push `ArticleListView` with a `FeedViewModel` for the selected feed. Supports swipe-to-delete, swipe-to-edit, and pull-to-refresh to update feed metadata and upsert articles. Passes the persistence service to `AddFeedView` and `EditFeedView`.
+`FeedListView` is the `NavigationStack` root. Accepts a `FeedPersisting` instance and creates `FeedListViewModel`. Shows the list of subscribed feeds using `FeedRowView` rows with `NavigationLink(value: PersistentFeed.id)`. Empty state shows a `ContentUnavailableView` prompting the user to add a feed. Toolbar has add (+) and a settings gear icon that pushes `SettingsView` via NavigationStack. Uses `.navigationDestination(for: UUID.self)` to push `ArticleListView` with a `FeedViewModel` for the selected feed. Supports swipe-to-delete, swipe-to-edit, and pull-to-refresh to update feed metadata and upsert articles. Passes the persistence service to `AddFeedView` and `EditFeedView`.
 
 `ActivityShareView` is a `UIViewControllerRepresentable` wrapping `UIActivityViewController` for sharing exported OPML files.
 
@@ -242,7 +243,7 @@ All view models are `@MainActor @Observable`.
 
 `ArticleRowView` displays a `PersistentArticle` with a 60×60 `AsyncImage` thumbnail, headline title (bold for unread, regular for read), subheadline snippet, and caption-style relative date. Read articles show dimmed (`.secondary`) title text.
 
-`ArticleReaderView` is presented as a `fullScreenCover`. It hosts a `NavigationStack` with Done (dismiss), gear (settings), and sparkles (summarize) toolbar buttons. Contains `ArticleReaderWebView` for displaying the article and supports presenting `ArticleSummaryView` (for extraction) and `APIKeySettingsView` (for API key configuration) as sheets. The discussion flow is reached from within `ArticleSummaryView`. The `ArticleReaderWebView` coordinator performs early extraction via a `WKScriptMessageHandler`, making pre-extracted content available for the summary and discussion flows.
+`ArticleReaderView` is presented as a `fullScreenCover`. It hosts a `NavigationStack` with Done (dismiss) and sparkles (AI) toolbar buttons. The sparkles button checks for an API key: if configured, it presents `ArticleSummaryView` (for extraction); if not configured, it presents `APIKeySettingsView` as a sheet so the user can discover and enter their key. The discussion flow is reached from within `ArticleSummaryView`. The `ArticleReaderWebView` coordinator performs early extraction via a `WKScriptMessageHandler`, making pre-extracted content available for the summary and discussion flows.
 
 `ArticleReaderWebView` is a `UIViewRepresentable` wrapping `WKWebView`. It injects `domSerializer.js` at document end for early extraction, and its `Coordinator` handles both early extraction (via message handler) and fallback extraction (via `didFinish` delegate). Stores results in a shared `ReaderExtractionState` observable.
 
@@ -250,7 +251,9 @@ All view models are `@MainActor @Observable`.
 
 `ArticleDiscussionView` is a sheet. It shows a `ScrollViewReader`-driven chat list with user (blue, right-aligned) and assistant (grey, left-aligned) message bubbles, and a text input bar. When no API key is configured, a `ContentUnavailableView` prompt replaces the chat.
 
-`APIKeySettingsView` provides a `SecureField` for pasting an Anthropic API key, Save/Remove buttons, and a status indicator. Saved keys go directly to `KeychainService`.
+`SettingsView` is the top-level settings page, pushed from `FeedListView` via the gear toolbar icon using a `NavigationLink` within `FeedListView`'s `NavigationStack`. Contains `NavigationLink` rows for API Key (pushes `APIKeySettingsView`) and Import/Export (pushes `ImportExportView`). `ImportExportView` (defined in the same file) hosts the OPML import/export functionality previously in the `FeedListView` toolbar menu.
+
+`APIKeySettingsView` provides a `TextField` for pasting an Anthropic API key, Save/Remove buttons, and a status indicator. Saved keys go directly to `KeychainService`. Designed to be pushed from `SettingsView` or presented as a sheet (wrapped in `NavigationStack` by the caller when used as a sheet).
 
 ## Data Flow
 
@@ -295,30 +298,33 @@ RSSAppApp (@main)
                 │                           │               ├── MetadataExtractor → title, byline
                 │                           │               ├── CandidateScorer → best content node
                 │                           │               └── ContentAssembler → htmlContent + textContent
-                │                           ├── sparkles button → sheet → ArticleSummaryView
-                │                           │   ├── ArticleSummaryViewModel
-                │                           │   │   └── ArticleExtractionService (hidden WKWebView)
-                │                           │   │       └── Same native extraction pipeline
-                │                           │   └── discuss button → sheet → ArticleDiscussionView
-                │                           │       └── DiscussionViewModel
-                │                           │           ├── KeychainService → Anthropic API key
-                │                           │           └── ClaudeAPIService → URLSession SSE stream
-                │                           └── gear button → sheet → APIKeySettingsView
-                ├── OPML Import (via .fileImporter)
-                │   └── viewModel.importOPML(from:)
-                │       ├── OPMLService.parseOPML → [OPMLFeedEntry]
-                │       ├── Deduplicate via persistence.feedExists(url:)
-                │       └── persistence.addFeed → SwiftData
-                ├── OPML Export (via Menu)
-                │   └── viewModel.exportOPML()
-                │       ├── PersistentFeed → .toSubscribedFeed() conversion
-                │       ├── OPMLService.generateOPML → Data
-                │       └── ActivityShareView → UIActivityViewController
-                ├── Sheet: AddFeedView(persistence:)
-                │   └── @State AddFeedViewModel(persistence:)
-                │       ├── FeedFetchingService → validate URL + fetch title
-                │       └── persistence.addFeed → SwiftData
-                └── Sheet: APIKeySettingsView
+                │                           └── sparkles button (AI icon)
+                │                               ├── API key configured → sheet → ArticleSummaryView
+                │                               │   ├── ArticleSummaryViewModel
+                │                               │   │   └── ArticleExtractionService (hidden WKWebView)
+                │                               │   │       └── Same native extraction pipeline
+                │                               │   └── discuss button → sheet → ArticleDiscussionView
+                │                               │       └── DiscussionViewModel
+                │                               │           ├── KeychainService → Anthropic API key
+                │                               │           └── ClaudeAPIService → URLSession SSE stream
+                │                               └── No API key → sheet → APIKeySettingsView
+                ├── gear button → push → SettingsView
+                │   ├── API Key row → push → APIKeySettingsView
+                │   └── Import / Export row → push → ImportExportView
+                │       ├── Import Feeds → .fileImporter
+                │       │   └── viewModel.importOPML(from:)
+                │       │       ├── OPMLService.parseOPML → [OPMLFeedEntry]
+                │       │       ├── Deduplicate via persistence.feedExists(url:)
+                │       │       └── persistence.addFeed → SwiftData
+                │       └── Export Feeds
+                │           └── viewModel.exportOPML()
+                │               ├── PersistentFeed → .toSubscribedFeed() conversion
+                │               ├── OPMLService.generateOPML → Data
+                │               └── ActivityShareView → UIActivityViewController
+                └── Sheet: AddFeedView(persistence:)
+                    └── @State AddFeedViewModel(persistence:)
+                        ├── FeedFetchingService → validate URL + fetch title
+                        └── persistence.addFeed → SwiftData
 ```
 
 ## Design Decisions

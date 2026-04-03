@@ -1,28 +1,14 @@
 import SwiftUI
-import UniformTypeIdentifiers
 
 struct FeedListView: View {
     @State private var viewModel: FeedListViewModel
     @State private var navigationPath = NavigationPath()
     @State private var showAddFeed = false
-    @State private var showSettings = false
-    @State private var showFileImporter = false
-    @State private var showExportShare = false
-    @State private var showImportResult = false
     @State private var feedToEdit: PersistentFeed?
     @State private var lastViewedFeedID: PersistentFeed.ID?
 
     private let persistence: FeedPersisting
     private let thumbnailService: ArticleThumbnailCaching = ArticleThumbnailService()
-
-    // .opml is not a system-declared UTType on all iOS versions; .xml is the guaranteed fallback.
-    private static let opmlContentTypes: [UTType] = {
-        var types: [UTType] = [.xml]
-        if let opmlType = UTType(filenameExtension: "opml") {
-            types.insert(opmlType, at: 0)
-        }
-        return types
-    }()
 
     init(persistence: FeedPersisting) {
         self.persistence = persistence
@@ -49,52 +35,27 @@ struct FeedListView: View {
                         }
                     }
                 }
+                .navigationDestination(for: SettingsDestination.self) { destination in
+                    switch destination {
+                    case .settings:
+                        SettingsView(persistence: persistence, viewModel: viewModel)
+                    }
+                }
                 .toolbar { toolbarItems }
                 .sheet(isPresented: $showAddFeed, onDismiss: {
                     viewModel.loadFeeds()
                 }) {
                     AddFeedView(persistence: persistence)
                 }
-                .sheet(isPresented: $showSettings) {
-                    APIKeySettingsView()
-                }
                 .sheet(item: $feedToEdit, onDismiss: {
                     viewModel.loadFeeds()
                 }) { feed in
                     EditFeedView(feed: feed, persistence: persistence)
                 }
-                .sheet(isPresented: $showExportShare, onDismiss: {
-                    viewModel.opmlExportURL = nil
-                }) {
-                    if let url = viewModel.opmlExportURL {
-                        ActivityShareView(items: [url])
-                    }
-                }
-                .fileImporter(
-                    isPresented: $showFileImporter,
-                    allowedContentTypes: Self.opmlContentTypes
-                ) { result in
-                    handleFileImport(result)
-                }
-                .alert("Import Complete", isPresented: $showImportResult, presenting: viewModel.opmlImportResult) { _ in
-                    Button("OK") { viewModel.opmlImportResult = nil }
-                } message: { result in
-                    Text(importResultMessage(result))
-                }
                 .alert("Error", isPresented: errorAlertBinding) {
                     Button("OK") { viewModel.errorMessage = nil }
                 } message: {
                     Text(viewModel.errorMessage ?? "")
-                }
-                .onChange(of: viewModel.opmlExportURL) { _, newValue in
-                    if newValue != nil {
-                        showExportShare = true
-                    }
-                }
-                .onChange(of: viewModel.opmlImportResult) { _, newValue in
-                    if newValue != nil {
-                        showImportResult = true
-                    }
                 }
                 .task {
                     viewModel.loadFeeds()
@@ -107,6 +68,13 @@ struct FeedListView: View {
                     }
                 }
         }
+    }
+
+    // MARK: - Navigation Destinations
+
+    /// Typed navigation destinations for push navigation within the feed list NavigationStack.
+    private enum SettingsDestination: Hashable {
+        case settings
     }
 
     // MARK: - Subviews
@@ -165,31 +133,12 @@ struct FeedListView: View {
             .accessibilityLabel("Add Feed")
         }
         ToolbarItem(placement: .topBarTrailing) {
-            Menu {
-                Button {
-                    showFileImporter = true
-                } label: {
-                    Label("Import Feeds", systemImage: "square.and.arrow.down")
-                }
-
-                Button {
-                    viewModel.exportOPML()
-                } label: {
-                    Label("Export Feeds", systemImage: "square.and.arrow.up")
-                }
-                .disabled(viewModel.feeds.isEmpty)
-
-                Divider()
-
-                Button {
-                    showSettings = true
-                } label: {
-                    Label("Settings", systemImage: "gear")
-                }
+            Button {
+                navigationPath.append(SettingsDestination.settings)
             } label: {
-                Image(systemName: "ellipsis.circle")
+                Image(systemName: "gear")
             }
-            .accessibilityLabel("More Options")
+            .accessibilityLabel("Settings")
         }
     }
 
@@ -200,26 +149,5 @@ struct FeedListView: View {
             get: { viewModel.errorMessage != nil },
             set: { if !$0 { viewModel.errorMessage = nil } }
         )
-    }
-
-    private func importResultMessage(_ result: OPMLImportResult) -> String {
-        if result.addedCount == 0 && result.skippedCount > 0 {
-            return "All \(result.skippedCount) feeds were already in your list."
-        } else if result.skippedCount == 0 {
-            return "Added \(result.addedCount) feed(s)."
-        } else {
-            return "Added \(result.addedCount) feed(s). \(result.skippedCount) duplicate(s) skipped."
-        }
-    }
-
-    private func handleFileImport(_ result: Result<URL, any Error>) {
-        switch result {
-        case .success(let url):
-            Task {
-                await viewModel.importOPMLAndRefresh(from: url)
-            }
-        case .failure:
-            viewModel.errorMessage = "Unable to open the file picker."
-        }
     }
 }

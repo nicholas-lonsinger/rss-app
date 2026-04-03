@@ -31,7 +31,14 @@ struct ArticleDiscussionView: View {
                 }
             }
             .sheet(isPresented: $showSettings) {
-                APIKeySettingsView()
+                NavigationStack {
+                    APIKeySettingsView()
+                        .toolbar {
+                            ToolbarItem(placement: .topBarTrailing) {
+                                Button("Done") { showSettings = false }
+                            }
+                        }
+                }
             }
         }
     }

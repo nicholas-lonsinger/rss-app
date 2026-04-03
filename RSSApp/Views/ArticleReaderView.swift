@@ -1,13 +1,23 @@
 import SwiftUI
+import os
 
 struct ArticleReaderView: View {
     let article: PersistentArticle
     let persistence: FeedPersisting?
 
+    private static let logger = Logger(category: "ArticleReaderView")
+
     @State private var showSummary = false
-    @State private var showSettings = false
+    @State private var showAPIKeySettings = false
     @State private var extractionState = ReaderExtractionState()
     @Environment(\.dismiss) private var dismiss
+
+    private let keychainService = KeychainService()
+    private static let apiKeyAccount = "anthropic-api-key"
+
+    private var hasAPIKey: Bool {
+        keychainService.load(for: Self.apiKeyAccount) != nil
+    }
 
     var body: some View {
         NavigationStack {
@@ -20,23 +30,29 @@ struct ArticleReaderView: View {
                     }
                     ToolbarItemGroup(placement: .topBarTrailing) {
                         Button {
-                            showSettings = true
-                        } label: {
-                            Image(systemName: "gear")
-                        }
-                        .accessibilityLabel("Settings")
-
-                        Button {
-                            showSummary = true
+                            if hasAPIKey {
+                                Self.logger.debug("AI button tapped — API key present, showing summary")
+                                showSummary = true
+                            } else {
+                                Self.logger.debug("AI button tapped — no API key, showing API key settings")
+                                showAPIKeySettings = true
+                            }
                         } label: {
                             Image(systemName: "sparkles")
                         }
                         .accessibilityLabel("Summarize with AI")
-                        .disabled(extractionState.content == nil)
+                        .disabled(hasAPIKey && extractionState.content == nil)
                     }
                 }
-                .sheet(isPresented: $showSettings) {
-                    APIKeySettingsView()
+                .sheet(isPresented: $showAPIKeySettings) {
+                    NavigationStack {
+                        APIKeySettingsView()
+                            .toolbar {
+                                ToolbarItem(placement: .topBarTrailing) {
+                                    Button("Done") { showAPIKeySettings = false }
+                                }
+                            }
+                    }
                 }
                 .sheet(isPresented: $showSummary) {
                     ArticleSummaryView(
