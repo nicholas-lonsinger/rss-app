@@ -120,13 +120,24 @@ struct ClaudeAPIService: ClaudeAPIServicing {
     }
 
     func parseSSELine(_ json: String) -> String? {
-        guard let data = json.data(using: .utf8),
-              let event = try? JSONDecoder().decode(ClaudeStreamEvent.self, from: data),
-              event.type == "content_block_delta",
-              let text = event.delta?.text else {
+        guard let data = json.data(using: .utf8) else {
+            Self.logger.warning("SSE line could not be encoded to UTF-8 data")
             return nil
         }
-        return text
+
+        let event: ClaudeStreamEvent
+        do {
+            event = try JSONDecoder().decode(ClaudeStreamEvent.self, from: data)
+        } catch {
+            Self.logger.warning("Failed to decode SSE JSON: \(error, privacy: .public). Input: \(json, privacy: .private)")
+            return nil
+        }
+
+        guard event.type == "content_block_delta" else {
+            return nil
+        }
+
+        return event.delta?.text
     }
 }
 
