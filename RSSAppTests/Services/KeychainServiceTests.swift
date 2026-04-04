@@ -20,7 +20,7 @@ struct KeychainServiceTests {
     @Test("save and load roundtrip")
     func saveAndLoad() throws {
         let (service, account) = makeService()
-        defer { service.delete(for: account) }
+        defer { try? service.delete(for: account) }
         try service.save("sk-test-key", for: account)
         #expect(service.load(for: account) == "sk-test-key")
     }
@@ -29,17 +29,24 @@ struct KeychainServiceTests {
     func deleteClears() throws {
         let (service, account) = makeService()
         try service.save("sk-test-key", for: account)
-        service.delete(for: account)
+        try service.delete(for: account)
         #expect(service.load(for: account) == nil)
     }
 
     @Test("save overwrites an existing value")
     func saveOverwrites() throws {
         let (service, account) = makeService()
-        defer { service.delete(for: account) }
+        defer { try? service.delete(for: account) }
         try service.save("first-value", for: account)
         try service.save("second-value", for: account)
         #expect(service.load(for: account) == "second-value")
+    }
+
+    @Test("delete succeeds when no value exists (errSecItemNotFound)")
+    func deleteWhenEmpty() throws {
+        let (service, account) = makeService()
+        // Should not throw — errSecItemNotFound is treated as success
+        try service.delete(for: account)
     }
 }
 
@@ -78,7 +85,7 @@ struct KeychainAPIKeyConvenienceTests {
     func deleteAPIKey() throws {
         let mock = MockKeychainService()
         try mock.saveAPIKey("sk-my-key")
-        mock.deleteAPIKey()
+        try mock.deleteAPIKey()
         #expect(mock.hasAPIKey == false)
         #expect(mock.loadAPIKey() == nil)
     }
@@ -89,6 +96,15 @@ struct KeychainAPIKeyConvenienceTests {
         mock.errorToThrow = KeychainError.saveFailed(-25308)
         #expect(throws: KeychainError.self) {
             try mock.saveAPIKey("sk-test")
+        }
+    }
+
+    @Test("deleteAPIKey propagates errors from delete")
+    func deleteAPIKeyPropagatesError() {
+        let mock = MockKeychainService()
+        mock.deleteErrorToThrow = KeychainError.deleteFailed(-25293)
+        #expect(throws: KeychainError.self) {
+            try mock.deleteAPIKey()
         }
     }
 

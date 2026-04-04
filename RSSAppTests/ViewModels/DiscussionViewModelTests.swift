@@ -64,7 +64,7 @@ struct DiscussionViewModelTests {
         vm.refreshAPIKeyState()
         #expect(vm.hasAPIKey == true)
 
-        keychainMock.deleteAPIKey()
+        try keychainMock.deleteAPIKey()
         vm.refreshAPIKeyState()
         #expect(vm.hasAPIKey == false)
     }

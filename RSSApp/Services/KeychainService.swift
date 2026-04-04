@@ -5,12 +5,13 @@ import Security
 protocol KeychainServicing: Sendable {
     func save(_ value: String, for account: String) throws
     func load(for account: String) -> String?
-    func delete(for account: String)
+    func delete(for account: String) throws
 }
 
 enum KeychainError: Error, Sendable {
     case encodingFailed
     case saveFailed(OSStatus)
+    case deleteFailed(OSStatus)
 }
 
 struct KeychainService: KeychainServicing {
@@ -29,7 +30,7 @@ struct KeychainService: KeychainServicing {
             throw KeychainError.encodingFailed
         }
 
-        delete(for: account)
+        try delete(for: account)
 
         let query: [CFString: Any] = [
             kSecClass: kSecClassGenericPassword,
@@ -64,7 +65,7 @@ struct KeychainService: KeychainServicing {
         return String(data: data, encoding: .utf8)
     }
 
-    func delete(for account: String) {
+    func delete(for account: String) throws {
         let query: [CFString: Any] = [
             kSecClass: kSecClassGenericPassword,
             kSecAttrService: service,
@@ -73,8 +74,11 @@ struct KeychainService: KeychainServicing {
         let status = SecItemDelete(query as CFDictionary)
         if status == errSecSuccess {
             Self.logger.notice("Keychain value deleted for account '\(account, privacy: .public)'")
-        } else if status != errSecItemNotFound {
-            Self.logger.warning("Keychain delete failed for account '\(account, privacy: .public)': \(status, privacy: .public)")
+        } else if status == errSecItemNotFound {
+            Self.logger.debug("Keychain delete skipped for account '\(account, privacy: .public)': no existing value")
+        } else {
+            Self.logger.error("Keychain delete failed for account '\(account, privacy: .public)': \(status, privacy: .public)")
+            throw KeychainError.deleteFailed(status)
         }
     }
 }
@@ -105,7 +109,7 @@ extension KeychainServicing {
     }
 
     /// Deletes the stored API key from the Keychain.
-    func deleteAPIKey() {
-        delete(for: Self.apiKeyAccount)
+    func deleteAPIKey() throws {
+        try delete(for: Self.apiKeyAccount)
     }
 }

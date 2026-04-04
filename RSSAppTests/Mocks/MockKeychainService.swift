@@ -6,6 +6,7 @@ import Foundation
 final class MockKeychainService: KeychainServicing, @unchecked Sendable {
     private var store: [String: String] = [:]
     var errorToThrow: (any Error)?
+    var deleteErrorToThrow: (any Error)?
 
     func save(_ value: String, for account: String) throws {
         if let error = errorToThrow { throw error }
@@ -16,7 +17,8 @@ final class MockKeychainService: KeychainServicing, @unchecked Sendable {
         store[account]
     }
 
-    func delete(for account: String) {
+    func delete(for account: String) throws {
+        if let error = deleteErrorToThrow { throw error }
         store.removeValue(forKey: account)
     }
 }
