@@ -13,6 +13,7 @@ final class DiscussionViewModel {
     var isGenerating: Bool = false
     var errorMessage: String?
     private(set) var hasAPIKey: Bool = false
+    private(set) var keychainError: String?
 
     private let article: Article
     private let content: ArticleContent
@@ -29,7 +30,7 @@ final class DiscussionViewModel {
         self.content = content
         self.claudeService = claudeService ?? ClaudeAPIService()
         self.keychainService = keychainService ?? KeychainService()
-        self.hasAPIKey = self.keychainService.hasAPIKey
+        updateAPIKeyState()
         Self.logger.debug("Initialized with hasAPIKey=\(self.hasAPIKey, privacy: .public)")
     }
 
@@ -38,14 +39,23 @@ final class DiscussionViewModel {
     /// Call after the user may have added or removed their API key (e.g., on
     /// sheet dismiss from API key settings).
     func refreshAPIKeyState() {
-        hasAPIKey = keychainService.hasAPIKey
+        updateAPIKeyState()
     }
 
     func sendMessage() async {
         let input = currentInput.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !input.isEmpty, !isGenerating else { return }
-        guard let apiKey = keychainService.loadAPIKey(), !apiKey.isEmpty else {
-            errorMessage = "No API key configured."
+
+        let apiKey: String
+        do {
+            guard let key = try keychainService.loadAPIKey(), !key.isEmpty else {
+                errorMessage = "No API key configured."
+                return
+            }
+            apiKey = key
+        } catch {
+            errorMessage = "Unable to read your API key from the Keychain."
+            Self.logger.error("Keychain load failed during sendMessage: \(error, privacy: .public)")
             return
         }
 
@@ -77,6 +87,17 @@ final class DiscussionViewModel {
     }
 
     // MARK: - Private
+
+    private func updateAPIKeyState() {
+        do {
+            hasAPIKey = try keychainService.hasAPIKey()
+            keychainError = nil
+        } catch {
+            hasAPIKey = false
+            keychainError = "Unable to read your API key from the Keychain."
+            Self.logger.error("Keychain read error: \(error, privacy: .public)")
+        }
+    }
 
     private func buildSystemPrompt() -> String {
         var prompt = "You are a helpful reading assistant. The user is reading the following article:\n\n"

@@ -50,10 +50,10 @@ struct ArticleReaderView: View {
                     }
                 }
                 .onAppear {
-                    hasAPIKey = keychainService.hasAPIKey
+                    hasAPIKey = (try? keychainService.hasAPIKey()) ?? false
                 }
                 .sheet(isPresented: $showAPIKeySettings, onDismiss: {
-                    hasAPIKey = keychainService.hasAPIKey
+                    hasAPIKey = (try? keychainService.hasAPIKey()) ?? false
                 }) {
                     NavigationStack {
                         APIKeySettingsView()

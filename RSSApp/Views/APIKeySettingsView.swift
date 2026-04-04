@@ -9,6 +9,7 @@ struct APIKeySettingsView: View {
     @State private var modelInput: String = ""
     @State private var maxTokensInput: String = ""
     @State private var hasAPIKey: Bool = false
+    @State private var loadError: String?
 
     private static let logger = Logger(category: "APIKeySettingsView")
 
@@ -54,10 +55,17 @@ struct APIKeySettingsView: View {
         .navigationTitle("API Key")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
-            hasAPIKey = keychainService.hasAPIKey
-            if let existing = keychainService.loadAPIKey() {
-                // Show a placeholder so the user knows a key is set, without revealing it.
-                keyInput = String(repeating: "•", count: min(existing.count, 20))
+            do {
+                hasAPIKey = try keychainService.hasAPIKey()
+                if let existing = try keychainService.loadAPIKey() {
+                    // Show a placeholder so the user knows a key is set, without revealing it.
+                    keyInput = String(repeating: "•", count: min(existing.count, 20))
+                }
+                loadError = nil
+            } catch {
+                hasAPIKey = false
+                loadError = "Unable to read your API key from the Keychain. Please try again later."
+                Self.logger.error("Failed to load API key from Keychain: \(error, privacy: .public)")
             }
             loadModelConfiguration()
         }
@@ -81,6 +89,14 @@ struct APIKeySettingsView: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text(deleteError ?? "")
+        }
+        .alert("Load Failed", isPresented: Binding(
+            get: { loadError != nil },
+            set: { if !$0 { loadError = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(loadError ?? "")
         }
     }
 

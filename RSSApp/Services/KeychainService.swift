@@ -4,13 +4,15 @@ import Security
 
 protocol KeychainServicing: Sendable {
     func save(_ value: String, for account: String) throws
-    func load(for account: String) -> String?
+    func load(for account: String) throws -> String?
     func delete(for account: String) throws
 }
 
 enum KeychainError: Error, Sendable {
     case encodingFailed
     case saveFailed(OSStatus)
+    case loadFailed(OSStatus)
+    case dataCorrupted
     case deleteFailed(OSStatus)
 }
 
@@ -47,7 +49,7 @@ struct KeychainService: KeychainServicing {
         Self.logger.notice("Keychain value saved for account '\(account, privacy: .public)'")
     }
 
-    func load(for account: String) -> String? {
+    func load(for account: String) throws -> String? {
         let query: [CFString: Any] = [
             kSecClass: kSecClassGenericPassword,
             kSecAttrService: service,
@@ -59,15 +61,34 @@ struct KeychainService: KeychainServicing {
         var result: AnyObject?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
 
-        guard status == errSecSuccess, let data = result as? Data else {
-            if status != errSecItemNotFound {
-                Self.logger.warning(
-                    "Keychain load failed for account '\(account, privacy: .public)': OSStatus \(status, privacy: .public)"
-                )
-            }
+        if status == errSecItemNotFound {
             return nil
         }
-        return String(data: data, encoding: .utf8)
+
+        guard status == errSecSuccess else {
+            Self.logger.error(
+                "Keychain load failed for account '\(account, privacy: .public)': OSStatus \(status, privacy: .public)"
+            )
+            throw KeychainError.loadFailed(status)
+        }
+
+        guard let data = result as? Data else {
+            Self.logger.fault(
+                "Keychain returned non-Data result for account '\(account, privacy: .public)' despite errSecSuccess"
+            )
+            assertionFailure("Keychain returned non-Data result for account '\(account)'")
+            throw KeychainError.dataCorrupted
+        }
+
+        guard let value = String(data: data, encoding: .utf8) else {
+            Self.logger.fault(
+                "Keychain data is not valid UTF-8 for account '\(account, privacy: .public)'"
+            )
+            assertionFailure("Keychain data is not valid UTF-8 for account '\(account)'")
+            throw KeychainError.dataCorrupted
+        }
+
+        return value
     }
 
     func delete(for account: String) throws {
@@ -97,15 +118,19 @@ extension KeychainServicing {
 
     /// Whether a non-empty API key is currently stored in the Keychain.
     ///
-    /// Returns `false` both when no key is stored and when a Keychain read
-    /// error occurs (the underlying `load(for:)` returns `nil` on error).
-    var hasAPIKey: Bool {
-        loadAPIKey()?.isEmpty == false
+    /// Returns `false` when no key is stored. Throws when the Keychain read
+    /// fails, allowing callers to distinguish "no key" from "error."
+    func hasAPIKey() throws -> Bool {
+        guard let key = try loadAPIKey() else { return false }
+        return !key.isEmpty
     }
 
     /// Loads the stored API key, if any.
-    func loadAPIKey() -> String? {
-        load(for: Self.apiKeyAccount)
+    ///
+    /// Returns `nil` when no key is stored. Throws on Keychain read errors
+    /// or data corruption so callers can show appropriate error messages.
+    func loadAPIKey() throws -> String? {
+        try load(for: Self.apiKeyAccount)
     }
 
     /// Saves the given API key to the Keychain.
