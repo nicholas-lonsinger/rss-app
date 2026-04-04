@@ -84,9 +84,12 @@ extension KeychainServicing {
     /// The Keychain account identifier for the Anthropic API key.
     static var apiKeyAccount: String { "anthropic-api-key" }
 
-    /// Whether an API key is currently stored in the Keychain.
+    /// Whether a non-empty API key is currently stored in the Keychain.
+    ///
+    /// Returns `false` both when no key is stored and when a Keychain read
+    /// error occurs (the underlying `load(for:)` returns `nil` on error).
     var hasAPIKey: Bool {
-        loadAPIKey() != nil
+        loadAPIKey()?.isEmpty == false
     }
 
     /// Loads the stored API key, if any.
