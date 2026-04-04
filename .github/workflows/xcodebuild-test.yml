@@ -20,11 +20,24 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Environment info
+      - name: Resolve simulator
+        id: sim
         run: |
           xcodebuild -version
           xcrun simctl list runtimes
           xcrun simctl list devices available
+          DEVICE=$(xcrun simctl list devices available -j \
+            | python3 -c "
+          import json, sys
+          data = json.load(sys.stdin)
+          runtimes = sorted((k, v) for k, v in data['devices'].items() if 'iOS' in k)
+          for name, devices in reversed(runtimes):
+              for d in devices:
+                  if 'iPhone' in d['name']:
+                      print(d['name']); sys.exit(0)
+          sys.exit(1)")
+          echo "device=$DEVICE" >> "$GITHUB_OUTPUT"
+          echo "Using device: $DEVICE"
 
       - name: Build for testing
         run: |
@@ -32,7 +45,7 @@ jobs:
           xcodebuild build-for-testing \
             -project RSSApp.xcodeproj \
             -scheme RSSApp \
-            -destination 'platform=iOS Simulator,OS=latest,name=iPhone 17 Pro' \
+            -destination 'platform=iOS Simulator,OS=latest,name=${{ steps.sim.outputs.device }}' \
             -derivedDataPath DerivedData \
             CODE_SIGN_IDENTITY="-" \
             CODE_SIGNING_REQUIRED=NO \
@@ -45,7 +58,7 @@ jobs:
           xcodebuild test-without-building \
             -project RSSApp.xcodeproj \
             -scheme RSSApp \
-            -destination 'platform=iOS Simulator,OS=latest,name=iPhone 17 Pro' \
+            -destination 'platform=iOS Simulator,OS=latest,name=${{ steps.sim.outputs.device }}' \
             -derivedDataPath DerivedData \
             -resultBundlePath TestResults.xcresult \
             CODE_SIGN_IDENTITY="-" \
