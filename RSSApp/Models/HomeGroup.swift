@@ -2,9 +2,10 @@ import Foundation
 
 /// Represents a top-level group on the Home screen.
 ///
-/// The three fixed cases cover the initial launch groups. The enum-based approach
-/// accommodates future user-created groups (e.g., folders, tags) by adding new cases
-/// with associated values.
+/// The three fixed cases cover the initial launch groups. If user-created groups
+/// (e.g., folders, tags) are needed in the future, the design would likely move to
+/// a protocol or struct-based approach, since `CaseIterable` conformance cannot be
+/// synthesized for enums with associated values.
 enum HomeGroup: Hashable, Identifiable, CaseIterable {
     case allArticles
     case unreadArticles

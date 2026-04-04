@@ -20,8 +20,9 @@ struct AllArticlesView: View {
             } else {
                 List(articles, id: \.articleID) { article in
                     Button {
-                        homeViewModel.markAsRead(article)
-                        selectedArticle = article
+                        if homeViewModel.markAsRead(article) {
+                            selectedArticle = article
+                        }
                     } label: {
                         CrossFeedArticleRowView(
                             article: article,
@@ -47,8 +48,15 @@ struct AllArticlesView: View {
             }
         }
         .navigationTitle("All Articles")
-        .fullScreenCover(item: $selectedArticle) { article in
+        .fullScreenCover(item: $selectedArticle, onDismiss: {
+            reloadArticles()
+        }) { article in
             ArticleReaderView(article: article, persistence: persistence)
+        }
+        .alert("Error", isPresented: errorAlertBinding) {
+            Button("OK") { homeViewModel.clearError() }
+        } message: {
+            Text(homeViewModel.errorMessage ?? "")
         }
         .task {
             reloadArticles()
@@ -59,6 +67,13 @@ struct AllArticlesView: View {
     }
 
     // MARK: - Helpers
+
+    private var errorAlertBinding: Binding<Bool> {
+        Binding(
+            get: { homeViewModel.errorMessage != nil },
+            set: { if !$0 { homeViewModel.clearError() } }
+        )
+    }
 
     private func reloadArticles() {
         articles = homeViewModel.allArticles()

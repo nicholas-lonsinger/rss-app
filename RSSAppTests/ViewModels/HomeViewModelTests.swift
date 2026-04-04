@@ -184,8 +184,9 @@ struct HomeViewModelTests {
         viewModel.loadUnreadCount()
         #expect(viewModel.unreadCount == 1)
 
-        viewModel.markAsRead(article)
+        let result = viewModel.markAsRead(article)
 
+        #expect(result == true)
         #expect(article.isRead == true)
         #expect(viewModel.unreadCount == 0)
     }
@@ -201,13 +202,14 @@ struct HomeViewModelTests {
         mockPersistence.articlesByFeedID[feed.id] = [article]
 
         let viewModel = HomeViewModel(persistence: mockPersistence)
-        viewModel.markAsRead(article)
+        let result = viewModel.markAsRead(article)
 
+        #expect(result == true)
         #expect(article.isRead == true)
         #expect(viewModel.errorMessage == nil)
     }
 
-    @Test("markAsRead sets errorMessage on persistence failure")
+    @Test("markAsRead sets errorMessage on persistence failure and returns false")
     @MainActor
     func markAsReadError() {
         let mockPersistence = MockFeedPersistenceService()
@@ -216,8 +218,9 @@ struct HomeViewModelTests {
         let article = TestFixtures.makePersistentArticle(articleID: "a1", isRead: false)
 
         let viewModel = HomeViewModel(persistence: mockPersistence)
-        viewModel.markAsRead(article)
+        let result = viewModel.markAsRead(article)
 
+        #expect(result == false)
         #expect(viewModel.errorMessage != nil)
     }
 
@@ -267,5 +270,22 @@ struct HomeViewModelTests {
         viewModel.toggleReadStatus(article)
 
         #expect(viewModel.errorMessage != nil)
+    }
+
+    // MARK: - Clear Error
+
+    @Test("clearError resets errorMessage to nil")
+    @MainActor
+    func clearErrorResetsMessage() {
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.errorToThrow = NSError(domain: "test", code: 1)
+
+        let viewModel = HomeViewModel(persistence: mockPersistence)
+        viewModel.loadUnreadCount()
+        #expect(viewModel.errorMessage != nil)
+
+        viewModel.clearError()
+
+        #expect(viewModel.errorMessage == nil)
     }
 }

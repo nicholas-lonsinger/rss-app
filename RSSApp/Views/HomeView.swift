@@ -26,16 +26,28 @@ struct HomeView: View {
                 case .unreadArticles:
                     UnreadArticlesView(persistence: persistence, homeViewModel: viewModel)
                 case .allFeeds:
-                    FeedListView(persistence: persistence)
+                    FeedListView(persistence: persistence, isEmbedded: true)
                 }
             }
             .task {
                 viewModel.loadUnreadCount()
             }
+            .alert("Error", isPresented: errorAlertBinding) {
+                Button("OK") { viewModel.clearError() }
+            } message: {
+                Text(viewModel.errorMessage ?? "")
+            }
         }
     }
 
     // MARK: - Helpers
+
+    private var errorAlertBinding: Binding<Bool> {
+        Binding(
+            get: { viewModel.errorMessage != nil },
+            set: { if !$0 { viewModel.clearError() } }
+        )
+    }
 
     private func unreadCount(for group: HomeGroup) -> Int? {
         switch group {

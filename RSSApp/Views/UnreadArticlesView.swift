@@ -20,9 +20,10 @@ struct UnreadArticlesView: View {
             } else {
                 List(articles, id: \.articleID) { article in
                     Button {
-                        homeViewModel.markAsRead(article)
-                        reloadArticles()
-                        selectedArticle = article
+                        if homeViewModel.markAsRead(article) {
+                            reloadArticles()
+                            selectedArticle = article
+                        }
                     } label: {
                         CrossFeedArticleRowView(
                             article: article,
@@ -48,8 +49,15 @@ struct UnreadArticlesView: View {
             }
         }
         .navigationTitle("Unread Articles")
-        .fullScreenCover(item: $selectedArticle) { article in
+        .fullScreenCover(item: $selectedArticle, onDismiss: {
+            reloadArticles()
+        }) { article in
             ArticleReaderView(article: article, persistence: persistence)
+        }
+        .alert("Error", isPresented: errorAlertBinding) {
+            Button("OK") { homeViewModel.clearError() }
+        } message: {
+            Text(homeViewModel.errorMessage ?? "")
         }
         .task {
             reloadArticles()
@@ -60,6 +68,13 @@ struct UnreadArticlesView: View {
     }
 
     // MARK: - Helpers
+
+    private var errorAlertBinding: Binding<Bool> {
+        Binding(
+            get: { homeViewModel.errorMessage != nil },
+            set: { if !$0 { homeViewModel.clearError() } }
+        )
+    }
 
     private func reloadArticles() {
         articles = homeViewModel.unreadArticles()

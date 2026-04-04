@@ -22,11 +22,14 @@ protocol FeedPersisting: Sendable {
     // MARK: Article operations
 
     func articles(for feed: PersistentFeed) throws -> [PersistentArticle]
+    /// Returns all articles across all feeds, sorted by published date descending (newest first).
     func allArticles() throws -> [PersistentArticle]
+    /// Returns all unread articles across all feeds, sorted by published date descending (newest first).
     func allUnreadArticles() throws -> [PersistentArticle]
     func upsertArticles(_ articles: [Article], for feed: PersistentFeed) throws
     func markArticleRead(_ article: PersistentArticle, isRead: Bool) throws
     func unreadCount(for feed: PersistentFeed) throws -> Int
+    /// Returns the total number of unread articles across all feeds.
     func totalUnreadCount() throws -> Int
 
     // MARK: Content cache

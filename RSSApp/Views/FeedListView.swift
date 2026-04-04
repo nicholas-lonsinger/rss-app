@@ -9,65 +9,81 @@ struct FeedListView: View {
 
     private let persistence: FeedPersisting
     private let thumbnailService: ArticleThumbnailCaching = ArticleThumbnailService()
+    private let isEmbedded: Bool
 
-    init(persistence: FeedPersisting) {
+    /// Creates a feed list view.
+    /// - Parameters:
+    ///   - persistence: The persistence service for feed data.
+    ///   - isEmbedded: When `true`, omits the wrapping `NavigationStack` so this view
+    ///     can be pushed inside a parent stack (e.g., from `HomeView`). Defaults to `false`.
+    init(persistence: FeedPersisting, isEmbedded: Bool = false) {
         self.persistence = persistence
+        self.isEmbedded = isEmbedded
         _viewModel = State(initialValue: FeedListViewModel(persistence: persistence))
     }
 
     var body: some View {
-        NavigationStack(path: $navigationPath) {
-            feedContent
-                .navigationTitle("Feeds")
-                .navigationDestination(for: PersistentFeed.ID.self) { feedID in
-                    if let feed = viewModel.feeds.first(where: { $0.id == feedID }) {
-                        ArticleListView(
-                            viewModel: FeedViewModel(feed: feed, persistence: persistence),
-                            persistence: persistence,
-                            thumbnailService: thumbnailService
-                        )
-                        .onAppear { lastViewedFeedID = feedID }
-                    } else {
-                        ContentUnavailableView {
-                            Label("Feed Not Found", systemImage: "exclamationmark.triangle")
-                        } description: {
-                            Text("This feed is no longer available.")
-                        }
-                    }
-                }
-                .navigationDestination(for: SettingsDestination.self) { destination in
-                    switch destination {
-                    case .settings:
-                        SettingsView(persistence: persistence, viewModel: viewModel)
-                    }
-                }
-                .toolbar { toolbarItems }
-                .sheet(isPresented: $showAddFeed, onDismiss: {
-                    viewModel.loadFeeds()
-                }) {
-                    AddFeedView(persistence: persistence)
-                }
-                .sheet(item: $feedToEdit, onDismiss: {
-                    viewModel.loadFeeds()
-                }) { feed in
-                    EditFeedView(feed: feed, persistence: persistence)
-                }
-                .alert("Error", isPresented: errorAlertBinding) {
-                    Button("OK") { viewModel.errorMessage = nil }
-                } message: {
-                    Text(viewModel.errorMessage ?? "")
-                }
-                .task {
-                    viewModel.loadFeeds()
-                }
-                .onChange(of: navigationPath.count) { oldCount, newCount in
-                    if newCount < oldCount,
-                       let feedID = lastViewedFeedID,
-                       let feed = viewModel.feeds.first(where: { $0.id == feedID }) {
-                        viewModel.refreshUnreadCount(for: feed)
-                    }
-                }
+        if isEmbedded {
+            feedListContent
+        } else {
+            NavigationStack(path: $navigationPath) {
+                feedListContent
+            }
         }
+    }
+
+    @ViewBuilder
+    private var feedListContent: some View {
+        feedContent
+            .navigationTitle("Feeds")
+            .navigationDestination(for: PersistentFeed.ID.self) { feedID in
+                if let feed = viewModel.feeds.first(where: { $0.id == feedID }) {
+                    ArticleListView(
+                        viewModel: FeedViewModel(feed: feed, persistence: persistence),
+                        persistence: persistence,
+                        thumbnailService: thumbnailService
+                    )
+                    .onAppear { lastViewedFeedID = feedID }
+                } else {
+                    ContentUnavailableView {
+                        Label("Feed Not Found", systemImage: "exclamationmark.triangle")
+                    } description: {
+                        Text("This feed is no longer available.")
+                    }
+                }
+            }
+            .navigationDestination(for: SettingsDestination.self) { destination in
+                switch destination {
+                case .settings:
+                    SettingsView(persistence: persistence, viewModel: viewModel)
+                }
+            }
+            .toolbar { toolbarItems }
+            .sheet(isPresented: $showAddFeed, onDismiss: {
+                viewModel.loadFeeds()
+            }) {
+                AddFeedView(persistence: persistence)
+            }
+            .sheet(item: $feedToEdit, onDismiss: {
+                viewModel.loadFeeds()
+            }) { feed in
+                EditFeedView(feed: feed, persistence: persistence)
+            }
+            .alert("Error", isPresented: errorAlertBinding) {
+                Button("OK") { viewModel.errorMessage = nil }
+            } message: {
+                Text(viewModel.errorMessage ?? "")
+            }
+            .task {
+                viewModel.loadFeeds()
+            }
+            .onChange(of: navigationPath.count) { oldCount, newCount in
+                if newCount < oldCount,
+                   let feedID = lastViewedFeedID,
+                   let feed = viewModel.feeds.first(where: { $0.id == feedID }) {
+                    viewModel.refreshUnreadCount(for: feed)
+                }
+            }
     }
 
     // MARK: - Navigation Destinations
