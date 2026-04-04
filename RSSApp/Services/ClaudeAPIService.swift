@@ -20,8 +20,35 @@ struct ClaudeAPIService: ClaudeAPIServicing {
     private static let logger = Logger(category: "ClaudeAPIService")
 
     private static let apiURL = "https://api.anthropic.com/v1/messages"
-    private static let model = "claude-sonnet-4-6"
-    private static let maxTokens = 1024
+
+    // MARK: - UserDefaults keys and defaults
+
+    static let modelDefaultsKey = "claude_model_identifier"
+    static let maxTokensDefaultsKey = "claude_max_tokens"
+    static let defaultModel = "claude-haiku-4-5-20251001"
+    static let defaultMaxTokens = 4096
+
+    // RATIONALE: UserDefaults is thread-safe but not marked Sendable in the ObjC headers.
+    // nonisolated(unsafe) is appropriate here since UserDefaults operations are internally synchronized.
+    private nonisolated(unsafe) let defaults: UserDefaults
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+    }
+
+    /// The current model identifier, read from UserDefaults at call time.
+    var model: String {
+        guard let stored = defaults.string(forKey: Self.modelDefaultsKey), !stored.isEmpty else {
+            return Self.defaultModel
+        }
+        return stored
+    }
+
+    /// The current max tokens, read from UserDefaults at call time.
+    var maxTokens: Int {
+        let stored = defaults.integer(forKey: Self.maxTokensDefaultsKey)
+        return stored > 0 ? stored : Self.defaultMaxTokens
+    }
 
     func sendMessage(
         systemPrompt: String,
@@ -38,7 +65,7 @@ struct ClaudeAPIService: ClaudeAPIServicing {
         }
 
         let request = try buildRequest(url: url, apiKey: apiKey, systemPrompt: systemPrompt, messages: messages)
-        Self.logger.debug("sendMessage() called with \(messages.count, privacy: .public) messages")
+        Self.logger.debug("sendMessage() called with \(messages.count, privacy: .public) messages, model=\(model, privacy: .public), maxTokens=\(maxTokens, privacy: .public)")
 
         return AsyncThrowingStream { continuation in
             Task {
@@ -82,8 +109,8 @@ struct ClaudeAPIService: ClaudeAPIServicing {
         request.setValue("application/json", forHTTPHeaderField: "content-type")
 
         let body = ClaudeRequest(
-            model: Self.model,
-            maxTokens: Self.maxTokens,
+            model: model,
+            maxTokens: maxTokens,
             system: systemPrompt,
             messages: messages.map { ClaudeRequestMessage(role: $0.role.rawValue, content: $0.content) },
             stream: true

@@ -40,6 +40,7 @@ RSSApp/
 │   ├── HTMLUtilities.swift             # HTML/XML escaping (text + attributes), tag stripping, entity decoding, image extraction, og:image extraction, icon URL extraction
 │   ├── KeychainService.swift           # Keychain wrapper for secure API key storage
 │   ├── MetadataExtractor.swift         # Extracts article title/byline from meta tags and DOM elements
+│   ├── ModelConfigurationValidator.swift # ModelValidation + MaxTokensValidation enums — input validation for model ID and max tokens
 │   ├── OPMLService.swift               # OPMLServing protocol + XMLParser-based OPML parser + XML generator
 │   ├── RSSParsingService.swift         # XMLParser-based RSS 2.0 + Atom parser with XHTML content reconstruction
 │   └── SiteSpecificExtracting.swift    # Protocol for per-hostname content extractors
@@ -113,17 +114,18 @@ RSSAppTests/
 │   ├── KeychainServiceTests.swift      # Save/load/delete/overwrite roundtrips
 │   ├── OPMLServiceTests.swift          # Parse flat/nested/empty OPML, generate + round-trip, XML escaping
 │   ├── MetadataExtractorTests.swift    # Title/byline extraction from meta tags and DOM
+│   ├── ModelConfigurationValidationTests.swift # ModelValidation and MaxTokensValidation input validation
 │   └── RSSParsingServiceTests.swift    # Channel parsing, thumbnails, IDs, edge cases
-└── ViewModels/
-    ├── AddFeedViewModelTests.swift         # URL validation, duplicate detection, success/failure
-    ├── EditFeedViewModelTests.swift        # URL editing, validation, duplicate detection, success/failure
-    ├── ArticleReaderViewModelTests.swift   # ArticleSummaryViewModel pre-extraction state tests
-    ├── DiscussionViewModelTests.swift      # Message flow, streaming, no-key behavior
-    ├── FeedListViewModelTests.swift        # Load, remove by object, remove by IndexSet
-    └── FeedViewModelTests.swift            # Load success/failure, state transitions
+├── ViewModels/
+│   ├── AddFeedViewModelTests.swift         # URL validation, duplicate detection, success/failure
+│   ├── EditFeedViewModelTests.swift        # URL editing, validation, duplicate detection, success/failure
+│   ├── ArticleReaderViewModelTests.swift   # ArticleSummaryViewModel pre-extraction state tests
+│   ├── DiscussionViewModelTests.swift      # Message flow, streaming, no-key behavior
+│   ├── FeedListViewModelTests.swift        # Load, remove by object, remove by IndexSet
+│   └── FeedViewModelTests.swift            # Load success/failure, state transitions
 ```
 
-**Total: 55 source files + 1 resource, 41 test source files + 1 fixture.**
+**Total: 56 source files + 1 resource, 42 test source files + 1 fixture.**
 
 ## Component Map
 
@@ -191,7 +193,7 @@ RSSAppTests/
 - `MetadataExtractor` — extracts article title and byline from OpenGraph/article meta tags and DOM elements (`<h1>`, byline class patterns).
 - `SiteSpecificExtracting` — extensibility protocol for per-hostname extractors. Implementations are checked before the generic algorithm runs.
 
-`ClaudeAPIServicing` is a `Sendable` protocol. `ClaudeAPIService` POSTs to the Anthropic Messages API with `stream: true`, reads SSE lines via `URLSession.bytes(for:).lines`, and yields text deltas via `AsyncThrowingStream<String, Error>`.
+`ClaudeAPIServicing` is a `Sendable` protocol. `ClaudeAPIService` POSTs to the Anthropic Messages API with `stream: true`, reads SSE lines via `URLSession.bytes(for:).lines`, and yields text deltas via `AsyncThrowingStream<String, Error>`. Model identifier and max output tokens are read from `UserDefaults` at call time (keys: `claude_model_identifier`, `claude_max_tokens`) with fallback defaults (`claude-haiku-4-5-20251001`, `4096`), so changes in settings take effect on the next API call without restarting. Accepts a `UserDefaults` parameter for testability.
 
 `KeychainServicing` is a `Sendable` protocol. `KeychainService` wraps `Security` framework (`kSecClassGenericPassword`) to save, load, and delete the Anthropic API key. The key is stored encrypted by the OS and never touches any file accessible to git.
 
@@ -253,7 +255,7 @@ All view models are `@MainActor @Observable`.
 
 `SettingsView` is the top-level settings page, pushed from `FeedListView` via the gear toolbar icon using a `NavigationLink` within `FeedListView`'s `NavigationStack`. Contains `NavigationLink` rows for API Key (pushes `APIKeySettingsView`) and Import/Export (pushes `ImportExportView`). `ImportExportView` (defined in the same file) hosts the OPML import/export functionality previously in the `FeedListView` toolbar menu.
 
-`APIKeySettingsView` provides a `TextField` for pasting an Anthropic API key, Save/Remove buttons, and a status indicator. Saved keys go directly to `KeychainService`. Designed to be pushed from `SettingsView` or presented as a sheet (wrapped in `NavigationStack` by the caller when used as a sheet).
+`APIKeySettingsView` provides a `TextField` for pasting an Anthropic API key, Save/Remove buttons, and a status indicator. Saved keys go directly to `KeychainService`. Also includes a "Model Configuration" section with fields for the Claude model identifier (validated: must start with `claude-`, lowercase alphanumeric + hyphens only) and max output tokens (validated: must be a positive integer). Both values are persisted in `UserDefaults` and validated inline with green checkmark / red indicator feedback. Validation logic is in `ModelValidation` and `MaxTokensValidation` enums in `ModelConfigurationValidator.swift` (under Services). Designed to be pushed from `SettingsView` or presented as a sheet (wrapped in `NavigationStack` by the caller when used as a sheet).
 
 ## Data Flow
 
@@ -371,7 +373,8 @@ RSSAppApp (@main)
 | HTMLUtilities | HTMLUtilitiesTests.swift | Tag stripping, entity decoding (amp, lt, gt, quot, apos, nbsp), whitespace collapse, HTML text escaping (amp, angle brackets, no-op), attribute escaping (amp, quot, lt, gt, no-op, multiple), image extraction (double/single quotes, multiple images, no images), og:image extraction (basic, reversed attributes, missing, case-insensitive, empty) |
 | RSSParsingService | RSSParsingServiceTests.swift | Channel info, article count, basic fields, pubDate, snippets, raw description, thumbnail sources (media:thumbnail, media:content, enclosure, img fallback), thumbnail priority, ID derivation (guid, link), empty channel, malformed XML, empty data, missing fields, empty title, long snippet truncation, Atom XHTML content reconstruction (content, summary, content-overrides-summary, snippet generation, thumbnail extraction), Atom/RSS author extraction, Atom category term attributes, RSS category text, Atom enclosure links, RSS lastBuildDate, Atom feed-level updated date, default author/categories |
 | KeychainService | KeychainServiceTests.swift | Save/load roundtrip, load when empty, delete clears value, overwrite updates value |
-| ClaudeAPIService | ClaudeAPIServiceTests.swift | Request headers, request body JSON encoding, SSE text delta parsing, non-delta event returns nil, malformed JSON returns nil, delta without text returns nil |
+| ClaudeAPIService | ClaudeAPIServiceTests.swift | Request headers, request body JSON encoding (defaults + custom model/maxTokens), UserDefaults reading (default/stored/empty model, default/stored/zero/negative maxTokens, dynamic updates), SSE text delta parsing, non-delta event returns nil, malformed JSON returns nil, delta without text returns nil |
+| ModelValidation + MaxTokensValidation | ModelConfigurationValidationTests.swift | Valid model ID with trimmed value, empty/whitespace, missing prefix, uppercase/spaces/special characters, claude-alone valid; valid positive integer with parsed value, minimum (1), large number, empty/whitespace, zero/negative/non-numeric/decimal invalid |
 | CandidateScorer | CandidateScorerTests.swift | Content node identification in simple pages, scoring with class/id signals, link-density penalty, pruning of unlikely nodes |
 | ContentAssembler | ContentAssemblerTests.swift | Plain text assembly, HTML tag preservation, attribute stripping, nested structure handling |
 | ContentExtractor | ContentExtractorTests.swift | End-to-end extraction from DOM, site-specific extractor fallback, nil handling |
