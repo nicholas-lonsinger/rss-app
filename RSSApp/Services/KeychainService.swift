@@ -60,6 +60,11 @@ struct KeychainService: KeychainServicing {
         let status = SecItemCopyMatching(query as CFDictionary, &result)
 
         guard status == errSecSuccess, let data = result as? Data else {
+            if status != errSecItemNotFound {
+                Self.logger.warning(
+                    "Keychain load failed for account '\(account, privacy: .public)': OSStatus \(status, privacy: .public)"
+                )
+            }
             return nil
         }
         return String(data: data, encoding: .utf8)
