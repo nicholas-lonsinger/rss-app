@@ -22,9 +22,12 @@ protocol FeedPersisting: Sendable {
     // MARK: Article operations
 
     func articles(for feed: PersistentFeed) throws -> [PersistentArticle]
+    func allArticles() throws -> [PersistentArticle]
+    func allUnreadArticles() throws -> [PersistentArticle]
     func upsertArticles(_ articles: [Article], for feed: PersistentFeed) throws
     func markArticleRead(_ article: PersistentArticle, isRead: Bool) throws
     func unreadCount(for feed: PersistentFeed) throws -> Int
+    func totalUnreadCount() throws -> Int
 
     // MARK: Content cache
 
@@ -128,6 +131,25 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
         return try modelContext.fetch(descriptor)
     }
 
+    func allArticles() throws -> [PersistentArticle] {
+        let descriptor = FetchDescriptor<PersistentArticle>(
+            sortBy: [SortDescriptor(\.publishedDate, order: .reverse)]
+        )
+        let articles = try modelContext.fetch(descriptor)
+        Self.logger.debug("Fetched \(articles.count, privacy: .public) total articles")
+        return articles
+    }
+
+    func allUnreadArticles() throws -> [PersistentArticle] {
+        let descriptor = FetchDescriptor<PersistentArticle>(
+            predicate: #Predicate { !$0.isRead },
+            sortBy: [SortDescriptor(\.publishedDate, order: .reverse)]
+        )
+        let articles = try modelContext.fetch(descriptor)
+        Self.logger.debug("Fetched \(articles.count, privacy: .public) unread articles")
+        return articles
+    }
+
     // RATIONALE: Insert-only by design — existing articles are never updated because preserving
     // user-generated state (read status, cached content) is more important than reflecting
     // minor metadata edits (title rewording) from the feed source.
@@ -171,6 +193,13 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
         let feedID = feed.persistentModelID
         let descriptor = FetchDescriptor<PersistentArticle>(
             predicate: #Predicate { $0.feed?.persistentModelID == feedID && !$0.isRead }
+        )
+        return try modelContext.fetchCount(descriptor)
+    }
+
+    func totalUnreadCount() throws -> Int {
+        let descriptor = FetchDescriptor<PersistentArticle>(
+            predicate: #Predicate { !$0.isRead }
         )
         return try modelContext.fetchCount(descriptor)
     }

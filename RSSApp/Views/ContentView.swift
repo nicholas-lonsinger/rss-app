@@ -5,7 +5,7 @@ struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
 
     var body: some View {
-        FeedListView(
+        HomeView(
             persistence: SwiftDataFeedPersistenceService(modelContext: modelContext)
         )
     }

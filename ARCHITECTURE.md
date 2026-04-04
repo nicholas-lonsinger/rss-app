@@ -15,6 +15,7 @@ RSSApp/
 │   ├── ArticleContent.swift            # Extracted article data — htmlContent + textContent
 │   ├── ChatMessage.swift               # Chat message with role (user/assistant) and content
 │   ├── DOMNode.swift                   # SerializedDOM + DOMNode tree from domSerializer.js
+│   ├── HomeGroup.swift                 # Enum — Home screen group types (allArticles, unreadArticles, allFeeds) with Identifiable, Hashable, CaseIterable
 │   ├── ModelConversion.swift           # Bidirectional conversion: PersistentFeed↔SubscribedFeed, PersistentArticle↔Article, PersistentArticleContent↔ArticleContent
 │   ├── OPMLFeedEntry.swift              # Intermediate OPML parsed entry (title, feedURL, siteURL, description)
 │   ├── OPMLImportResult.swift           # OPML import outcome counts (added, skipped, total)
@@ -50,10 +51,13 @@ RSSApp/
 │   ├── ArticleSummaryViewModel.swift   # @Observable @MainActor — extraction state machine
 │   ├── DiscussionViewModel.swift       # @Observable @MainActor — chat history + Claude streaming
 │   ├── FeedListViewModel.swift         # @Observable @MainActor — feed list management, refresh, OPML, unread counts, icon resolution via FeedPersisting
-│   └── FeedViewModel.swift             # @Observable @MainActor — cached + network article loading, read/unread via FeedPersisting
+│   ├── FeedViewModel.swift             # @Observable @MainActor — cached + network article loading, read/unread via FeedPersisting
+│   └── HomeViewModel.swift             # @Observable @MainActor — total unread count, cross-feed article queries, read/unread via FeedPersisting
 ├── Views/                              # SwiftUI views
 │   ├── ActivityShareView.swift          # UIViewControllerRepresentable wrapping UIActivityViewController
 │   ├── AddFeedView.swift               # Sheet for adding a new feed — URL input + validation
+│   ├── AllArticlesView.swift           # Flat chronological list of all articles across all feeds
+│   ├── CrossFeedArticleRowView.swift   # Article row with feed name label for cross-feed lists
 │   ├── EditFeedView.swift              # Sheet for editing a feed URL — pre-populated input + validation
 │   ├── APIKeySettingsView.swift        # Keychain API key entry/removal UI (pushed from SettingsView or presented as sheet)
 │   ├── ArticleDiscussionView.swift     # Chat sheet — message bubbles + streaming input
@@ -63,11 +67,13 @@ RSSApp/
 │   ├── ArticleRowView.swift            # Single article row — thumbnail, title, snippet, date, read/unread styling
 │   ├── ArticleThumbnailView.swift     # Article thumbnail display — loads cached JPEG from disk, fallback photo placeholder
 │   ├── ArticleSummaryView.swift        # Extracted article summary sheet — extracted content + discuss
-│   ├── ContentView.swift               # Root view — creates SwiftDataFeedPersistenceService from modelContext, hosts FeedListView
+│   ├── ContentView.swift               # Root view — creates SwiftDataFeedPersistenceService from modelContext, hosts HomeView
 │   ├── FeedIconView.swift              # Feed icon display — loads cached PNG from disk, fallback globe placeholder
 │   ├── FeedListView.swift              # Subscribed feed list — NavigationStack root with add/remove, settings gear, unread badges
+│   ├── HomeView.swift                  # Home screen — NavigationStack root with All Articles, Unread Articles, All Feeds rows
 │   ├── FeedRowView.swift               # Single feed row — icon, title, description, unread count badge
-│   └── SettingsView.swift              # Top-level settings page with NavigationLink rows pushing API Key and Import/Export sub-screens
+│   ├── SettingsView.swift              # Top-level settings page with NavigationLink rows pushing API Key and Import/Export sub-screens
+│   └── UnreadArticlesView.swift        # Filtered list of unread articles across all feeds
 └── Resources/
     ├── domSerializer.js                # Bundled DOM serializer — walks DOM tree, emits JSON for Swift extraction
     └── Assets.xcassets/                # App icons and image assets
@@ -97,6 +103,7 @@ RSSAppTests/
 ├── Models/
 │   ├── ArticleTests.swift              # Article creation, identity, hashable
 │   ├── DOMNodeTests.swift              # DOMNode accessors, text/element queries, tree traversal
+│   ├── HomeGroupTests.swift            # HomeGroup enum cases, IDs, properties, Hashable conformance
 │   └── SubscribedFeedTests.swift       # updatingMetadata preserves identity, does not mutate
 ├── Services/
 │   ├── ArticleThumbnailServiceTests.swift # Thumbnail cache miss, delete safety, filename hashing
@@ -107,7 +114,7 @@ RSSAppTests/
 │   ├── DOMSerializerTests.swift        # WKWebView integration — JS serialization fidelity
 │   ├── ExtractionPipelineTests.swift   # Full pipeline: HTML → WKWebView serialize → Swift extract
 │   ├── FeedIconServiceTests.swift      # Icon resolution, caching, HTMLUtilities icon extraction
-│   ├── FeedPersistenceServiceTests.swift # SwiftData CRUD, upsert, read/unread, content cache, cascade delete
+│   ├── FeedPersistenceServiceTests.swift # SwiftData CRUD, upsert, read/unread, cross-feed queries, content cache, cascade delete
 │   ├── FeedStorageServiceTests.swift   # Save/load roundtrip, add/remove, empty state (legacy UserDefaults)
 │   ├── HTMLUtilitiesTests.swift        # Tag stripping, entity decoding, image extraction, og:image extraction
 │   ├── UserDefaultsMigrationTests.swift # Migration from UserDefaults to SwiftData, idempotency, ID preservation
@@ -122,10 +129,11 @@ RSSAppTests/
 │   ├── ArticleReaderViewModelTests.swift   # ArticleSummaryViewModel pre-extraction state tests
 │   ├── DiscussionViewModelTests.swift      # Message flow, streaming, no-key behavior
 │   ├── FeedListViewModelTests.swift        # Load, remove by object, remove by IndexSet
-│   └── FeedViewModelTests.swift            # Load success/failure, state transitions
+│   ├── FeedViewModelTests.swift            # Load success/failure, state transitions
+│   └── HomeViewModelTests.swift            # Unread count, cross-feed article queries, read/unread status
 ```
 
-**Total: 56 source files + 1 resource, 42 test source files + 1 fixture.**
+**Total: 62 source files + 1 resource, 44 test source files + 1 fixture.**
 
 ## Component Map
 
@@ -137,7 +145,7 @@ RSSAppTests/
 
 ### Models
 
-**Files:** `Article.swift`, `ArticleContent.swift`, `ChatMessage.swift`, `DOMNode.swift`, `ModelConversion.swift`, `OPMLFeedEntry.swift`, `OPMLImportResult.swift`, `PersistentArticle.swift`, `PersistentArticleContent.swift`, `PersistentFeed.swift`, `RSSFeed.swift`, `SubscribedFeed.swift`
+**Files:** `Article.swift`, `ArticleContent.swift`, `ChatMessage.swift`, `DOMNode.swift`, `HomeGroup.swift`, `ModelConversion.swift`, `OPMLFeedEntry.swift`, `OPMLImportResult.swift`, `PersistentArticle.swift`, `PersistentArticleContent.swift`, `PersistentFeed.swift`, `RSSFeed.swift`, `SubscribedFeed.swift`
 
 **SwiftData persistence models** — Three `@Model` classes form the persistence layer with relationships:
 
@@ -166,6 +174,8 @@ RSSAppTests/
 `DOMNode.swift` defines `SerializedDOM` (top-level page representation with title, URL, lang, meta tags, and body tree) and `DOMNode` (recursive tree node with tag name, attributes, visibility flag, and children). Both are `Codable` and `Sendable` value types. `CandidateScorer` internally wraps nodes in a reference-type `NodeWrapper` to add parent pointers during scoring.
 
 `OPMLFeedEntry` is an intermediate type for parsed OPML feed entries — title, feed URL, optional site URL, and description. Decoupled from persistence because OPML data lacks `id` and `addedDate`.
+
+`HomeGroup` is an enum representing the fixed group types on the Home screen: `.allArticles`, `.unreadArticles`, `.allFeeds`. Conforms to `Hashable`, `Identifiable`, and `CaseIterable`. Each case provides a `title`, `systemImage`, and stable `id`. The enum-based approach accommodates future user-created groups by adding new cases with associated values.
 
 `OPMLImportResult` communicates import outcome to the UI — counts of added, skipped, and total feeds in the file.
 
@@ -209,7 +219,7 @@ RSSAppTests/
 
 ### ViewModels
 
-**Files:** `AddFeedViewModel.swift`, `ArticleSummaryViewModel.swift`, `DiscussionViewModel.swift`, `EditFeedViewModel.swift`, `FeedListViewModel.swift`, `FeedViewModel.swift`
+**Files:** `AddFeedViewModel.swift`, `ArticleSummaryViewModel.swift`, `DiscussionViewModel.swift`, `EditFeedViewModel.swift`, `FeedListViewModel.swift`, `FeedViewModel.swift`, `HomeViewModel.swift`
 
 All view models are `@MainActor @Observable`.
 
@@ -223,15 +233,25 @@ All view models are `@MainActor @Observable`.
 
 `ArticleSummaryViewModel` drives the article summary/extraction flow. Its `State` enum (`idle` / `extracting` / `ready(ArticleContent)` / `failed(String)`) reflects the extraction lifecycle. Stores `extractedContent` for use by the discussion sheet. Accepts an `ArticleExtracting` dependency for testability.
 
+`HomeViewModel` manages the Home screen state. Provides `loadUnreadCount()` for the total unread badge, `allArticles()` and `unreadArticles()` for cross-feed article lists, and `markAsRead(_:)` / `toggleReadStatus(_:)` for read/unread tracking that updates the unread count. Accepts `FeedPersisting` dependency for testability.
+
 `DiscussionViewModel` manages the chat session. `sendMessage()` appends the user turn, appends an empty assistant placeholder, then streams Claude API response chunks into `messages[lastIndex].content`. Reads the API key from `KeychainServicing`. Accepts both `ClaudeAPIServicing` and `KeychainServicing` dependencies for testability.
 
 ### Views
 
-**Files:** `ActivityShareView.swift`, `AddFeedView.swift`, `APIKeySettingsView.swift`, `ArticleDiscussionView.swift`, `ArticleListView.swift`, `ArticleReaderView.swift`, `ArticleReaderWebView.swift`, `ArticleRowView.swift`, `ArticleSummaryView.swift`, `ArticleThumbnailView.swift`, `ContentView.swift`, `FeedIconView.swift`, `FeedListView.swift`, `FeedRowView.swift`, `SettingsView.swift`
+**Files:** `ActivityShareView.swift`, `AddFeedView.swift`, `AllArticlesView.swift`, `APIKeySettingsView.swift`, `ArticleDiscussionView.swift`, `ArticleListView.swift`, `ArticleReaderView.swift`, `ArticleReaderWebView.swift`, `ArticleRowView.swift`, `ArticleSummaryView.swift`, `ArticleThumbnailView.swift`, `ContentView.swift`, `CrossFeedArticleRowView.swift`, `EditFeedView.swift`, `FeedIconView.swift`, `FeedListView.swift`, `FeedRowView.swift`, `HomeView.swift`, `SettingsView.swift`, `UnreadArticlesView.swift`
 
-`ContentView` creates a `SwiftDataFeedPersistenceService` from the `@Environment(\.modelContext)` and passes it to `FeedListView`.
+`ContentView` creates a `SwiftDataFeedPersistenceService` from the `@Environment(\.modelContext)` and passes it to `HomeView`.
 
-`FeedListView` is the `NavigationStack` root. Accepts a `FeedPersisting` instance and creates `FeedListViewModel`. Shows the list of subscribed feeds using `FeedRowView` rows with `NavigationLink(value: PersistentFeed.id)`. Empty state shows a `ContentUnavailableView` prompting the user to add a feed. Toolbar has add (+) and a settings gear icon that pushes `SettingsView` via NavigationStack. Uses `.navigationDestination(for: UUID.self)` to push `ArticleListView` with a `FeedViewModel` for the selected feed. Supports swipe-to-delete, swipe-to-edit, and pull-to-refresh to update feed metadata and upsert articles. Passes the persistence service to `AddFeedView` and `EditFeedView`.
+`HomeView` is the `NavigationStack` root and the app's launch screen. Shows three fixed `HomeGroup` rows: All Articles, Unread Articles (with unread count badge), and All Feeds. Uses `NavigationLink(value: HomeGroup)` with `.navigationDestination(for: HomeGroup.self)` to push `AllArticlesView`, `UnreadArticlesView`, or `FeedListView` respectively. Creates `HomeViewModel` for unread count tracking.
+
+`AllArticlesView` displays a flat chronological list of every article across all feeds, sorted by publish date descending. Uses `CrossFeedArticleRowView` for rows. Supports swipe-to-toggle read/unread and tap to open `ArticleReaderView` via `.fullScreenCover`. Updates `HomeViewModel` unread count on disappear.
+
+`UnreadArticlesView` displays a filtered list of unread articles across all feeds. Same layout as `AllArticlesView` but articles disappear when marked as read. Shows "All Caught Up" empty state when no unread articles remain.
+
+`CrossFeedArticleRowView` is the article row used in cross-feed lists. Extends `ArticleRowView`'s layout with a feed name label (text only) so the user can identify the source feed, along with a relative date separated by a middle dot.
+
+`FeedListView` is the `NavigationStack` root for the feed list (pushed from `HomeView` via the All Feeds group). Accepts a `FeedPersisting` instance and creates `FeedListViewModel`. Shows the list of subscribed feeds using `FeedRowView` rows with `NavigationLink(value: PersistentFeed.id)`. Empty state shows a `ContentUnavailableView` prompting the user to add a feed. Toolbar has add (+) and a settings gear icon that pushes `SettingsView` via NavigationStack. Uses `.navigationDestination(for: UUID.self)` to push `ArticleListView` with a `FeedViewModel` for the selected feed. Supports swipe-to-delete, swipe-to-edit, and pull-to-refresh to update feed metadata and upsert articles. Passes the persistence service to `AddFeedView` and `EditFeedView`.
 
 `ActivityShareView` is a `UIViewControllerRepresentable` wrapping `UIActivityViewController` for sharing exported OPML files.
 
@@ -266,53 +286,66 @@ RSSAppApp (@main)
     └── WindowGroup (.modelContainer)
         └── ContentView
             ├── @Environment(\.modelContext) → SwiftDataFeedPersistenceService
-            └── FeedListView(persistence:)
-                ├── @State FeedListViewModel(persistence:)
-                │   ├── SwiftDataFeedPersistenceService (FeedPersisting protocol)
-                │   │   └── ModelContext → SwiftData → [PersistentFeed], [PersistentArticle], ...
-                │   └── FeedFetchingService (FeedFetching protocol) ← pull-to-refresh / post-import metadata refresh
+            └── HomeView(persistence:)
+                ├── @State HomeViewModel(persistence:)
+                │   └── FeedPersisting → totalUnreadCount, allArticles, allUnreadArticles, markAsRead/toggle
                 ├── NavigationStack
-                │   ├── Empty → ContentUnavailableView + "Add Feed" button
-                │   └── List → FeedRowView (title, description, unread count badge)
-                │       └── NavigationLink(value: PersistentFeed.id)
-                │           └── .navigationDestination → ArticleListView
-                │               ├── FeedViewModel(feed:, persistence:)
-                │               │   ├── FeedPersisting → cached [PersistentArticle] (shown immediately)
-                │               │   ├── FeedFetchingService → network fetch → upsert to database
-                │               │   ├── articles: [PersistentArticle]
-                │               │   ├── markAsRead / toggleReadStatus
-                │               │   ├── feedTitle: String
-                │               │   ├── isLoading: Bool (only when no cached articles)
-                │               │   └── errorMessage: String? (only when no cached articles)
-                │               ├── Loading → ProgressView (only if no cached data)
-                │               ├── Error → ContentUnavailableView + Retry (only if no cached data)
-                │               └── Content → List
-                │                   ├── Swipe actions: mark read/unread
-                │                   └── ArticleRowView (thumbnail, title, snippet, date, read/unread styling)
-                │                       └── tap → markAsRead → fullScreenCover → ArticleReaderView
-                │                           ├── ArticleReaderWebView (visible WKWebView)
-                │                           │   └── Coordinator (WKNavigationDelegate + WKScriptMessageHandler)
-                │                           │       ├── Injects domSerializer.js at document end
-                │                           │       ├── Early extraction via message handler → ReaderExtractionState
-                │                           │       └── Fallback extraction via didFinish + evaluateJavaScript
-                │                           │           └── Native extraction pipeline:
-                │                           │               ├── ContentExtractor (orchestrator)
-                │                           │               ├── MetadataExtractor → title, byline
-                │                           │               ├── CandidateScorer → best content node
-                │                           │               └── ContentAssembler → htmlContent + textContent
-                │                           └── sparkles button (AI icon)
-                │                               ├── API key configured → sheet → ArticleSummaryView
-                │                               │   ├── ArticleSummaryViewModel
-                │                               │   │   └── ArticleExtractionService (hidden WKWebView)
-                │                               │   │       └── Same native extraction pipeline
-                │                               │   └── discuss button → sheet → ArticleDiscussionView
-                │                               │       └── DiscussionViewModel
-                │                               │           ├── KeychainService → Anthropic API key
-                │                               │           └── ClaudeAPIService → URLSession SSE stream
-                │                               └── No API key → sheet → APIKeySettingsView
-                ├── gear button → push → SettingsView
-                │   ├── API Key row → push → APIKeySettingsView
-                │   └── Import / Export row → push → ImportExportView
+                │   └── List(HomeGroup.allCases) → HomeRowView (title, icon, unread badge)
+                │       └── NavigationLink(value: HomeGroup)
+                │           └── .navigationDestination(for: HomeGroup.self)
+                │               ├── .allArticles → AllArticlesView
+                │               │   └── CrossFeedArticleRowView (thumbnail, title, snippet, feed name, date)
+                │               │       └── tap → markAsRead → fullScreenCover → ArticleReaderView
+                │               ├── .unreadArticles → UnreadArticlesView
+                │               │   └── CrossFeedArticleRowView (same as above, filtered to unread)
+                │               │       └── tap → markAsRead → fullScreenCover → ArticleReaderView
+                │               └── .allFeeds → FeedListView(persistence:)
+                │                   ├── @State FeedListViewModel(persistence:)
+                │                   │   ├── SwiftDataFeedPersistenceService (FeedPersisting protocol)
+                │                   │   │   └── ModelContext → SwiftData → [PersistentFeed], [PersistentArticle], ...
+                │                   │   └── FeedFetchingService (FeedFetching protocol) ← pull-to-refresh / post-import metadata refresh
+                │                   ├── NavigationStack
+                │                   │   ├── Empty → ContentUnavailableView + "Add Feed" button
+                │                   │   └── List → FeedRowView (title, description, unread count badge)
+                │                   │       └── NavigationLink(value: PersistentFeed.id)
+                │                   │           └── .navigationDestination → ArticleListView
+                │                   │               ├── FeedViewModel(feed:, persistence:)
+                │                   │               │   ├── FeedPersisting → cached [PersistentArticle] (shown immediately)
+                │                   │               │   ├── FeedFetchingService → network fetch → upsert to database
+                │                   │               │   ├── articles: [PersistentArticle]
+                │                   │               │   ├── markAsRead / toggleReadStatus
+                │                   │               │   ├── feedTitle: String
+                │                   │               │   ├── isLoading: Bool (only when no cached articles)
+                │                   │               │   └── errorMessage: String? (only when no cached articles)
+                │                   │               ├── Loading → ProgressView (only if no cached data)
+                │                   │               ├── Error → ContentUnavailableView + Retry (only if no cached data)
+                │                   │               └── Content → List
+                │                   │                   ├── Swipe actions: mark read/unread
+                │                   │                   └── ArticleRowView (thumbnail, title, snippet, date, read/unread styling)
+                │                   │                       └── tap → markAsRead → fullScreenCover → ArticleReaderView
+                │                   │                           ├── ArticleReaderWebView (visible WKWebView)
+                │                   │                           │   └── Coordinator (WKNavigationDelegate + WKScriptMessageHandler)
+                │                   │                           │       ├── Injects domSerializer.js at document end
+                │                   │                           │       ├── Early extraction via message handler → ReaderExtractionState
+                │                   │                           │       └── Fallback extraction via didFinish + evaluateJavaScript
+                │                   │                           │           └── Native extraction pipeline:
+                │                   │                           │               ├── ContentExtractor (orchestrator)
+                │                   │                           │               ├── MetadataExtractor → title, byline
+                │                   │                           │               ├── CandidateScorer → best content node
+                │                   │                           │               └── ContentAssembler → htmlContent + textContent
+                │                   │                           └── sparkles button (AI icon)
+                │                   │                               ├── API key configured → sheet → ArticleSummaryView
+                │                   │                               │   ├── ArticleSummaryViewModel
+                │                   │                               │   │   └── ArticleExtractionService (hidden WKWebView)
+                │                   │                               │   │       └── Same native extraction pipeline
+                │                   │                               │   └── discuss button → sheet → ArticleDiscussionView
+                │                   │                               │       └── DiscussionViewModel
+                │                   │                               │           ├── KeychainService → Anthropic API key
+                │                   │                               │           └── ClaudeAPIService → URLSession SSE stream
+                │                   │                               └── No API key → sheet → APIKeySettingsView
+                │                   ├── gear button → push → SettingsView
+                │                   │   ├── API Key row → push → APIKeySettingsView
+                │                   │   └── Import / Export row → push → ImportExportView
                 │       ├── Import Feeds → .fileImporter
                 │       │   └── viewModel.importOPML(from:)
                 │       │       ├── OPMLService.parseOPML → [OPMLFeedEntry]
@@ -361,6 +394,9 @@ RSSAppApp (@main)
 | OPML import accepts outlines without `type="rss"` | Real-world OPML files often omit the type attribute; any outline with a valid `xmlUrl` is treated as a feed |
 | Feed title fetched at add-time | Validates the URL is a real feed; better UX than requiring manual title entry |
 | `FeedViewModel` with cache-first loading | Shows cached articles immediately from SwiftData, then fetches from network and upserts; enables offline browsing |
+| Home screen as app root | Provides meta-groups (All Articles, Unread Articles, All Feeds) above the feed list; pushes `FeedListView` via NavigationStack rather than replacing it |
+| `HomeGroup` enum for group types | Three fixed cases with `CaseIterable`; enum-based approach accommodates future user-created groups (folders, tags) by adding new cases |
+| Cross-feed article queries in `FeedPersisting` | `allArticles()`, `allUnreadArticles()`, `totalUnreadCount()` are protocol methods so they work with both SwiftData and mock implementations |
 
 ## Test Coverage
 
@@ -384,7 +420,9 @@ RSSAppApp (@main)
 | ArticleSummaryViewModel | ArticleReaderViewModelTests.swift | Pre-extracted content availability, extraction skip behavior, idle state |
 | DiscussionViewModel | DiscussionViewModelTests.swift | hasAPIKey reflects keychain, send appends messages, chunks accumulate, input cleared, API error → error content, empty input ignored, no-key sets errorMessage |
 | FeedViewModel | FeedViewModelTests.swift | Load success/failure, isLoading state, feedTitle default/update/unchanged on failure |
-| FeedPersistenceService | FeedPersistenceServiceTests.swift | Feed CRUD (add, delete, update metadata/error/URL/cache headers, feedExists), article upsert (insert new, skip existing preserving read status), read/unread toggle, unread count, content cache (store, update, nil), cascade delete (feed → articles → content) |
+| HomeGroup | HomeGroupTests.swift | All cases count and order, unique IDs, non-empty titles/systemImages, per-case property values, Hashable conformance |
+| HomeViewModel | HomeViewModelTests.swift | Unread count (success, error, empty), all articles (sorted, multi-feed, error), unread articles (filter, all read, error), markAsRead (updates count, no-op for read, error), toggleReadStatus (to read, to unread, error) |
+| FeedPersistenceService | FeedPersistenceServiceTests.swift | Feed CRUD (add, delete, update metadata/error/URL/cache headers, feedExists), article upsert (insert new, skip existing preserving read status), read/unread toggle, unread count, cross-feed queries (allArticles sorted, allUnreadArticles filtered, totalUnreadCount across feeds), content cache (store, update, nil), cascade delete (feed → articles → content) |
 | UserDefaultsMigrationService | UserDefaultsMigrationTests.swift | Migrate feeds, clear UserDefaults, migration flag, skip when migrated, empty defaults, preserve IDs |
 | FeedStorageService | FeedStorageServiceTests.swift | Save/load roundtrip, add, remove, empty state, overwrite (legacy UserDefaults) |
 | FeedURLValidator | FeedURLValidatorTests.swift | Valid HTTP/HTTPS, scheme prepend, empty/whitespace, non-HTTP schemes (ftp, feed), query parameters, whitespace trimming, scheme-only no host |
