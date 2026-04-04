@@ -20,7 +20,7 @@ struct ArticleReaderView: View {
 
     /// Whether content extraction is still in progress (API key present but content not yet available).
     private var isExtracting: Bool {
-        hasAPIKey && extractionState.content == nil
+        hasAPIKey && extractionState.content == nil && article.link != nil
     }
 
     var body: some View {
