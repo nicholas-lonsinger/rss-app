@@ -76,3 +76,34 @@ struct KeychainService: KeychainServicing {
         }
     }
 }
+
+// MARK: - API Key Convenience
+
+extension KeychainServicing {
+
+    /// The Keychain account identifier for the Anthropic API key.
+    static var apiKeyAccount: String { "anthropic-api-key" }
+
+    /// Whether a non-empty API key is currently stored in the Keychain.
+    ///
+    /// Returns `false` both when no key is stored and when a Keychain read
+    /// error occurs (the underlying `load(for:)` returns `nil` on error).
+    var hasAPIKey: Bool {
+        loadAPIKey()?.isEmpty == false
+    }
+
+    /// Loads the stored API key, if any.
+    func loadAPIKey() -> String? {
+        load(for: Self.apiKeyAccount)
+    }
+
+    /// Saves the given API key to the Keychain.
+    func saveAPIKey(_ value: String) throws {
+        try save(value, for: Self.apiKeyAccount)
+    }
+
+    /// Deletes the stored API key from the Keychain.
+    func deleteAPIKey() {
+        delete(for: Self.apiKeyAccount)
+    }
+}

@@ -25,7 +25,9 @@ struct DiscussionViewModelTests {
 
         let keychainMock = MockKeychainService()
         if hasKey {
-            try? keychainMock.save("sk-test", for: "anthropic-api-key")
+            // RATIONALE: MockKeychainService.save never throws, so force-try is
+            // safe and ensures the test fails loudly if that assumption changes.
+            try! keychainMock.saveAPIKey("sk-test")
         }
 
         return DiscussionViewModel(
