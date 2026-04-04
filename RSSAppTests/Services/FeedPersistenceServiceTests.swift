@@ -246,6 +246,83 @@ struct FeedPersistenceServiceTests {
         #expect(try service.unreadCount(for: feed) == 2)
     }
 
+    // MARK: - Cross-Feed Article Queries
+
+    @Test("allArticles returns articles from all feeds sorted by date descending")
+    @MainActor
+    func allArticlesAcrossFeeds() throws {
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed1 = TestFixtures.makePersistentFeed(title: "Feed 1", feedURL: URL(string: "https://one.com/feed")!)
+        let feed2 = TestFixtures.makePersistentFeed(title: "Feed 2", feedURL: URL(string: "https://two.com/feed")!)
+        try service.addFeed(feed1)
+        try service.addFeed(feed2)
+
+        try service.upsertArticles([
+            TestFixtures.makeArticle(id: "a1", publishedDate: Date(timeIntervalSince1970: 1_000_000)),
+        ], for: feed1)
+        try service.upsertArticles([
+            TestFixtures.makeArticle(id: "a2", publishedDate: Date(timeIntervalSince1970: 2_000_000)),
+        ], for: feed2)
+        try service.save()
+
+        let all = try service.allArticles()
+        #expect(all.count == 2)
+        #expect(all[0].articleID == "a2")
+        #expect(all[1].articleID == "a1")
+    }
+
+    @Test("allUnreadArticles returns only unread articles across feeds")
+    @MainActor
+    func allUnreadArticlesFilters() throws {
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+
+        try service.upsertArticles([
+            TestFixtures.makeArticle(id: "a1", publishedDate: Date(timeIntervalSince1970: 2_000_000)),
+            TestFixtures.makeArticle(id: "a2", publishedDate: Date(timeIntervalSince1970: 1_000_000)),
+        ], for: feed)
+        try service.save()
+
+        // articles(for:) sorts by publishedDate descending, so a1 is first
+        let articles = try service.articles(for: feed)
+        #expect(articles[0].articleID == "a1")
+        try service.markArticleRead(articles[0], isRead: true)
+
+        let unread = try service.allUnreadArticles()
+        #expect(unread.count == 1)
+        #expect(unread[0].articleID == "a2")
+    }
+
+    @Test("totalUnreadCount returns sum across all feeds")
+    @MainActor
+    func totalUnreadCountAcrossFeeds() throws {
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed1 = TestFixtures.makePersistentFeed(title: "Feed 1", feedURL: URL(string: "https://one.com/feed")!)
+        let feed2 = TestFixtures.makePersistentFeed(title: "Feed 2", feedURL: URL(string: "https://two.com/feed")!)
+        try service.addFeed(feed1)
+        try service.addFeed(feed2)
+
+        try service.upsertArticles([
+            TestFixtures.makeArticle(id: "a1"),
+            TestFixtures.makeArticle(id: "a2"),
+        ], for: feed1)
+        try service.upsertArticles([
+            TestFixtures.makeArticle(id: "a3"),
+        ], for: feed2)
+        try service.save()
+
+        #expect(try service.totalUnreadCount() == 3)
+
+        let articles = try service.articles(for: feed1)
+        try service.markArticleRead(articles[0], isRead: true)
+
+        #expect(try service.totalUnreadCount() == 2)
+    }
+
     // MARK: - Content Cache
 
     @Test("cacheContent stores and retrieves article content")

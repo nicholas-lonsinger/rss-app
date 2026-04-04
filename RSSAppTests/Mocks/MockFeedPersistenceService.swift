@@ -83,6 +83,21 @@ final class MockFeedPersistenceService: FeedPersisting {
         return articlesByFeedID[feed.id] ?? []
     }
 
+    func allArticles() throws -> [PersistentArticle] {
+        if let error = errorToThrow { throw error }
+        return articlesByFeedID.values
+            .flatMap { $0 }
+            .sorted { ($0.publishedDate ?? .distantPast) > ($1.publishedDate ?? .distantPast) }
+    }
+
+    func allUnreadArticles() throws -> [PersistentArticle] {
+        if let error = errorToThrow { throw error }
+        return articlesByFeedID.values
+            .flatMap { $0 }
+            .filter { !$0.isRead }
+            .sorted { ($0.publishedDate ?? .distantPast) > ($1.publishedDate ?? .distantPast) }
+    }
+
     func upsertArticles(_ articles: [Article], for feed: PersistentFeed) throws {
         if let error = errorToThrow { throw error }
         let existingIDs = Set((articlesByFeedID[feed.id] ?? []).map(\.articleID))
@@ -104,6 +119,11 @@ final class MockFeedPersistenceService: FeedPersisting {
     func unreadCount(for feed: PersistentFeed) throws -> Int {
         if let error = unreadCountError ?? errorToThrow { throw error }
         return (articlesByFeedID[feed.id] ?? []).filter { !$0.isRead }.count
+    }
+
+    func totalUnreadCount() throws -> Int {
+        if let error = unreadCountError ?? errorToThrow { throw error }
+        return articlesByFeedID.values.flatMap { $0 }.filter { !$0.isRead }.count
     }
 
     // MARK: - Content Cache
