@@ -75,7 +75,7 @@ struct APIKeySettingsView: View {
         )) {
             Button("OK", role: .cancel) {}
         } message: {
-            Text(saveError ?? "An unknown error occurred while saving to the Keychain.")
+            Text(saveError ?? "")
         }
     }
 
@@ -153,14 +153,17 @@ struct APIKeySettingsView: View {
 
     private func saveKey() {
         let trimmed = keyInput.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, !trimmed.allSatisfy({ $0 == "•" }) else { return }
+        guard !trimmed.isEmpty, !trimmed.allSatisfy({ $0 == "•" }) else {
+            Self.logger.debug("saveKey skipped: input is empty or masked placeholder")
+            return
+        }
         do {
             try keychainService.saveAPIKey(trimmed)
             isSaved = true
             Self.logger.notice("API key saved to Keychain")
         } catch {
-            saveError = error.localizedDescription
-            Self.logger.error("Failed to save API key to Keychain: \(error.localizedDescription, privacy: .public)")
+            saveError = "Unable to save your API key to the Keychain. Please try again."
+            Self.logger.error("Failed to save API key to Keychain: \(error, privacy: .public)")
         }
     }
 
