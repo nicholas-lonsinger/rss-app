@@ -56,6 +56,7 @@ final class DiscussionViewModel {
         } catch {
             errorMessage = "Unable to read your API key from the Keychain."
             Self.logger.error("Keychain load failed during sendMessage: \(error, privacy: .public)")
+            updateAPIKeyState()
             return
         }
 

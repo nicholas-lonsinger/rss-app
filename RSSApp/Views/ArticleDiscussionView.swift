@@ -111,6 +111,9 @@ struct ArticleDiscussionView: View {
             Label("Keychain Error", systemImage: "exclamationmark.lock")
         } description: {
             Text(message)
+        } actions: {
+            Button("Try Again") { viewModel.refreshAPIKeyState() }
+                .buttonStyle(.bordered)
         }
     }
 

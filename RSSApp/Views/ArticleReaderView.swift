@@ -50,10 +50,20 @@ struct ArticleReaderView: View {
                     }
                 }
                 .onAppear {
-                    hasAPIKey = (try? keychainService.hasAPIKey()) ?? false
+                    do {
+                        hasAPIKey = try keychainService.hasAPIKey()
+                    } catch {
+                        hasAPIKey = false
+                        Self.logger.error("Keychain read failed in onAppear: \(error, privacy: .public)")
+                    }
                 }
                 .sheet(isPresented: $showAPIKeySettings, onDismiss: {
-                    hasAPIKey = (try? keychainService.hasAPIKey()) ?? false
+                    do {
+                        hasAPIKey = try keychainService.hasAPIKey()
+                    } catch {
+                        hasAPIKey = false
+                        Self.logger.error("Keychain read failed on settings dismiss: \(error, privacy: .public)")
+                    }
                 }) {
                     NavigationStack {
                         APIKeySettingsView()

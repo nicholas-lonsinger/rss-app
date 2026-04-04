@@ -56,8 +56,9 @@ struct APIKeySettingsView: View {
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
             do {
-                hasAPIKey = try keychainService.hasAPIKey()
-                if let existing = try keychainService.loadAPIKey() {
+                let existing = try keychainService.loadAPIKey()
+                hasAPIKey = existing?.isEmpty == false
+                if let existing {
                     // Show a placeholder so the user knows a key is set, without revealing it.
                     keyInput = String(repeating: "•", count: min(existing.count, 20))
                 }
