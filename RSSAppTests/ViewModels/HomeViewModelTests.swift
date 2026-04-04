@@ -443,6 +443,7 @@ struct HomeViewModelTests {
         #expect(result == false)
         #expect(viewModel.errorMessage != nil)
         #expect(viewModel.unreadCount == 2)
+        #expect(article.isRead == false)
     }
 
     @Test("toggleReadStatus toggles from unread to read")
@@ -502,6 +503,7 @@ struct HomeViewModelTests {
 
         #expect(viewModel.errorMessage != nil)
         #expect(viewModel.unreadCount == 2)
+        #expect(article.isRead == false)
     }
 
     // MARK: - Clear Error
