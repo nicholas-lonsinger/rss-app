@@ -33,7 +33,6 @@ struct AllArticlesView: View {
                     .swipeActions(edge: .leading) {
                         Button {
                             homeViewModel.toggleReadStatus(article)
-                            homeViewModel.loadAllArticles()
                         } label: {
                             Label(
                                 article.isRead ? "Unread" : "Read",
@@ -52,9 +51,7 @@ struct AllArticlesView: View {
             }
         }
         .navigationTitle("All Articles")
-        .fullScreenCover(item: $selectedArticle, onDismiss: {
-            homeViewModel.loadAllArticles()
-        }) { article in
+        .fullScreenCover(item: $selectedArticle) { article in
             ArticleReaderView(article: article, persistence: persistence)
         }
         .alert("Error", isPresented: errorAlertBinding) {

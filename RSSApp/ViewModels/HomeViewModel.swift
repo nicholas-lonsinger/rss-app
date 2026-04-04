@@ -45,11 +45,16 @@ final class HomeViewModel {
 
     // MARK: - All Articles (paginated)
 
-    /// Loads the first page of all articles, resetting pagination state.
+    /// Resets pagination and loads the first page of all articles.
+    /// On failure, preserves the previously loaded list to avoid flashing an empty state.
     func loadAllArticles() {
+        let previous = allArticlesList
         allArticlesList = []
         hasMoreAllArticles = true
         loadMoreAllArticles()
+        if allArticlesList.isEmpty && errorMessage != nil {
+            allArticlesList = previous
+        }
     }
 
     /// Loads the next page of all articles and appends to the existing list.
@@ -60,10 +65,13 @@ final class HomeViewModel {
                 offset: allArticlesList.count,
                 limit: Self.pageSize
             )
-            allArticlesList.append(contentsOf: page)
+            let existingIDs = Set(allArticlesList.map(\.articleID))
+            let newItems = page.filter { !existingIDs.contains($0.articleID) }
+            allArticlesList.append(contentsOf: newItems)
             hasMoreAllArticles = page.count == Self.pageSize
-            Self.logger.debug("Loaded page of \(page.count, privacy: .public) all articles (total: \(self.allArticlesList.count, privacy: .public))")
+            Self.logger.debug("Loaded page of \(page.count, privacy: .public) all articles (\(newItems.count, privacy: .public) new, total: \(self.allArticlesList.count, privacy: .public))")
         } catch {
+            hasMoreAllArticles = false
             errorMessage = "Unable to load all articles."
             Self.logger.error("Failed to load all articles page: \(error, privacy: .public)")
         }
@@ -71,11 +79,16 @@ final class HomeViewModel {
 
     // MARK: - Unread Articles (paginated)
 
-    /// Loads the first page of unread articles, resetting pagination state.
+    /// Resets pagination and loads the first page of unread articles.
+    /// On failure, preserves the previously loaded list to avoid flashing an empty state.
     func loadUnreadArticles() {
+        let previous = unreadArticlesList
         unreadArticlesList = []
         hasMoreUnreadArticles = true
         loadMoreUnreadArticles()
+        if unreadArticlesList.isEmpty && errorMessage != nil {
+            unreadArticlesList = previous
+        }
     }
 
     /// Loads the next page of unread articles and appends to the existing list.
@@ -86,38 +99,15 @@ final class HomeViewModel {
                 offset: unreadArticlesList.count,
                 limit: Self.pageSize
             )
-            unreadArticlesList.append(contentsOf: page)
+            let existingIDs = Set(unreadArticlesList.map(\.articleID))
+            let newItems = page.filter { !existingIDs.contains($0.articleID) }
+            unreadArticlesList.append(contentsOf: newItems)
             hasMoreUnreadArticles = page.count == Self.pageSize
-            Self.logger.debug("Loaded page of \(page.count, privacy: .public) unread articles (total: \(self.unreadArticlesList.count, privacy: .public))")
+            Self.logger.debug("Loaded page of \(page.count, privacy: .public) unread articles (\(newItems.count, privacy: .public) new, total: \(self.unreadArticlesList.count, privacy: .public))")
         } catch {
+            hasMoreUnreadArticles = false
             errorMessage = "Unable to load unread articles."
             Self.logger.error("Failed to load unread articles page: \(error, privacy: .public)")
-        }
-    }
-
-    // MARK: - Legacy non-paginated accessors (used by existing callers)
-
-    func allArticles() -> [PersistentArticle] {
-        do {
-            let articles = try persistence.allArticles()
-            Self.logger.debug("Loaded \(articles.count, privacy: .public) total articles")
-            return articles
-        } catch {
-            errorMessage = "Unable to load all articles."
-            Self.logger.error("Failed to load all articles: \(error, privacy: .public)")
-            return []
-        }
-    }
-
-    func unreadArticles() -> [PersistentArticle] {
-        do {
-            let articles = try persistence.allUnreadArticles()
-            Self.logger.debug("Loaded \(articles.count, privacy: .public) unread articles")
-            return articles
-        } catch {
-            errorMessage = "Unable to load unread articles."
-            Self.logger.error("Failed to load unread articles: \(error, privacy: .public)")
-            return []
         }
     }
 
@@ -134,6 +124,11 @@ final class HomeViewModel {
             Self.logger.error("Failed to mark article as read: \(error, privacy: .public)")
             return false
         }
+    }
+
+    /// Removes a specific article from the unread articles list (e.g., after marking it read).
+    func removeFromUnreadList(_ article: PersistentArticle) {
+        unreadArticlesList.removeAll { $0.articleID == article.articleID }
     }
 
     func toggleReadStatus(_ article: PersistentArticle) {

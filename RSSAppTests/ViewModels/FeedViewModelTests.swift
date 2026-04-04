@@ -222,9 +222,33 @@ struct FeedViewModelTests {
 
         // Now inject error for the next page load
         mockPersistence.errorToThrow = NSError(domain: "test", code: 1)
+        let articleCountBefore = viewModel.articles.count
         viewModel.loadMoreArticles()
 
         #expect(viewModel.errorMessage != nil)
+        #expect(viewModel.articles.count == articleCountBefore)
+        #expect(viewModel.hasMoreArticles == false)
+    }
+
+    @Test("loadFeed sets hasMoreArticles to false when cached articles fewer than page size")
+    @MainActor
+    func loadFeedCacheHasMoreArticlesFalse() async {
+        let feed = TestFixtures.makePersistentFeed(feedURL: URL(string: "https://example.com/feed")!)
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+        let cachedArticles = [
+            TestFixtures.makeArticle(id: "cached-1", title: "Cached Article"),
+        ]
+        try? mockPersistence.upsertArticles(cachedArticles, for: feed)
+
+        let mock = MockFeedFetchingService()
+        mock.errorToThrow = FeedFetchingError.invalidResponse(statusCode: 500)
+
+        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence)
+        await viewModel.loadFeed()
+
+        #expect(viewModel.articles.count == 1)
+        #expect(viewModel.hasMoreArticles == false)
     }
 
     // MARK: - Read Status

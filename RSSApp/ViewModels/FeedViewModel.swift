@@ -60,9 +60,10 @@ final class FeedViewModel {
                 try persistence.upsertArticles(result.feed.articles, for: feed)
                 try persistence.updateFeedCacheHeaders(feed, etag: result.etag, lastModified: result.lastModified)
                 try persistence.save()
-                // Reload first page after upsert
-                articles = try persistence.articles(for: feed, offset: 0, limit: Self.pageSize)
-                hasMoreArticles = articles.count == Self.pageSize
+                // Reload up to current scroll depth so the user doesn't lose their position
+                let reloadLimit = max(articles.count, Self.pageSize)
+                articles = try persistence.articles(for: feed, offset: 0, limit: reloadLimit)
+                hasMoreArticles = articles.count == reloadLimit
                 Self.logger.notice("Feed loaded: \(self.articles.count, privacy: .public) articles in first page")
             } else {
                 Self.logger.debug("Feed unchanged (304) for '\(self.feed.title, privacy: .public)'")
@@ -84,10 +85,13 @@ final class FeedViewModel {
                 offset: articles.count,
                 limit: Self.pageSize
             )
-            articles.append(contentsOf: page)
+            let existingIDs = Set(articles.map(\.articleID))
+            let newItems = page.filter { !existingIDs.contains($0.articleID) }
+            articles.append(contentsOf: newItems)
             hasMoreArticles = page.count == Self.pageSize
-            Self.logger.debug("Loaded page of \(page.count, privacy: .public) articles for feed (total: \(self.articles.count, privacy: .public))")
+            Self.logger.debug("Loaded page of \(page.count, privacy: .public) articles for feed (\(newItems.count, privacy: .public) new, total: \(self.articles.count, privacy: .public))")
         } catch {
+            hasMoreArticles = false
             errorMessage = "Unable to load more articles."
             Self.logger.error("Failed to load articles page: \(error, privacy: .public)")
         }

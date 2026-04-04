@@ -57,5 +57,19 @@ struct ArticleListView: View {
             ArticleReaderView(article: article, persistence: persistence)
         }
         .task { await viewModel.loadFeed() }
+        .alert("Error", isPresented: errorAlertBinding) {
+            Button("OK") { viewModel.errorMessage = nil }
+        } message: {
+            Text(viewModel.errorMessage ?? "")
+        }
+    }
+
+    // MARK: - Helpers
+
+    private var errorAlertBinding: Binding<Bool> {
+        Binding(
+            get: { viewModel.errorMessage != nil && !viewModel.articles.isEmpty },
+            set: { if !$0 { viewModel.errorMessage = nil } }
+        )
     }
 }

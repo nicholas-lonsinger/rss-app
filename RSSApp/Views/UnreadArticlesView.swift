@@ -21,6 +21,7 @@ struct UnreadArticlesView: View {
                     Button {
                         if homeViewModel.markAsRead(article) {
                             selectedArticle = article
+                            homeViewModel.removeFromUnreadList(article)
                         }
                     } label: {
                         CrossFeedArticleRowView(
@@ -33,7 +34,9 @@ struct UnreadArticlesView: View {
                     .swipeActions(edge: .leading) {
                         Button {
                             homeViewModel.toggleReadStatus(article)
-                            homeViewModel.loadUnreadArticles()
+                            if article.isRead {
+                                homeViewModel.removeFromUnreadList(article)
+                            }
                         } label: {
                             Label(
                                 article.isRead ? "Unread" : "Read",
@@ -52,9 +55,7 @@ struct UnreadArticlesView: View {
             }
         }
         .navigationTitle("Unread Articles")
-        .fullScreenCover(item: $selectedArticle, onDismiss: {
-            homeViewModel.loadUnreadArticles()
-        }) { article in
+        .fullScreenCover(item: $selectedArticle) { article in
             ArticleReaderView(article: article, persistence: persistence)
         }
         .alert("Error", isPresented: errorAlertBinding) {

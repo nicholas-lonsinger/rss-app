@@ -21,16 +21,26 @@ protocol FeedPersisting: Sendable {
 
     // MARK: Article operations
 
+    /// Returns all articles for a feed, sorted by published date descending (newest first).
     func articles(for feed: PersistentFeed) throws -> [PersistentArticle]
-    /// Returns articles for a feed with pagination, sorted by published date descending (newest first).
+    /// Returns a page of articles for a feed, sorted by published date descending (newest first).
+    /// - Parameters:
+    ///   - offset: Number of articles to skip from the beginning of the sorted result set.
+    ///   - limit: Maximum number of articles to return.
     func articles(for feed: PersistentFeed, offset: Int, limit: Int) throws -> [PersistentArticle]
     /// Returns all articles across all feeds, sorted by published date descending (newest first).
     func allArticles() throws -> [PersistentArticle]
-    /// Returns articles across all feeds with pagination, sorted by published date descending (newest first).
+    /// Returns a page of all articles across all feeds, sorted by published date descending (newest first).
+    /// - Parameters:
+    ///   - offset: Number of articles to skip from the beginning of the sorted result set.
+    ///   - limit: Maximum number of articles to return.
     func allArticles(offset: Int, limit: Int) throws -> [PersistentArticle]
     /// Returns all unread articles across all feeds, sorted by published date descending (newest first).
     func allUnreadArticles() throws -> [PersistentArticle]
-    /// Returns unread articles across all feeds with pagination, sorted by published date descending (newest first).
+    /// Returns a page of unread articles across all feeds, sorted by published date descending (newest first).
+    /// - Parameters:
+    ///   - offset: Number of articles to skip from the beginning of the sorted result set.
+    ///   - limit: Maximum number of articles to return.
     func allUnreadArticles(offset: Int, limit: Int) throws -> [PersistentArticle]
     func upsertArticles(_ articles: [Article], for feed: PersistentFeed) throws
     func markArticleRead(_ article: PersistentArticle, isRead: Bool) throws
