@@ -23,6 +23,15 @@ The `-derivedDataPath DerivedData` flag ensures build output goes to a determini
 
 Requires **iOS 26**, **Xcode 26**, and **Swift 6**. iPhone only (no iPad target).
 
+**Never run xcodebuild multiple times for the same purpose.** Each invocation takes minutes. Capture output once and parse the log file for different details afterward. Never re-run the same build or test command with different `grep`/`tail` filters. `xcodebuild test` implies a build, so a separate `build` step before `test` is only needed to isolate build failures.
+
+```bash
+# Capture once, parse many times
+LOGFILE=$(mktemp /tmp/xcodebuild.XXXXXX) && xcodebuild test ... 2>&1 | tee "$LOGFILE" | tail -30
+grep -E 'TEST.*FAILED|error:' "$LOGFILE"   # no re-run needed
+rm "$LOGFILE"                               # clean up when done
+```
+
 ## Architecture
 
 > Full directory structure, component map, data flow diagrams, design decisions, and test coverage details are in [ARCHITECTURE.md](ARCHITECTURE.md). Consult it before making structural changes. The summary below is a quick reference; if it conflicts with ARCHITECTURE.md, ARCHITECTURE.md is authoritative.
