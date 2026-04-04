@@ -30,6 +30,7 @@ final class DiscussionViewModel {
         self.claudeService = claudeService ?? ClaudeAPIService()
         self.keychainService = keychainService ?? KeychainService()
         self.hasAPIKey = self.keychainService.hasAPIKey
+        Self.logger.debug("Initialized with hasAPIKey=\(self.hasAPIKey, privacy: .public)")
     }
 
     /// Refreshes the cached API key presence from the Keychain.

@@ -64,6 +64,8 @@ struct ArticleReaderView: View {
                             }
                     }
                 }
+                // RATIONALE: ArticleSummaryView has no navigation path to API key settings,
+                // so no hasAPIKey cache refresh is needed on dismiss.
                 .sheet(isPresented: $showSummary) {
                     ArticleSummaryView(
                         article: article.toArticle(),

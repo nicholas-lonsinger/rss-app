@@ -44,8 +44,10 @@ struct APIKeySettingsView: View {
 
                 Button("Remove Key", role: .destructive) {
                     keychainService.deleteAPIKey()
-                    keyInput = ""
-                    hasAPIKey = false
+                    hasAPIKey = keychainService.hasAPIKey
+                    if !hasAPIKey {
+                        keyInput = ""
+                    }
                 }
                 .disabled(!hasAPIKey)
             }
