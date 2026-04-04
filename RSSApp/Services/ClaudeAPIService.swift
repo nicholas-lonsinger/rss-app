@@ -129,7 +129,7 @@ struct ClaudeAPIService: ClaudeAPIServicing {
         do {
             event = try JSONDecoder().decode(ClaudeStreamEvent.self, from: data)
         } catch {
-            Self.logger.warning("Failed to decode SSE JSON: \(error, privacy: .public)")
+            Self.logger.warning("Failed to decode SSE JSON: \(error, privacy: .public). Input: \(json, privacy: .private)")
             return nil
         }
 
