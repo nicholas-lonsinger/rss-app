@@ -20,73 +20,32 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Select Xcode
-        run: |
-          # Prefer Xcode 26; fall back to the latest available version
-          if [ -d "/Applications/Xcode_26.0.app" ]; then
-            sudo xcode-select -s /Applications/Xcode_26.0.app/Contents/Developer
-          elif [ -d "/Applications/Xcode_26.app" ]; then
-            sudo xcode-select -s /Applications/Xcode_26.app/Contents/Developer
-          else
-            echo "::warning::Xcode 26 not found, using default Xcode"
-          fi
-          xcodebuild -version
-
-      - name: Resolve simulator destination
+      - name: Resolve simulator
         id: sim
         run: |
-          # List available iPhone simulators and pick the first one.
-          # Avoids hardcoding a device name that may not exist on all runner images.
-          DEST=$(xcrun simctl list devices available -j \
+          xcodebuild -version
+          xcrun simctl list runtimes
+          xcrun simctl list devices available
+          DEVICE=$(xcrun simctl list devices available -j \
             | python3 -c "
           import json, sys
           data = json.load(sys.stdin)
-          for runtime, devices in data.get('devices', {}).items():
-              if 'iOS' not in runtime:
-                  continue
+          runtimes = sorted((k, v) for k, v in data['devices'].items() if 'iOS' in k)
+          for name, devices in reversed(runtimes):
               for d in devices:
                   if 'iPhone' in d['name']:
-                      print(d['name'])
-                      sys.exit(0)
-          sys.exit(1)
-          ")
-          if [ -z "$DEST" ]; then
-            echo "::error::No iPhone simulator found"
-            xcrun simctl list devices available
-            exit 1
-          fi
-          echo "dest=platform=iOS Simulator,name=$DEST" >> "$GITHUB_OUTPUT"
-          echo "Using simulator: $DEST"
-
-          # Ensure the simulator is booted — xcodebuild sometimes fails to find
-          # available-but-shutdown simulators on CI runners.
-          UDID=$(xcrun simctl list devices available -j \
-            | python3 -c "
-          import json, sys
-          data = json.load(sys.stdin)
-          name = '$DEST'
-          for runtime, devices in data.get('devices', {}).items():
-              if 'iOS' not in runtime:
-                  continue
-              for d in devices:
-                  if d['name'] == name:
-                      print(d['udid'])
-                      sys.exit(0)
-          " || true)
-          if [ -n "$UDID" ]; then
-            echo "Booting simulator $UDID..."
-            xcrun simctl boot "$UDID" 2>/dev/null || true
-          fi
+                      print(d['name']); sys.exit(0)
+          sys.exit(1)")
+          echo "device=$DEVICE" >> "$GITHUB_OUTPUT"
+          echo "Using device: $DEVICE"
 
       - name: Build for testing
-        env:
-          SIM_DEST: ${{ steps.sim.outputs.dest }}
         run: |
           set -o pipefail
           xcodebuild build-for-testing \
             -project RSSApp.xcodeproj \
             -scheme RSSApp \
-            -destination "$SIM_DEST" \
+            -destination 'platform=iOS Simulator,OS=latest,name=${{ steps.sim.outputs.device }}' \
             -derivedDataPath DerivedData \
             CODE_SIGN_IDENTITY="-" \
             CODE_SIGNING_REQUIRED=NO \
@@ -94,14 +53,12 @@ jobs:
             2>&1 | if command -v xcbeautify &>/dev/null; then xcbeautify --renderer github-actions; else cat; fi
 
       - name: Test without building
-        env:
-          SIM_DEST: ${{ steps.sim.outputs.dest }}
         run: |
           set -o pipefail
           xcodebuild test-without-building \
             -project RSSApp.xcodeproj \
             -scheme RSSApp \
-            -destination "$SIM_DEST" \
+            -destination 'platform=iOS Simulator,OS=latest,name=${{ steps.sim.outputs.device }}' \
             -derivedDataPath DerivedData \
             -resultBundlePath TestResults.xcresult \
             CODE_SIGN_IDENTITY="-" \
