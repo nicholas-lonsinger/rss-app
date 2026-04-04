@@ -10,6 +10,8 @@ final class MockFeedPersistenceService: FeedPersisting {
     var feeds: [PersistentFeed] = []
     var errorToThrow: (any Error)?
     var unreadCountError: (any Error)?
+    var saveError: (any Error)?
+    var updateFeedErrorError: (any Error)?
     var addFeedFailureAfterCount: Int?
 
     var articlesByFeedID: [UUID: [PersistentArticle]] = [:]
@@ -48,7 +50,7 @@ final class MockFeedPersistenceService: FeedPersisting {
     }
 
     func updateFeedError(_ feed: PersistentFeed, error: String?) throws {
-        if let errorToThrow { throw errorToThrow }
+        if let error = updateFeedErrorError ?? errorToThrow { throw error }
         feed.lastFetchError = error
         feed.lastFetchErrorDate = error != nil ? Date() : nil
     }
@@ -143,6 +145,6 @@ final class MockFeedPersistenceService: FeedPersisting {
     // MARK: - Persistence
 
     func save() throws {
-        if let error = errorToThrow { throw error }
+        if let error = saveError ?? errorToThrow { throw error }
     }
 }

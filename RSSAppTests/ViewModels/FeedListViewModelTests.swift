@@ -851,4 +851,78 @@ struct FeedListViewModelTests {
         #expect(viewModel.feeds[0].lastFetchError == nil)
         #expect(viewModel.errorMessage == nil)
     }
+
+    // MARK: - Save Failure Feedback
+
+    @Test("refreshAllFeeds sets errorMessage when final save fails")
+    @MainActor
+    func refreshAllFeedsSaveFailureSetsErrorMessage() async {
+        let url = URL(string: "https://example.com/feed")!
+        let feed = TestFixtures.makePersistentFeed(title: "Feed", feedURL: url)
+
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+        let mockFetching = MockFeedFetchingService()
+        mockFetching.feedsByURL = [url: TestFixtures.makeFeed(title: "Updated")]
+        mockPersistence.saveError = NSError(domain: "test", code: 1)
+
+        let viewModel = FeedListViewModel(
+            persistence: mockPersistence,
+            feedFetching: mockFetching,
+            feedIconService: MockFeedIconService()
+        )
+        viewModel.loadFeeds()
+        await viewModel.refreshAllFeeds()
+
+        #expect(viewModel.errorMessage == "Unable to save updated feeds.")
+    }
+
+    @Test("refreshAllFeeds save failure sets errorMessage not importExportErrorMessage")
+    @MainActor
+    func refreshAllFeedsSaveFailureDoesNotSetImportExportError() async {
+        let url = URL(string: "https://example.com/feed")!
+        let feed = TestFixtures.makePersistentFeed(title: "Feed", feedURL: url)
+
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+        let mockFetching = MockFeedFetchingService()
+        mockFetching.feedsByURL = [url: TestFixtures.makeFeed(title: "Updated")]
+        mockPersistence.saveError = NSError(domain: "test", code: 1)
+
+        let viewModel = FeedListViewModel(
+            persistence: mockPersistence,
+            feedFetching: mockFetching,
+            feedIconService: MockFeedIconService()
+        )
+        viewModel.loadFeeds()
+        await viewModel.refreshAllFeeds()
+
+        #expect(viewModel.errorMessage != nil)
+        #expect(viewModel.importExportErrorMessage == nil)
+    }
+
+    @Test("refreshAllFeeds counts 304 persistence failure in failure total")
+    @MainActor
+    func refreshAllFeeds304PersistenceFailureCounted() async {
+        let url = URL(string: "https://example.com/feed")!
+        let feed = TestFixtures.makePersistentFeed(title: "Feed", feedURL: url)
+
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+        let mockFetching = MockFeedFetchingService()
+        mockFetching.shouldReturn304 = true
+        // Make only updateFeedError throw to simulate persistence failure on 304 path
+        mockPersistence.updateFeedErrorError = NSError(domain: "test", code: 1)
+
+        let viewModel = FeedListViewModel(
+            persistence: mockPersistence,
+            feedFetching: mockFetching,
+            feedIconService: MockFeedIconService()
+        )
+        viewModel.loadFeeds()
+        await viewModel.refreshAllFeeds()
+
+        #expect(viewModel.errorMessage != nil)
+        #expect(viewModel.errorMessage?.contains("1 of 1") == true)
+    }
 }

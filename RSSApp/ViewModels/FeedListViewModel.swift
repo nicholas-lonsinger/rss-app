@@ -275,6 +275,7 @@ final class FeedListViewModel {
                     do {
                         try persistence.updateFeedError(feed, error: nil)
                     } catch {
+                        failureCount += 1
                         Self.logger.error("Failed to clear error state for '\(feed.title, privacy: .public)': \(error, privacy: .public)")
                     }
                     Task {
@@ -311,16 +312,20 @@ final class FeedListViewModel {
             }
         }
 
+        var saveDidFail = false
         do {
             try persistence.save()
         } catch {
+            saveDidFail = true
             Self.logger.error("Failed to save after refresh: \(error, privacy: .public)")
         }
 
         loadFeeds()
         Self.logger.notice("Refresh complete: \(self.feeds.count - failureCount, privacy: .public) updated, \(failureCount, privacy: .public) failed")
 
-        if failureCount > 0 {
+        if saveDidFail {
+            errorMessage = "Unable to save updated feeds."
+        } else if failureCount > 0 {
             errorMessage = "\(failureCount) of \(feedsToRefresh.count) feed(s) could not be updated."
         }
     }
