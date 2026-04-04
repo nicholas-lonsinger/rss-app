@@ -21,7 +21,6 @@ struct UnreadArticlesView: View {
                 List(articles, id: \.articleID) { article in
                     Button {
                         if homeViewModel.markAsRead(article) {
-                            reloadArticles()
                             selectedArticle = article
                         }
                     } label: {
