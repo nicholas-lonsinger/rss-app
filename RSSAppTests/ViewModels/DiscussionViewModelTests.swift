@@ -171,4 +171,30 @@ struct DiscussionViewModelTests {
         #expect(vm.errorMessage != nil)
         #expect(vm.messages.isEmpty)
     }
+
+    @Test("sendMessage clears errorMessage on successful send")
+    func sendClearsErrorMessage() async {
+        let keychainMock = MockKeychainService()
+        let claudeMock = MockClaudeAPIService()
+        claudeMock.chunks = ["OK"]
+
+        // Start without a key so sendMessage sets errorMessage
+        let vm = DiscussionViewModel(
+            article: TestFixtures.makeArticle(),
+            content: makeContent(),
+            claudeService: claudeMock,
+            keychainService: keychainMock
+        )
+        vm.currentInput = "Hello"
+        await vm.sendMessage()
+        #expect(vm.errorMessage != nil)
+
+        // Add a key and retry — errorMessage should clear
+        try! keychainMock.saveAPIKey("sk-test")
+        vm.refreshAPIKeyState()
+        vm.currentInput = "Hello again"
+        await vm.sendMessage()
+        #expect(vm.errorMessage == nil)
+        #expect(vm.messages.count == 2)
+    }
 }
