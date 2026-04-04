@@ -10,11 +10,10 @@ struct APIKeySettingsView: View {
     private static let logger = Logger(category: "APIKeySettingsView")
 
     private let keychainService = KeychainService()
-    private static let account = "anthropic-api-key"
 
     /// Whether an API key is currently stored in the Keychain.
     private var hasAPIKey: Bool {
-        keychainService.load(for: Self.account) != nil
+        keychainService.hasAPIKey
     }
 
     var body: some View {
@@ -47,7 +46,7 @@ struct APIKeySettingsView: View {
                 .disabled(keyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
                 Button("Remove Key", role: .destructive) {
-                    keychainService.delete(for: Self.account)
+                    keychainService.deleteAPIKey()
                     keyInput = ""
                 }
                 .disabled(!hasAPIKey)
@@ -58,7 +57,7 @@ struct APIKeySettingsView: View {
         .navigationTitle("API Key")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
-            if let existing = keychainService.load(for: Self.account) {
+            if let existing = keychainService.loadAPIKey() {
                 // Show a placeholder so the user knows a key is set, without revealing it.
                 keyInput = String(repeating: "•", count: min(existing.count, 20))
             }
@@ -146,7 +145,7 @@ struct APIKeySettingsView: View {
     private func saveKey() {
         let trimmed = keyInput.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !trimmed.allSatisfy({ $0 == "•" }) else { return }
-        try? keychainService.save(trimmed, for: Self.account)
+        try? keychainService.saveAPIKey(trimmed)
         isSaved = true
     }
 

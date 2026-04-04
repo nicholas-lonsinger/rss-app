@@ -8,15 +8,13 @@ final class DiscussionViewModel {
 
     private static let logger = Logger(category: "DiscussionViewModel")
 
-    private static let apiKeyAccount = "anthropic-api-key"
-
     var messages: [ChatMessage] = []
     var currentInput: String = ""
     var isGenerating: Bool = false
     var errorMessage: String?
 
     var hasAPIKey: Bool {
-        keychainService.load(for: Self.apiKeyAccount) != nil
+        keychainService.hasAPIKey
     }
 
     private let article: Article
@@ -39,7 +37,7 @@ final class DiscussionViewModel {
     func sendMessage() async {
         let input = currentInput.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !input.isEmpty, !isGenerating else { return }
-        guard let apiKey = keychainService.load(for: Self.apiKeyAccount), !apiKey.isEmpty else {
+        guard let apiKey = keychainService.loadAPIKey(), !apiKey.isEmpty else {
             errorMessage = "No API key configured."
             return
         }

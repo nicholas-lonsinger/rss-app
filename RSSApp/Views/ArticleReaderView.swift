@@ -13,10 +13,9 @@ struct ArticleReaderView: View {
     @Environment(\.dismiss) private var dismiss
 
     private let keychainService = KeychainService()
-    private static let apiKeyAccount = "anthropic-api-key"
 
     private var hasAPIKey: Bool {
-        keychainService.load(for: Self.apiKeyAccount) != nil
+        keychainService.hasAPIKey
     }
 
     var body: some View {

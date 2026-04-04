@@ -25,7 +25,7 @@ struct DiscussionViewModelTests {
 
         let keychainMock = MockKeychainService()
         if hasKey {
-            try? keychainMock.save("sk-test", for: "anthropic-api-key")
+            try? keychainMock.saveAPIKey("sk-test")
         }
 
         return DiscussionViewModel(
