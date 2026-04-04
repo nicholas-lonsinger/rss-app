@@ -925,4 +925,62 @@ struct FeedListViewModelTests {
         #expect(viewModel.errorMessage != nil)
         #expect(viewModel.errorMessage?.contains("1 of 1") == true)
     }
+
+    @Test("refreshAllFeeds save failure takes priority over fetch failure message")
+    @MainActor
+    func refreshAllFeedsSaveFailurePriorityOverFetchFailure() async {
+        let url1 = URL(string: "https://ok.com/feed")!
+        let url2 = URL(string: "https://fail.com/feed")!
+        let feed1 = TestFixtures.makePersistentFeed(title: "Good Feed", feedURL: url1)
+        let feed2 = TestFixtures.makePersistentFeed(title: "Bad Feed", feedURL: url2)
+
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed1, feed2]
+        let mockFetching = MockFeedFetchingService()
+        mockFetching.feedsByURL = [url1: TestFixtures.makeFeed(title: "Updated")]
+        mockFetching.errorsByURL = [url2: FeedFetchingError.invalidResponse(statusCode: 500)]
+        // Both a fetch failure AND a save failure occur
+        mockPersistence.saveError = NSError(domain: "test", code: 1)
+
+        let viewModel = FeedListViewModel(
+            persistence: mockPersistence,
+            feedFetching: mockFetching,
+            feedIconService: MockFeedIconService()
+        )
+        viewModel.loadFeeds()
+        await viewModel.refreshAllFeeds()
+
+        // Save failure must take priority over the fetch failure count message
+        #expect(viewModel.errorMessage == "Unable to save updated feeds.")
+    }
+
+    @Test("refreshAllFeeds save failure message survives loadFeeds failure")
+    @MainActor
+    func refreshAllFeedsSaveFailureMessageSurvivesLoadFeedsFailure() async {
+        let url = URL(string: "https://example.com/feed")!
+        let feed = TestFixtures.makePersistentFeed(title: "Feed", feedURL: url)
+
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+        let mockFetching = MockFeedFetchingService()
+        mockFetching.feedsByURL = [url: TestFixtures.makeFeed(title: "Updated")]
+        // save() will fail
+        mockPersistence.saveError = NSError(domain: "test", code: 1)
+
+        let viewModel = FeedListViewModel(
+            persistence: mockPersistence,
+            feedFetching: mockFetching,
+            feedIconService: MockFeedIconService()
+        )
+        viewModel.loadFeeds()
+
+        // After refresh starts and save fails, make loadFeeds() also fail.
+        // loadFeeds() sets errorMessage to "Unable to load your feeds." on failure,
+        // but the subsequent saveDidFail check should overwrite it.
+        mockPersistence.errorToThrow = NSError(domain: "test", code: 2)
+        await viewModel.refreshAllFeeds()
+
+        // Save failure message must be set even when loadFeeds() itself fails
+        #expect(viewModel.errorMessage == "Unable to save updated feeds.")
+    }
 }

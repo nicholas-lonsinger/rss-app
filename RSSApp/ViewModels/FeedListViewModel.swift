@@ -320,6 +320,7 @@ final class FeedListViewModel {
             Self.logger.error("Failed to save after refresh: \(error, privacy: .public)")
         }
 
+        // loadFeeds() clears errorMessage on success, so error feedback must be set after this call.
         loadFeeds()
         Self.logger.notice("Refresh complete: \(self.feeds.count - failureCount, privacy: .public) updated, \(failureCount, privacy: .public) failed")
 
