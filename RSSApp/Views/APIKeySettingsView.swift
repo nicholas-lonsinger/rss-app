@@ -4,6 +4,7 @@ import os
 struct APIKeySettingsView: View {
     @State private var keyInput: String = ""
     @State private var isSaved: Bool = false
+    @State private var saveError: String?
     @State private var modelInput: String = ""
     @State private var maxTokensInput: String = ""
 
@@ -67,6 +68,14 @@ struct APIKeySettingsView: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text("Your Anthropic API key has been saved to the Keychain.")
+        }
+        .alert("Save Failed", isPresented: Binding(
+            get: { saveError != nil },
+            set: { if !$0 { saveError = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(saveError ?? "")
         }
     }
 
@@ -144,9 +153,18 @@ struct APIKeySettingsView: View {
 
     private func saveKey() {
         let trimmed = keyInput.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, !trimmed.allSatisfy({ $0 == "•" }) else { return }
-        try? keychainService.saveAPIKey(trimmed)
-        isSaved = true
+        guard !trimmed.isEmpty, !trimmed.allSatisfy({ $0 == "•" }) else {
+            Self.logger.debug("saveKey skipped: input is empty or masked placeholder")
+            return
+        }
+        do {
+            try keychainService.saveAPIKey(trimmed)
+            isSaved = true
+            Self.logger.notice("API key saved to Keychain")
+        } catch {
+            saveError = "Unable to save your API key to the Keychain. Please try again."
+            Self.logger.error("Failed to save API key to Keychain: \(error, privacy: .public)")
+        }
     }
 
     private func loadModelConfiguration() {
