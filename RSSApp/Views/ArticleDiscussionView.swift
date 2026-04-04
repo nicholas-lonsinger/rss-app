@@ -30,7 +30,9 @@ struct ArticleDiscussionView: View {
                     Button("Done") { dismiss() }
                 }
             }
-            .sheet(isPresented: $showSettings) {
+            .sheet(isPresented: $showSettings, onDismiss: {
+                viewModel.refreshAPIKeyState()
+            }) {
                 NavigationStack {
                     APIKeySettingsView()
                         .toolbar {

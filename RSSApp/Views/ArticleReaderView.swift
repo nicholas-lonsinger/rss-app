@@ -10,13 +10,10 @@ struct ArticleReaderView: View {
     @State private var showSummary = false
     @State private var showAPIKeySettings = false
     @State private var extractionState = ReaderExtractionState()
+    @State private var hasAPIKey = false
     @Environment(\.dismiss) private var dismiss
 
     private let keychainService = KeychainService()
-
-    private var hasAPIKey: Bool {
-        keychainService.hasAPIKey
-    }
 
     /// Whether content extraction is still in progress (API key present but content not yet available).
     private var isExtracting: Bool {
@@ -52,7 +49,12 @@ struct ArticleReaderView: View {
                         }
                     }
                 }
-                .sheet(isPresented: $showAPIKeySettings) {
+                .onAppear {
+                    hasAPIKey = keychainService.hasAPIKey
+                }
+                .sheet(isPresented: $showAPIKeySettings, onDismiss: {
+                    hasAPIKey = keychainService.hasAPIKey
+                }) {
                     NavigationStack {
                         APIKeySettingsView()
                             .toolbar {
