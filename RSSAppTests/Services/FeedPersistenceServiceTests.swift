@@ -323,6 +323,124 @@ struct FeedPersistenceServiceTests {
         #expect(try service.totalUnreadCount() == 2)
     }
 
+    // MARK: - Paginated Article Queries
+
+    @Test("allArticles(offset:limit:) returns correct page")
+    @MainActor
+    func allArticlesPaginated() throws {
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+
+        // Insert 5 articles with distinct dates
+        for i in 0..<5 {
+            try service.upsertArticles([
+                TestFixtures.makeArticle(
+                    id: "a\(i)",
+                    publishedDate: Date(timeIntervalSince1970: Double(i) * 1_000_000)
+                ),
+            ], for: feed)
+        }
+        try service.save()
+
+        // First page: offset 0, limit 2 (should get newest two: a4, a3)
+        let page1 = try service.allArticles(offset: 0, limit: 2)
+        #expect(page1.count == 2)
+        #expect(page1[0].articleID == "a4")
+        #expect(page1[1].articleID == "a3")
+
+        // Second page: offset 2, limit 2 (should get a2, a1)
+        let page2 = try service.allArticles(offset: 2, limit: 2)
+        #expect(page2.count == 2)
+        #expect(page2[0].articleID == "a2")
+        #expect(page2[1].articleID == "a1")
+
+        // Third page: offset 4, limit 2 (should get a0 only)
+        let page3 = try service.allArticles(offset: 4, limit: 2)
+        #expect(page3.count == 1)
+        #expect(page3[0].articleID == "a0")
+    }
+
+    @Test("allUnreadArticles(offset:limit:) returns correct page of unread articles")
+    @MainActor
+    func allUnreadArticlesPaginated() throws {
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+
+        for i in 0..<4 {
+            try service.upsertArticles([
+                TestFixtures.makeArticle(
+                    id: "a\(i)",
+                    publishedDate: Date(timeIntervalSince1970: Double(i) * 1_000_000)
+                ),
+            ], for: feed)
+        }
+        try service.save()
+
+        // Mark a3 (newest) as read
+        let articles = try service.articles(for: feed)
+        let newestArticle = articles.first { $0.articleID == "a3" }!
+        try service.markArticleRead(newestArticle, isRead: true)
+
+        // Page 1: offset 0, limit 2 — should skip a3 (read) and return a2, a1
+        let page1 = try service.allUnreadArticles(offset: 0, limit: 2)
+        #expect(page1.count == 2)
+        #expect(page1[0].articleID == "a2")
+        #expect(page1[1].articleID == "a1")
+
+        // Page 2: offset 2, limit 2 — should return a0 only
+        let page2 = try service.allUnreadArticles(offset: 2, limit: 2)
+        #expect(page2.count == 1)
+        #expect(page2[0].articleID == "a0")
+    }
+
+    @Test("articles(for:offset:limit:) returns correct page for a specific feed")
+    @MainActor
+    func articlesForFeedPaginated() throws {
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+
+        for i in 0..<3 {
+            try service.upsertArticles([
+                TestFixtures.makeArticle(
+                    id: "a\(i)",
+                    publishedDate: Date(timeIntervalSince1970: Double(i) * 1_000_000)
+                ),
+            ], for: feed)
+        }
+        try service.save()
+
+        let page1 = try service.articles(for: feed, offset: 0, limit: 2)
+        #expect(page1.count == 2)
+        #expect(page1[0].articleID == "a2")
+
+        let page2 = try service.articles(for: feed, offset: 2, limit: 2)
+        #expect(page2.count == 1)
+        #expect(page2[0].articleID == "a0")
+    }
+
+    @Test("paginated query with offset beyond data returns empty")
+    @MainActor
+    func paginatedOffsetBeyondData() throws {
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+
+        try service.upsertArticles([
+            TestFixtures.makeArticle(id: "a1"),
+        ], for: feed)
+        try service.save()
+
+        let page = try service.allArticles(offset: 10, limit: 5)
+        #expect(page.isEmpty)
+    }
+
     // MARK: - Content Cache
 
     @Test("cacheContent stores and retrieves article content")

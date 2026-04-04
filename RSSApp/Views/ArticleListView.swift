@@ -9,7 +9,7 @@ struct ArticleListView: View {
     var body: some View {
         Group {
             if viewModel.isLoading && viewModel.articles.isEmpty {
-                ProgressView("Loading feed…")
+                ProgressView("Loading feed\u{2026}")
             } else if let errorMessage = viewModel.errorMessage, viewModel.articles.isEmpty {
                 ContentUnavailableView {
                     Label("Feed Unavailable", systemImage: "exclamationmark.triangle")
@@ -42,6 +42,11 @@ struct ArticleListView: View {
                         }
                         .tint(article.isRead ? .blue : .gray)
                     }
+                    .onAppear {
+                        if article.articleID == viewModel.articles.last?.articleID {
+                            viewModel.loadMoreArticles()
+                        }
+                    }
                 }
                 .listStyle(.plain)
                 .refreshable { await viewModel.loadFeed() }
@@ -52,5 +57,19 @@ struct ArticleListView: View {
             ArticleReaderView(article: article, persistence: persistence)
         }
         .task { await viewModel.loadFeed() }
+        .alert("Error", isPresented: errorAlertBinding) {
+            Button("OK") { viewModel.errorMessage = nil }
+        } message: {
+            Text(viewModel.errorMessage ?? "")
+        }
+    }
+
+    // MARK: - Helpers
+
+    private var errorAlertBinding: Binding<Bool> {
+        Binding(
+            get: { viewModel.errorMessage != nil && !viewModel.articles.isEmpty },
+            set: { if !$0 { viewModel.errorMessage = nil } }
+        )
     }
 }

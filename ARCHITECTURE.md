@@ -209,7 +209,7 @@ RSSAppTests/
 
 `FeedURLValidator` is a shared utility enum that normalizes and validates raw URL input strings. It trims whitespace, prepends `https://` when no scheme is present, and validates the result has an HTTP or HTTPS scheme with a non-nil host. Used by both `AddFeedViewModel` and `EditFeedViewModel` to deduplicate URL validation logic.
 
-`FeedPersisting` is a `@MainActor` protocol defining the persistence layer. `SwiftDataFeedPersistenceService` implements it using a `ModelContext`. Provides feed CRUD, article upsert (deduplicating by `articleID` within a feed, preserving read status), read/unread tracking, unread counts, and content caching. The `@MainActor` isolation matches the view model pattern and avoids `@Model` cross-actor transfer issues.
+`FeedPersisting` is a `@MainActor` protocol defining the persistence layer. `SwiftDataFeedPersistenceService` implements it using a `ModelContext`. Provides feed CRUD, article upsert (deduplicating by `articleID` within a feed, preserving read status), read/unread tracking, unread counts, content caching, and paginated article queries (`articles(for:offset:limit:)`, `allArticles(offset:limit:)`, `allUnreadArticles(offset:limit:)`) using `FetchDescriptor.fetchOffset`/`fetchLimit`. The `@MainActor` isolation matches the view model pattern and avoids `@Model` cross-actor transfer issues.
 
 `UserDefaultsMigrationService` performs a one-time migration of `SubscribedFeed` data from UserDefaults to SwiftData on first launch. Idempotent — sets a migration flag on success and retries on failure.
 
@@ -229,11 +229,11 @@ All view models are `@MainActor @Observable`.
 
 `EditFeedViewModel` handles the edit-feed flow: pre-populated URL input, validation (duplicate detection via `feedExists`), fetching the new URL, and updating the `PersistentFeed` via `FeedPersisting`. Clears error state on successful URL change. Accepts `FeedFetching` and `FeedPersisting` dependencies for testability.
 
-`FeedViewModel` manages the article list for a single feed. Takes a `PersistentFeed` and `FeedPersisting`. On `loadFeed()`, displays cached `[PersistentArticle]` immediately, then fetches from network and upserts new articles. Provides `markAsRead(_:)` and `toggleReadStatus(_:)` for read/unread tracking. Only shows loading spinner when there are no cached articles. Only shows error when network fails and there are no cached articles (offline resilience).
+`FeedViewModel` manages the article list for a single feed. Takes a `PersistentFeed` and `FeedPersisting`. On `loadFeed()`, displays the first page of cached `[PersistentArticle]` immediately (page size 50), then fetches from network and upserts new articles, reloading up to the current scroll depth (`max(articles.count, pageSize)`) to preserve position. Provides `loadMoreArticles()` for infinite scroll (with deduplication and error-stop), `markAsRead(_:)` and `toggleReadStatus(_:)` for read/unread tracking. Only shows loading spinner when there are no cached articles. Only shows error when network fails and there are no cached articles (offline resilience). Pagination errors surface via an `.alert` when articles are already loaded.
 
 `ArticleSummaryViewModel` drives the article summary/extraction flow. Its `State` enum (`idle` / `extracting` / `ready(ArticleContent)` / `failed(String)`) reflects the extraction lifecycle. Stores `extractedContent` for use by the discussion sheet. Accepts an `ArticleExtracting` dependency for testability.
 
-`HomeViewModel` manages the Home screen state. Provides `loadUnreadCount()` for the total unread badge, `allArticles()` and `unreadArticles()` for cross-feed article lists, and `markAsRead(_:)` / `toggleReadStatus(_:)` for read/unread tracking that updates the unread count. Accepts `FeedPersisting` dependency for testability.
+`HomeViewModel` manages the Home screen state. Provides `loadUnreadCount()` for the total unread badge. Article lists use paginated loading: `loadAllArticles()` / `loadMoreAllArticles()` populate `allArticlesList`, and `loadUnreadArticles()` / `loadMoreUnreadArticles()` populate `unreadArticlesList` (page size 50, with deduplication and error-stop). On reload failure, preserves the previously loaded list to avoid flashing an empty state. Provides `removeFromUnreadList(_:)` for targeted client-side removal when marking articles read, and `markAsRead(_:)` / `toggleReadStatus(_:)` for read/unread tracking that updates the unread count. Accepts `FeedPersisting` dependency for testability.
 
 `DiscussionViewModel` manages the chat session. `sendMessage()` appends the user turn, appends an empty assistant placeholder, then streams Claude API response chunks into `messages[lastIndex].content`. Reads the API key from `KeychainServicing`. Accepts both `ClaudeAPIServicing` and `KeychainServicing` dependencies for testability.
 
@@ -245,9 +245,9 @@ All view models are `@MainActor @Observable`.
 
 `HomeView` is the `NavigationStack` root and the app's launch screen. Shows three fixed `HomeGroup` rows: All Articles, Unread Articles (with unread count badge), and All Feeds. Uses `NavigationLink(value: HomeGroup)` with `.navigationDestination(for: HomeGroup.self)` to push `AllArticlesView`, `UnreadArticlesView`, or `FeedListView` respectively. Creates `HomeViewModel` for unread count tracking.
 
-`AllArticlesView` displays a flat chronological list of every article across all feeds, sorted by publish date descending. Uses `CrossFeedArticleRowView` for rows. Supports swipe-to-toggle read/unread and tap to open `ArticleReaderView` via `.fullScreenCover`. Updates `HomeViewModel` unread count on disappear.
+`AllArticlesView` displays a paginated chronological list of every article across all feeds, sorted by publish date descending. Uses `CrossFeedArticleRowView` for rows with infinite scroll (`.onAppear` on the last item triggers `loadMoreAllArticles()`). Swipe-to-toggle read/unread relies on `@Observable` propagation (no full reload). Tap opens `ArticleReaderView` via `.fullScreenCover`. Updates `HomeViewModel` unread count on disappear.
 
-`UnreadArticlesView` displays a filtered list of unread articles across all feeds. Same layout as `AllArticlesView` but articles disappear when marked as read. Shows "All Caught Up" empty state when no unread articles remain.
+`UnreadArticlesView` displays a paginated filtered list of unread articles across all feeds with infinite scroll. Same layout as `AllArticlesView` but uses targeted `removeFromUnreadList(_:)` when marking articles read to avoid scroll position loss. Shows "All Caught Up" empty state when no unread articles remain.
 
 `CrossFeedArticleRowView` is the article row used in cross-feed lists. Extends `ArticleRowView`'s layout with a feed name label (text only) so the user can identify the source feed, along with a relative date separated by a middle dot.
 
@@ -261,7 +261,7 @@ All view models are `@MainActor @Observable`.
 
 `EditFeedView` is a sheet accepting a `PersistentFeed` and `FeedPersisting`. Pre-populates the URL field, validates the new URL, fetches the feed to confirm it works, and auto-dismisses on success.
 
-`ArticleListView` shows `[PersistentArticle]` with loading / error / list states. Supports swipe actions to mark articles as read/unread. Tapping a row marks it as read and presents `ArticleReaderView` via `.fullScreenCover`. Uses `viewModel.feedTitle` as the navigation title.
+`ArticleListView` shows `[PersistentArticle]` with loading / error / list states and infinite scroll (`.onAppear` on the last item triggers `loadMoreArticles()`). Supports swipe actions to mark articles as read/unread. Pagination errors surface via an `.alert` when articles are already loaded. Tapping a row marks it as read and presents `ArticleReaderView` via `.fullScreenCover`. Uses `viewModel.feedTitle` as the navigation title.
 
 `ArticleRowView` displays a `PersistentArticle` with a 60×60 `AsyncImage` thumbnail, headline title (bold for unread, regular for read), subheadline snippet, and caption-style relative date. Read articles show dimmed (`.secondary`) title text.
 
@@ -288,7 +288,7 @@ RSSAppApp (@main)
             ├── @Environment(\.modelContext) → SwiftDataFeedPersistenceService
             └── HomeView(persistence:)
                 ├── @State HomeViewModel(persistence:)
-                │   └── FeedPersisting → totalUnreadCount, allArticles, allUnreadArticles, markAsRead/toggle
+                │   └── FeedPersisting → totalUnreadCount, paginated allArticles/allUnreadArticles (offset/limit), markAsRead/toggle
                 ├── NavigationStack
                 │   └── List(HomeGroup.allCases) → HomeRowView (title, icon, unread badge)
                 │       └── NavigationLink(value: HomeGroup)
@@ -310,9 +310,10 @@ RSSAppApp (@main)
                 │                   │       └── NavigationLink(value: PersistentFeed.id)
                 │                   │           └── .navigationDestination → ArticleListView
                 │                   │               ├── FeedViewModel(feed:, persistence:)
-                │                   │               │   ├── FeedPersisting → cached [PersistentArticle] (shown immediately)
-                │                   │               │   ├── FeedFetchingService → network fetch → upsert to database
-                │                   │               │   ├── articles: [PersistentArticle]
+                │                   │               │   ├── FeedPersisting → first page of cached [PersistentArticle] (shown immediately)
+                │                   │               │   ├── FeedFetchingService → network fetch → upsert → reload up to scroll depth
+                │                   │               │   ├── articles: [PersistentArticle] (paginated, page size 50)
+                │                   │               │   ├── loadMoreArticles() → infinite scroll with dedup + error-stop
                 │                   │               │   ├── markAsRead / toggleReadStatus
                 │                   │               │   ├── feedTitle: String
                 │                   │               │   ├── isLoading: Bool (only when no cached articles)
@@ -397,6 +398,8 @@ RSSAppApp (@main)
 | Home screen as app root | Provides meta-groups (All Articles, Unread Articles, All Feeds) above the feed list; pushes `FeedListView` via NavigationStack rather than replacing it |
 | `HomeGroup` enum for group types | Three fixed cases with `CaseIterable`; enum-based approach accommodates future user-created groups (folders, tags) by adding new cases |
 | Cross-feed article queries in `FeedPersisting` | `allArticles()`, `allUnreadArticles()`, `totalUnreadCount()` are protocol methods so they work with both SwiftData and mock implementations |
+| Offset-based pagination (page size 50) | Simple `fetchOffset`/`fetchLimit` on `FetchDescriptor`; deduplication filter on append prevents duplicates from dataset shifts; `hasMore` flag set to `false` on error to prevent infinite retry loops; previous list preserved on reload failure |
+| Targeted unread list mutation | `removeFromUnreadList(_:)` removes a single article client-side instead of reloading the full list, preserving scroll position when marking articles read |
 
 ## Test Coverage
 
@@ -419,10 +422,10 @@ RSSAppApp (@main)
 | Extraction Pipeline | ExtractionPipelineTests.swift | Full pipeline: HTML fixture → WKWebView serialize → Swift extract; JSON validity; meta tag capture |
 | ArticleSummaryViewModel | ArticleReaderViewModelTests.swift | Pre-extracted content availability, extraction skip behavior, idle state |
 | DiscussionViewModel | DiscussionViewModelTests.swift | hasAPIKey reflects keychain, send appends messages, chunks accumulate, input cleared, API error → error content, empty input ignored, no-key sets errorMessage |
-| FeedViewModel | FeedViewModelTests.swift | Load success/failure, isLoading state, feedTitle default/update/unchanged on failure |
+| FeedViewModel | FeedViewModelTests.swift | Load success/failure, isLoading state, feedTitle default/update/unchanged on failure, paginated loading (append page, no-op when exhausted, error preserves articles and sets hasMore=false, hasMore after cache-first load) |
 | HomeGroup | HomeGroupTests.swift | All cases count and order, unique IDs, non-empty titles/systemImages, per-case property values, Hashable conformance |
-| HomeViewModel | HomeViewModelTests.swift | Unread count (success, error, empty), all articles (sorted, multi-feed, error), unread articles (filter, all read, error), markAsRead (updates count, no-op for read, error), toggleReadStatus (to read, to unread, error) |
-| FeedPersistenceService | FeedPersistenceServiceTests.swift | Feed CRUD (add, delete, update metadata/error/URL/cache headers, feedExists), article upsert (insert new, skip existing preserving read status), read/unread toggle, unread count, cross-feed queries (allArticles sorted, allUnreadArticles filtered, totalUnreadCount across feeds), content cache (store, update, nil), cascade delete (feed → articles → content) |
+| HomeViewModel | HomeViewModelTests.swift | Unread count (success, error, empty), paginated all articles (first page, multi-page append, no-op when exhausted, error with hasMore=false, reset no-duplicate, error preserves previous list, hasMore on error), paginated unread articles (first page, multi-page append, no-op when exhausted, error, reset no-duplicate, error preserves previous list), removeFromUnreadList, markAsRead (updates count, no-op for read, error), toggleReadStatus (to read, to unread, error) |
+| FeedPersistenceService | FeedPersistenceServiceTests.swift | Feed CRUD (add, delete, update metadata/error/URL/cache headers, feedExists), article upsert (insert new, skip existing preserving read status), read/unread toggle, unread count, cross-feed queries (allArticles sorted, allUnreadArticles filtered, totalUnreadCount across feeds), paginated queries (allArticles offset/limit, allUnreadArticles offset/limit, articles-for-feed offset/limit, offset beyond data returns empty), content cache (store, update, nil), cascade delete (feed → articles → content) |
 | UserDefaultsMigrationService | UserDefaultsMigrationTests.swift | Migrate feeds, clear UserDefaults, migration flag, skip when migrated, empty defaults, preserve IDs |
 | FeedStorageService | FeedStorageServiceTests.swift | Save/load roundtrip, add, remove, empty state, overwrite (legacy UserDefaults) |
 | FeedURLValidator | FeedURLValidatorTests.swift | Valid HTTP/HTTPS, scheme prepend, empty/whitespace, non-HTTP schemes (ftp, feed), query parameters, whitespace trimming, scheme-only no host |
