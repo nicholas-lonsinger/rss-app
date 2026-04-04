@@ -20,18 +20,6 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Select Xcode
-        run: |
-          # Prefer Xcode 26; fall back to the latest available version
-          if [ -d "/Applications/Xcode_26.0.app" ]; then
-            sudo xcode-select -s /Applications/Xcode_26.0.app/Contents/Developer
-          elif [ -d "/Applications/Xcode_26.app" ]; then
-            sudo xcode-select -s /Applications/Xcode_26.app/Contents/Developer
-          else
-            echo "::warning::Xcode 26 not found, using default Xcode"
-          fi
-          xcodebuild -version
-
       - name: Resolve simulator destination
         id: sim
         run: |
