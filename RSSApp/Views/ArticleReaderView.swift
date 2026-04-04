@@ -18,6 +18,11 @@ struct ArticleReaderView: View {
         keychainService.hasAPIKey
     }
 
+    /// Whether content extraction is still in progress (API key present but content not yet available).
+    private var isExtracting: Bool {
+        hasAPIKey && extractionState.content == nil && article.link != nil
+    }
+
     var body: some View {
         NavigationStack {
             articleContent
@@ -28,19 +33,23 @@ struct ArticleReaderView: View {
                         Button("Done") { dismiss() }
                     }
                     ToolbarItemGroup(placement: .topBarTrailing) {
-                        Button {
-                            if hasAPIKey {
-                                Self.logger.debug("AI button tapped — API key present, showing summary")
-                                showSummary = true
-                            } else {
-                                Self.logger.debug("AI button tapped — no API key, showing API key settings")
-                                showAPIKeySettings = true
+                        if isExtracting {
+                            ProgressView()
+                                .accessibilityLabel("Extracting article content")
+                        } else {
+                            Button {
+                                if hasAPIKey {
+                                    Self.logger.debug("AI button tapped — API key present, showing summary")
+                                    showSummary = true
+                                } else {
+                                    Self.logger.debug("AI button tapped — no API key, showing API key settings")
+                                    showAPIKeySettings = true
+                                }
+                            } label: {
+                                Image(systemName: "sparkles")
                             }
-                        } label: {
-                            Image(systemName: "sparkles")
+                            .accessibilityLabel("Summarize with AI")
                         }
-                        .accessibilityLabel("Summarize with AI")
-                        .disabled(hasAPIKey && extractionState.content == nil)
                     }
                 }
                 .sheet(isPresented: $showAPIKeySettings) {
