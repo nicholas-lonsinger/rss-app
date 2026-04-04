@@ -32,6 +32,14 @@ struct ArticleDiscussionView: View {
                     Button("Done") { dismiss() }
                 }
             }
+            .alert("Send Failed", isPresented: Binding(
+                get: { viewModel.errorMessage != nil },
+                set: { if !$0 { viewModel.errorMessage = nil } }
+            )) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(viewModel.errorMessage ?? "")
+            }
             .sheet(isPresented: $showSettings, onDismiss: {
                 viewModel.refreshAPIKeyState()
             }) {
