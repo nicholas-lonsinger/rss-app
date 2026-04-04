@@ -5,6 +5,7 @@ struct APIKeySettingsView: View {
     @State private var keyInput: String = ""
     @State private var isSaved: Bool = false
     @State private var saveError: String?
+    @State private var deleteError: String?
     @State private var modelInput: String = ""
     @State private var maxTokensInput: String = ""
     @State private var hasAPIKey: Bool = false
@@ -43,11 +44,7 @@ struct APIKeySettingsView: View {
                 .disabled(keyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
                 Button("Remove Key", role: .destructive) {
-                    keychainService.deleteAPIKey()
-                    hasAPIKey = keychainService.hasAPIKey
-                    if !hasAPIKey {
-                        keyInput = ""
-                    }
+                    deleteKey()
                 }
                 .disabled(!hasAPIKey)
             }
@@ -76,6 +73,14 @@ struct APIKeySettingsView: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text(saveError ?? "")
+        }
+        .alert("Remove Failed", isPresented: Binding(
+            get: { deleteError != nil },
+            set: { if !$0 { deleteError = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(deleteError ?? "")
         }
     }
 
@@ -150,6 +155,18 @@ struct APIKeySettingsView: View {
     }
 
     // MARK: - Persistence
+
+    private func deleteKey() {
+        do {
+            try keychainService.deleteAPIKey()
+            hasAPIKey = false
+            keyInput = ""
+            Self.logger.notice("API key removed from Keychain")
+        } catch {
+            deleteError = "Unable to remove your API key from the Keychain. Please try again."
+            Self.logger.error("Failed to delete API key from Keychain: \(error, privacy: .public)")
+        }
+    }
 
     private func saveKey() {
         let trimmed = keyInput.trimmingCharacters(in: .whitespacesAndNewlines)
