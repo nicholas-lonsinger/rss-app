@@ -82,6 +82,11 @@ final class DiscussionViewModel {
             }
             Self.logger.info("Assistant response complete (\(self.messages[assistantIndex].content.count, privacy: .public) chars)")
         } catch {
+            // RATIONALE: API streaming errors are surfaced inline in the chat bubble rather than
+            // via the errorMessage alert. Validation errors (missing/unreadable API key) block
+            // sending entirely and use an alert because no message was dispatched. Streaming errors
+            // occur mid-conversation and are contextual to the assistant turn, so displaying them
+            // inline preserves the conversational flow and lets the user see which response failed.
             messages[assistantIndex].content = "Error: \(error.localizedDescription)"
             Self.logger.error("Claude API error: \(error, privacy: .public)")
         }
