@@ -26,16 +26,28 @@ struct HomeViewModelTests {
         #expect(viewModel.errorMessage == nil)
     }
 
-    @Test("loadUnreadCount sets errorMessage on failure")
+    @Test("loadUnreadCount sets errorMessage on failure and preserves prior count")
     @MainActor
     func loadUnreadCountError() {
+        let feed = TestFixtures.makePersistentFeed()
         let mockPersistence = MockFeedPersistenceService()
-        mockPersistence.unreadCountError = NSError(domain: "test", code: 1)
+        mockPersistence.feeds = [feed]
+
+        let article = TestFixtures.makePersistentArticle(articleID: "a1", isRead: false)
+        article.feed = feed
+        mockPersistence.articlesByFeedID[feed.id] = [article]
 
         let viewModel = HomeViewModel(persistence: mockPersistence)
         viewModel.loadUnreadCount()
+        #expect(viewModel.unreadCount == 1)
+        #expect(viewModel.errorMessage == nil)
+
+        // Inject error after successful count load
+        mockPersistence.unreadCountError = NSError(domain: "test", code: 1)
+        viewModel.loadUnreadCount()
 
         #expect(viewModel.errorMessage != nil)
+        #expect(viewModel.unreadCount == 1)
     }
 
     @Test("loadUnreadCount returns zero when no articles")
@@ -47,6 +59,34 @@ struct HomeViewModelTests {
         viewModel.loadUnreadCount()
 
         #expect(viewModel.unreadCount == 0)
+        #expect(viewModel.errorMessage == nil)
+    }
+
+    // MARK: - Empty Database
+
+    @Test("loadAllArticles returns empty list when no articles exist")
+    @MainActor
+    func loadAllArticlesEmpty() {
+        let mockPersistence = MockFeedPersistenceService()
+
+        let viewModel = HomeViewModel(persistence: mockPersistence)
+        viewModel.loadAllArticles()
+
+        #expect(viewModel.allArticlesList.isEmpty)
+        #expect(viewModel.hasMoreAllArticles == false)
+        #expect(viewModel.errorMessage == nil)
+    }
+
+    @Test("loadUnreadArticles returns empty list when no articles exist")
+    @MainActor
+    func loadUnreadArticlesEmpty() {
+        let mockPersistence = MockFeedPersistenceService()
+
+        let viewModel = HomeViewModel(persistence: mockPersistence)
+        viewModel.loadUnreadArticles()
+
+        #expect(viewModel.unreadArticlesList.isEmpty)
+        #expect(viewModel.hasMoreUnreadArticles == false)
         #expect(viewModel.errorMessage == nil)
     }
 
@@ -379,19 +419,31 @@ struct HomeViewModelTests {
         #expect(viewModel.errorMessage == nil)
     }
 
-    @Test("markAsRead sets errorMessage on persistence failure and returns false")
+    @Test("markAsRead sets errorMessage on persistence failure, returns false, and preserves unread count")
     @MainActor
     func markAsReadError() {
+        let feed = TestFixtures.makePersistentFeed()
         let mockPersistence = MockFeedPersistenceService()
-        mockPersistence.errorToThrow = NSError(domain: "test", code: 1)
+        mockPersistence.feeds = [feed]
 
         let article = TestFixtures.makePersistentArticle(articleID: "a1", isRead: false)
+        article.feed = feed
+        let article2 = TestFixtures.makePersistentArticle(articleID: "a2", isRead: false)
+        article2.feed = feed
+        mockPersistence.articlesByFeedID[feed.id] = [article, article2]
 
         let viewModel = HomeViewModel(persistence: mockPersistence)
+        viewModel.loadUnreadCount()
+        #expect(viewModel.unreadCount == 2)
+
+        // Inject error after successful count load
+        mockPersistence.errorToThrow = NSError(domain: "test", code: 1)
         let result = viewModel.markAsRead(article)
 
         #expect(result == false)
         #expect(viewModel.errorMessage != nil)
+        #expect(viewModel.unreadCount == 2)
+        #expect(article.isRead == false)
     }
 
     @Test("toggleReadStatus toggles from unread to read")
@@ -428,18 +480,30 @@ struct HomeViewModelTests {
         #expect(article.isRead == false)
     }
 
-    @Test("toggleReadStatus sets errorMessage on persistence failure")
+    @Test("toggleReadStatus sets errorMessage on persistence failure and preserves unread count")
     @MainActor
     func toggleReadStatusError() {
+        let feed = TestFixtures.makePersistentFeed()
         let mockPersistence = MockFeedPersistenceService()
-        mockPersistence.errorToThrow = NSError(domain: "test", code: 1)
+        mockPersistence.feeds = [feed]
 
         let article = TestFixtures.makePersistentArticle(articleID: "a1", isRead: false)
+        article.feed = feed
+        let article2 = TestFixtures.makePersistentArticle(articleID: "a2", isRead: false)
+        article2.feed = feed
+        mockPersistence.articlesByFeedID[feed.id] = [article, article2]
 
         let viewModel = HomeViewModel(persistence: mockPersistence)
+        viewModel.loadUnreadCount()
+        #expect(viewModel.unreadCount == 2)
+
+        // Inject error after successful count load
+        mockPersistence.errorToThrow = NSError(domain: "test", code: 1)
         viewModel.toggleReadStatus(article)
 
         #expect(viewModel.errorMessage != nil)
+        #expect(viewModel.unreadCount == 2)
+        #expect(article.isRead == false)
     }
 
     // MARK: - Clear Error
