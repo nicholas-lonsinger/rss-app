@@ -9,11 +9,24 @@ protocol ClaudeAPIServicing: Sendable {
     ) async throws -> AsyncThrowingStream<String, Error>
 }
 
-enum ClaudeAPIError: Error, Sendable {
+enum ClaudeAPIError: Error, Sendable, LocalizedError {
     case invalidURL
     case httpError(statusCode: Int)
     case missingAPIKey
     case serverError(message: String)
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidURL:
+            "The API URL is invalid."
+        case .httpError(let statusCode):
+            "The server returned HTTP \(statusCode)."
+        case .missingAPIKey:
+            "No API key configured."
+        case .serverError(let message):
+            message
+        }
+    }
 }
 
 struct ClaudeAPIService: ClaudeAPIServicing {
@@ -135,6 +148,11 @@ struct ClaudeAPIService: ClaudeAPIServicing {
         }
 
         if event.type == "error" {
+            if event.error == nil {
+                Self.logger.warning("Server sent error event with no error object")
+            } else if event.error?.message == nil || event.error?.type == nil {
+                Self.logger.warning("Server error event missing fields — message: \(event.error?.message == nil ? "nil" : "present", privacy: .public), type: \(event.error?.type == nil ? "nil" : "present", privacy: .public)")
+            }
             let errorMessage = event.error?.message ?? "Unknown server error"
             let errorType = event.error?.type ?? "unknown"
             Self.logger.error("Claude API stream error (type=\(errorType, privacy: .public)): \(errorMessage, privacy: .public). Raw: \(json, privacy: .private)")

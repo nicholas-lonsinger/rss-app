@@ -228,4 +228,30 @@ struct ClaudeAPIServiceTests {
             Issue.record("Unexpected error type: \(error)")
         }
     }
+
+    // MARK: - LocalizedError conformance
+
+    @Test("localizedDescription returns server message for serverError")
+    func localizedDescriptionServerError() {
+        let error = ClaudeAPIError.serverError(message: "Rate limit exceeded")
+        #expect(error.localizedDescription == "Rate limit exceeded")
+    }
+
+    @Test("localizedDescription returns descriptive message for httpError")
+    func localizedDescriptionHTTPError() {
+        let error = ClaudeAPIError.httpError(statusCode: 429)
+        #expect(error.localizedDescription == "The server returned HTTP 429.")
+    }
+
+    @Test("localizedDescription returns descriptive message for missingAPIKey")
+    func localizedDescriptionMissingAPIKey() {
+        let error = ClaudeAPIError.missingAPIKey
+        #expect(error.localizedDescription == "No API key configured.")
+    }
+
+    @Test("localizedDescription returns descriptive message for invalidURL")
+    func localizedDescriptionInvalidURL() {
+        let error = ClaudeAPIError.invalidURL
+        #expect(error.localizedDescription == "The API URL is invalid.")
+    }
 }
