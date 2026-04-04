@@ -73,6 +73,8 @@ struct KeychainService: KeychainServicing {
         let status = SecItemDelete(query as CFDictionary)
         if status == errSecSuccess {
             Self.logger.notice("Keychain value deleted for account '\(account, privacy: .public)'")
+        } else if status != errSecItemNotFound {
+            Self.logger.warning("Keychain delete failed for account '\(account, privacy: .public)': \(status, privacy: .public)")
         }
     }
 }
