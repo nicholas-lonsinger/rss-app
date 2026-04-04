@@ -721,12 +721,13 @@ struct FeedListViewModelTests {
     func importOPMLFromURLSetsImportExportErrorOnReadFailure() {
         let mockPersistence = MockFeedPersistenceService()
         let mockOPML = MockOPMLService()
-        let nonexistentURL = URL(filePath: "/tmp/nonexistent-\(UUID().uuidString).opml")
+        let nonexistentURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("nonexistent-\(UUID().uuidString).opml")
 
         let viewModel = FeedListViewModel(persistence: mockPersistence, opmlService: mockOPML)
         viewModel.importOPML(from: nonexistentURL)
 
-        #expect(viewModel.importExportErrorMessage != nil)
+        #expect(viewModel.importExportErrorMessage == "Unable to read the selected file.")
         #expect(viewModel.errorMessage == nil)
     }
 
@@ -735,7 +736,8 @@ struct FeedListViewModelTests {
     func importOPMLAndRefreshFromURLSetsImportExportErrorOnReadFailure() async {
         let mockPersistence = MockFeedPersistenceService()
         let mockOPML = MockOPMLService()
-        let nonexistentURL = URL(filePath: "/tmp/nonexistent-\(UUID().uuidString).opml")
+        let nonexistentURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("nonexistent-\(UUID().uuidString).opml")
 
         let viewModel = FeedListViewModel(
             persistence: mockPersistence,
@@ -744,7 +746,7 @@ struct FeedListViewModelTests {
         )
         await viewModel.importOPMLAndRefresh(from: nonexistentURL)
 
-        #expect(viewModel.importExportErrorMessage != nil)
+        #expect(viewModel.importExportErrorMessage == "Unable to read the selected file.")
         #expect(viewModel.errorMessage == nil)
     }
 
