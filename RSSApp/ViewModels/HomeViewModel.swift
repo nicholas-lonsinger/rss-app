@@ -59,22 +59,12 @@ final class HomeViewModel {
 
     /// Loads the next page of all articles and appends to the existing list.
     func loadMoreAllArticles() {
-        guard hasMoreAllArticles else { return }
-        do {
-            let page = try persistence.allArticles(
-                offset: allArticlesList.count,
-                limit: Self.pageSize
-            )
-            let existingIDs = Set(allArticlesList.map(\.articleID))
-            let newItems = page.filter { !existingIDs.contains($0.articleID) }
-            allArticlesList.append(contentsOf: newItems)
-            hasMoreAllArticles = page.count == Self.pageSize
-            Self.logger.debug("Loaded page of \(page.count, privacy: .public) all articles (\(newItems.count, privacy: .public) new, total: \(self.allArticlesList.count, privacy: .public))")
-        } catch {
-            hasMoreAllArticles = false
-            errorMessage = "Unable to load all articles."
-            Self.logger.error("Failed to load all articles page: \(error, privacy: .public)")
-        }
+        loadMorePage(
+            into: &allArticlesList,
+            hasMore: &hasMoreAllArticles,
+            fetch: { offset, limit in try self.persistence.allArticles(offset: offset, limit: limit) },
+            label: "all articles"
+        )
     }
 
     // MARK: - Unread Articles (paginated)
@@ -93,21 +83,37 @@ final class HomeViewModel {
 
     /// Loads the next page of unread articles and appends to the existing list.
     func loadMoreUnreadArticles() {
-        guard hasMoreUnreadArticles else { return }
+        loadMorePage(
+            into: &unreadArticlesList,
+            hasMore: &hasMoreUnreadArticles,
+            fetch: { offset, limit in try self.persistence.allUnreadArticles(offset: offset, limit: limit) },
+            label: "unread articles"
+        )
+    }
+
+    // MARK: - Pagination Helpers
+
+    /// Fetches the next page of articles, deduplicates, and appends to the list.
+    /// Sets `hasMore` to `false` on error to prevent infinite retry loops.
+    private func loadMorePage(
+        into list: inout [PersistentArticle],
+        hasMore: inout Bool,
+        fetch: (_ offset: Int, _ limit: Int) throws -> [PersistentArticle],
+        label: String
+    ) {
+        guard hasMore else { return }
         do {
-            let page = try persistence.allUnreadArticles(
-                offset: unreadArticlesList.count,
-                limit: Self.pageSize
-            )
-            let existingIDs = Set(unreadArticlesList.map(\.articleID))
+            let page = try fetch(list.count, Self.pageSize)
+            let existingIDs = Set(list.map(\.articleID))
             let newItems = page.filter { !existingIDs.contains($0.articleID) }
-            unreadArticlesList.append(contentsOf: newItems)
-            hasMoreUnreadArticles = page.count == Self.pageSize
-            Self.logger.debug("Loaded page of \(page.count, privacy: .public) unread articles (\(newItems.count, privacy: .public) new, total: \(self.unreadArticlesList.count, privacy: .public))")
+            list.append(contentsOf: newItems)
+            hasMore = page.count == Self.pageSize
+            let totalCount = list.count
+            Self.logger.debug("Loaded page of \(page.count, privacy: .public) \(label, privacy: .public) (\(newItems.count, privacy: .public) new, total: \(totalCount, privacy: .public))")
         } catch {
-            hasMoreUnreadArticles = false
-            errorMessage = "Unable to load unread articles."
-            Self.logger.error("Failed to load unread articles page: \(error, privacy: .public)")
+            hasMore = false
+            errorMessage = "Unable to load \(label)."
+            Self.logger.error("Failed to load \(label) page: \(error, privacy: .public)")
         }
     }
 
