@@ -13,6 +13,7 @@ enum ClaudeAPIError: Error, Sendable {
     case invalidURL
     case httpError(statusCode: Int)
     case missingAPIKey
+    case serverError(message: String)
 }
 
 struct ClaudeAPIService: ClaudeAPIServicing {
@@ -85,7 +86,7 @@ struct ClaudeAPIService: ClaudeAPIServicing {
                         guard line.hasPrefix("data: ") else { continue }
                         let json = String(line.dropFirst(6))
                         guard json != "[DONE]" else { break }
-                        if let chunk = parseSSELine(json) {
+                        if let chunk = try parseSSELine(json) {
                             continuation.yield(chunk)
                         }
                     }
@@ -119,7 +120,7 @@ struct ClaudeAPIService: ClaudeAPIServicing {
         return request
     }
 
-    func parseSSELine(_ json: String) -> String? {
+    func parseSSELine(_ json: String) throws -> String? {
         guard let data = json.data(using: .utf8) else {
             Self.logger.warning("SSE line could not be encoded to UTF-8 data")
             return nil
@@ -131,6 +132,13 @@ struct ClaudeAPIService: ClaudeAPIServicing {
         } catch {
             Self.logger.warning("Failed to decode SSE JSON: \(error, privacy: .public). Input: \(json, privacy: .private)")
             return nil
+        }
+
+        if event.type == "error" {
+            let errorMessage = event.error?.message ?? "Unknown server error"
+            let errorType = event.error?.type ?? "unknown"
+            Self.logger.error("Claude API stream error (type=\(errorType, privacy: .public)): \(errorMessage, privacy: .public). Raw: \(json, privacy: .private)")
+            throw ClaudeAPIError.serverError(message: errorMessage)
         }
 
         guard event.type == "content_block_delta" else {
@@ -167,6 +175,12 @@ struct ClaudeRequestMessage: Encodable {
 struct ClaudeStreamEvent: Decodable {
     let type: String
     let delta: ClaudeStreamDelta?
+    let error: ClaudeStreamError?
+}
+
+struct ClaudeStreamError: Decodable {
+    let type: String?
+    let message: String?
 }
 
 struct ClaudeStreamDelta: Decodable {

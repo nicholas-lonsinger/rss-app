@@ -138,29 +138,94 @@ struct ClaudeAPIServiceTests {
     // MARK: - SSE parsing
 
     @Test("parseSSELine extracts text from content_block_delta event")
-    func parseTextDelta() {
+    func parseTextDelta() throws {
         let service = ClaudeAPIService(defaults: makeTestDefaults())
         let json = #"{"type":"content_block_delta","delta":{"type":"text_delta","text":"Hello"}}"#
-        #expect(service.parseSSELine(json) == "Hello")
+        #expect(try service.parseSSELine(json) == "Hello")
     }
 
     @Test("parseSSELine returns nil for non-delta event types")
-    func parseNonDelta() {
+    func parseNonDelta() throws {
         let service = ClaudeAPIService(defaults: makeTestDefaults())
         let json = #"{"type":"message_start","message":{"id":"abc"}}"#
-        #expect(service.parseSSELine(json) == nil)
+        #expect(try service.parseSSELine(json) == nil)
     }
 
     @Test("parseSSELine returns nil for malformed JSON")
-    func parseMalformed() {
+    func parseMalformed() throws {
         let service = ClaudeAPIService(defaults: makeTestDefaults())
-        #expect(service.parseSSELine("not json at all") == nil)
+        #expect(try service.parseSSELine("not json at all") == nil)
     }
 
     @Test("parseSSELine returns nil for content_block_delta with no text field")
-    func parseDeltaNoText() {
+    func parseDeltaNoText() throws {
         let service = ClaudeAPIService(defaults: makeTestDefaults())
         let json = #"{"type":"content_block_delta","delta":{"type":"input_json_delta","partial_json":"{}"}}"#
-        #expect(service.parseSSELine(json) == nil)
+        #expect(try service.parseSSELine(json) == nil)
+    }
+
+    // MARK: - SSE error event handling
+
+    @Test("parseSSELine throws serverError for error event with message")
+    func parseErrorEvent() {
+        let service = ClaudeAPIService(defaults: makeTestDefaults())
+        let json = #"{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}"#
+        #expect(throws: ClaudeAPIError.self) {
+            try service.parseSSELine(json)
+        }
+    }
+
+    @Test("parseSSELine throws serverError with the error message from the event")
+    func parseErrorEventMessage() {
+        let service = ClaudeAPIService(defaults: makeTestDefaults())
+        let json = #"{"type":"error","error":{"type":"rate_limit_error","message":"Rate limit exceeded"}}"#
+        do {
+            _ = try service.parseSSELine(json)
+            Issue.record("Expected parseSSELine to throw")
+        } catch let error as ClaudeAPIError {
+            guard case .serverError(let message) = error else {
+                Issue.record("Expected serverError, got \(error)")
+                return
+            }
+            #expect(message == "Rate limit exceeded")
+        } catch {
+            Issue.record("Unexpected error type: \(error)")
+        }
+    }
+
+    @Test("parseSSELine throws serverError with fallback message when error object has no message")
+    func parseErrorEventNoMessage() {
+        let service = ClaudeAPIService(defaults: makeTestDefaults())
+        let json = #"{"type":"error","error":{"type":"internal_error"}}"#
+        do {
+            _ = try service.parseSSELine(json)
+            Issue.record("Expected parseSSELine to throw")
+        } catch let error as ClaudeAPIError {
+            guard case .serverError(let message) = error else {
+                Issue.record("Expected serverError, got \(error)")
+                return
+            }
+            #expect(message == "Unknown server error")
+        } catch {
+            Issue.record("Unexpected error type: \(error)")
+        }
+    }
+
+    @Test("parseSSELine throws serverError with fallback message when error object is absent")
+    func parseErrorEventNoErrorObject() {
+        let service = ClaudeAPIService(defaults: makeTestDefaults())
+        let json = #"{"type":"error"}"#
+        do {
+            _ = try service.parseSSELine(json)
+            Issue.record("Expected parseSSELine to throw")
+        } catch let error as ClaudeAPIError {
+            guard case .serverError(let message) = error else {
+                Issue.record("Expected serverError, got \(error)")
+                return
+            }
+            #expect(message == "Unknown server error")
+        } catch {
+            Issue.record("Unexpected error type: \(error)")
+        }
     }
 }
