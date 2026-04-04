@@ -69,6 +69,57 @@ struct DiscussionViewModelTests {
         #expect(vm.hasAPIKey == false)
     }
 
+    @Test("keychainError is set when keychain load fails")
+    func keychainErrorOnLoadFailure() {
+        let keychainMock = MockKeychainService()
+        keychainMock.loadErrorToThrow = KeychainError.loadFailed(-25293)
+        let vm = DiscussionViewModel(
+            article: TestFixtures.makeArticle(),
+            content: makeContent(),
+            claudeService: MockClaudeAPIService(),
+            keychainService: keychainMock
+        )
+        #expect(vm.hasAPIKey == false)
+        #expect(vm.keychainError != nil)
+    }
+
+    @Test("keychainError clears when keychain recovers")
+    func keychainErrorClearsOnRecovery() throws {
+        let keychainMock = MockKeychainService()
+        keychainMock.loadErrorToThrow = KeychainError.loadFailed(-25293)
+        let vm = DiscussionViewModel(
+            article: TestFixtures.makeArticle(),
+            content: makeContent(),
+            claudeService: MockClaudeAPIService(),
+            keychainService: keychainMock
+        )
+        #expect(vm.keychainError != nil)
+
+        keychainMock.loadErrorToThrow = nil
+        try keychainMock.saveAPIKey("sk-test")
+        vm.refreshAPIKeyState()
+        #expect(vm.keychainError == nil)
+        #expect(vm.hasAPIKey == true)
+    }
+
+    @Test("sendMessage shows error when keychain load throws")
+    func sendMessageKeychainError() async {
+        let keychainMock = MockKeychainService()
+        try! keychainMock.saveAPIKey("sk-test")
+        let vm = DiscussionViewModel(
+            article: TestFixtures.makeArticle(),
+            content: makeContent(),
+            claudeService: MockClaudeAPIService(),
+            keychainService: keychainMock
+        )
+        // Inject error after init so hasAPIKey is true but load fails during send
+        keychainMock.loadErrorToThrow = KeychainError.loadFailed(-25293)
+        vm.currentInput = "Hello"
+        await vm.sendMessage()
+        #expect(vm.errorMessage != nil)
+        #expect(vm.messages.isEmpty)
+    }
+
     @Test("sendMessage appends user message then assistant message")
     func sendAppendsMessages() async {
         let vm = makeVM()

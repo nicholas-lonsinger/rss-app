@@ -17,7 +17,9 @@ struct ArticleDiscussionView: View {
     var body: some View {
         NavigationStack {
             Group {
-                if viewModel.hasAPIKey {
+                if let keychainError = viewModel.keychainError {
+                    keychainErrorView(message: keychainError)
+                } else if viewModel.hasAPIKey {
                     chatView
                 } else {
                     noKeyView
@@ -102,6 +104,17 @@ struct ArticleDiscussionView: View {
 
     private var canSend: Bool {
         !viewModel.currentInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !viewModel.isGenerating
+    }
+
+    private func keychainErrorView(message: String) -> some View {
+        ContentUnavailableView {
+            Label("Keychain Error", systemImage: "exclamationmark.lock")
+        } description: {
+            Text(message)
+        } actions: {
+            Button("Try Again") { viewModel.refreshAPIKeyState() }
+                .buttonStyle(.bordered)
+        }
     }
 
     private var noKeyView: some View {

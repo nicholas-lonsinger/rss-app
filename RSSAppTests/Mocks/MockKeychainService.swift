@@ -6,6 +6,7 @@ import Foundation
 final class MockKeychainService: KeychainServicing, @unchecked Sendable {
     private var store: [String: String] = [:]
     var errorToThrow: (any Error)?
+    var loadErrorToThrow: (any Error)?
     var deleteErrorToThrow: (any Error)?
 
     func save(_ value: String, for account: String) throws {
@@ -13,8 +14,9 @@ final class MockKeychainService: KeychainServicing, @unchecked Sendable {
         store[account] = value
     }
 
-    func load(for account: String) -> String? {
-        store[account]
+    func load(for account: String) throws -> String? {
+        if let error = loadErrorToThrow { throw error }
+        return store[account]
     }
 
     func delete(for account: String) throws {

@@ -12,9 +12,9 @@ struct KeychainServiceTests {
     }
 
     @Test("load returns nil when no value has been saved")
-    func loadWhenEmpty() {
+    func loadWhenEmpty() throws {
         let (service, account) = makeService()
-        #expect(service.load(for: account) == nil)
+        #expect(try service.load(for: account) == nil)
     }
 
     @Test("save and load roundtrip")
@@ -22,7 +22,7 @@ struct KeychainServiceTests {
         let (service, account) = makeService()
         defer { try? service.delete(for: account) }
         try service.save("sk-test-key", for: account)
-        #expect(service.load(for: account) == "sk-test-key")
+        #expect(try service.load(for: account) == "sk-test-key")
     }
 
     @Test("delete clears a saved value")
@@ -30,7 +30,7 @@ struct KeychainServiceTests {
         let (service, account) = makeService()
         try service.save("sk-test-key", for: account)
         try service.delete(for: account)
-        #expect(service.load(for: account) == nil)
+        #expect(try service.load(for: account) == nil)
     }
 
     @Test("save overwrites an existing value")
@@ -39,7 +39,7 @@ struct KeychainServiceTests {
         defer { try? service.delete(for: account) }
         try service.save("first-value", for: account)
         try service.save("second-value", for: account)
-        #expect(service.load(for: account) == "second-value")
+        #expect(try service.load(for: account) == "second-value")
     }
 
     @Test("delete succeeds when no value exists (errSecItemNotFound)")
@@ -56,29 +56,47 @@ struct KeychainServiceTests {
 struct KeychainAPIKeyConvenienceTests {
 
     @Test("hasAPIKey returns false when no key is stored")
-    func hasAPIKeyWhenEmpty() {
+    func hasAPIKeyWhenEmpty() throws {
         let mock = MockKeychainService()
-        #expect(mock.hasAPIKey == false)
+        #expect(try mock.hasAPIKey() == false)
     }
 
     @Test("hasAPIKey returns true after saving a key")
     func hasAPIKeyAfterSave() throws {
         let mock = MockKeychainService()
         try mock.saveAPIKey("sk-test")
-        #expect(mock.hasAPIKey == true)
+        #expect(try mock.hasAPIKey() == true)
+    }
+
+    @Test("hasAPIKey throws when load fails")
+    func hasAPIKeyThrowsOnError() {
+        let mock = MockKeychainService()
+        mock.loadErrorToThrow = KeychainError.loadFailed(-25293)
+        #expect(throws: KeychainError.self) {
+            try mock.hasAPIKey()
+        }
     }
 
     @Test("loadAPIKey returns nil when no key is stored")
-    func loadAPIKeyWhenEmpty() {
+    func loadAPIKeyWhenEmpty() throws {
         let mock = MockKeychainService()
-        #expect(mock.loadAPIKey() == nil)
+        #expect(try mock.loadAPIKey() == nil)
     }
 
     @Test("saveAPIKey and loadAPIKey roundtrip")
     func saveAndLoadAPIKey() throws {
         let mock = MockKeychainService()
         try mock.saveAPIKey("sk-my-key")
-        #expect(mock.loadAPIKey() == "sk-my-key")
+        #expect(try mock.loadAPIKey() == "sk-my-key")
+    }
+
+    @Test("loadAPIKey propagates errors from load")
+    func loadAPIKeyPropagatesError() {
+        let mock = MockKeychainService()
+        mock.loadErrorToThrow = KeychainError.loadFailed(-25293)
+        #expect(throws: KeychainError.self) {
+            try mock.loadAPIKey()
+        }
     }
 
     @Test("deleteAPIKey clears a saved key")
@@ -86,8 +104,8 @@ struct KeychainAPIKeyConvenienceTests {
         let mock = MockKeychainService()
         try mock.saveAPIKey("sk-my-key")
         try mock.deleteAPIKey()
-        #expect(mock.hasAPIKey == false)
-        #expect(mock.loadAPIKey() == nil)
+        #expect(try mock.hasAPIKey() == false)
+        #expect(try mock.loadAPIKey() == nil)
     }
 
     @Test("saveAPIKey propagates errors from save")
