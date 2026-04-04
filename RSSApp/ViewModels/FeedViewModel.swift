@@ -64,7 +64,7 @@ final class FeedViewModel {
                 let reloadLimit = max(articles.count, Self.pageSize)
                 articles = try persistence.articles(for: feed, offset: 0, limit: reloadLimit)
                 hasMoreArticles = articles.count == reloadLimit
-                Self.logger.notice("Feed loaded: \(self.articles.count, privacy: .public) articles in first page")
+                Self.logger.notice("Feed loaded: \(self.articles.count, privacy: .public) articles (reload limit: \(reloadLimit, privacy: .public))")
             } else {
                 Self.logger.debug("Feed unchanged (304) for '\(self.feed.title, privacy: .public)'")
             }
