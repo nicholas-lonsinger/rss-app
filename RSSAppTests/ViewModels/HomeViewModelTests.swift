@@ -167,6 +167,180 @@ struct HomeViewModelTests {
         #expect(viewModel.errorMessage != nil)
     }
 
+    // MARK: - Paginated All Articles
+
+    @Test("loadAllArticles loads first page into allArticlesList")
+    @MainActor
+    func loadAllArticlesFirstPage() {
+        let feed = TestFixtures.makePersistentFeed()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+
+        // Create articles fewer than page size
+        let articles = (0..<3).map { i in
+            let article = TestFixtures.makePersistentArticle(
+                articleID: "a\(i)",
+                publishedDate: Date(timeIntervalSince1970: Double(i) * 1_000_000)
+            )
+            article.feed = feed
+            return article
+        }
+        mockPersistence.articlesByFeedID[feed.id] = articles
+
+        let viewModel = HomeViewModel(persistence: mockPersistence)
+        viewModel.loadAllArticles()
+
+        #expect(viewModel.allArticlesList.count == 3)
+        #expect(viewModel.hasMoreAllArticles == false)
+        #expect(viewModel.errorMessage == nil)
+    }
+
+    @Test("loadMoreAllArticles appends next page")
+    @MainActor
+    func loadMoreAllArticlesAppendsPage() {
+        let feed = TestFixtures.makePersistentFeed()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+
+        // Create exactly pageSize + 5 articles to force a second page
+        let totalCount = HomeViewModel.pageSize + 5
+        let articles = (0..<totalCount).map { i in
+            let article = TestFixtures.makePersistentArticle(
+                articleID: "a\(i)",
+                publishedDate: Date(timeIntervalSince1970: Double(totalCount - i) * 1_000_000)
+            )
+            article.feed = feed
+            return article
+        }
+        mockPersistence.articlesByFeedID[feed.id] = articles
+
+        let viewModel = HomeViewModel(persistence: mockPersistence)
+        viewModel.loadAllArticles()
+
+        #expect(viewModel.allArticlesList.count == HomeViewModel.pageSize)
+        #expect(viewModel.hasMoreAllArticles == true)
+
+        viewModel.loadMoreAllArticles()
+
+        #expect(viewModel.allArticlesList.count == totalCount)
+        #expect(viewModel.hasMoreAllArticles == false)
+    }
+
+    @Test("loadMoreAllArticles does nothing when no more pages")
+    @MainActor
+    func loadMoreAllArticlesNoOp() {
+        let mockPersistence = MockFeedPersistenceService()
+
+        let viewModel = HomeViewModel(persistence: mockPersistence)
+        viewModel.loadAllArticles()
+        #expect(viewModel.hasMoreAllArticles == false)
+
+        // Should be a no-op
+        viewModel.loadMoreAllArticles()
+        #expect(viewModel.allArticlesList.isEmpty)
+    }
+
+    @Test("loadAllArticles sets errorMessage on failure")
+    @MainActor
+    func loadAllArticlesError() {
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.errorToThrow = NSError(domain: "test", code: 1)
+
+        let viewModel = HomeViewModel(persistence: mockPersistence)
+        viewModel.loadAllArticles()
+
+        #expect(viewModel.allArticlesList.isEmpty)
+        #expect(viewModel.errorMessage != nil)
+    }
+
+    // MARK: - Paginated Unread Articles
+
+    @Test("loadUnreadArticles loads first page into unreadArticlesList")
+    @MainActor
+    func loadUnreadArticlesFirstPage() {
+        let feed = TestFixtures.makePersistentFeed()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+
+        let unread1 = TestFixtures.makePersistentArticle(articleID: "u1", isRead: false)
+        unread1.feed = feed
+        let unread2 = TestFixtures.makePersistentArticle(articleID: "u2", isRead: false)
+        unread2.feed = feed
+        let read = TestFixtures.makePersistentArticle(articleID: "r1", isRead: true)
+        read.feed = feed
+        mockPersistence.articlesByFeedID[feed.id] = [unread1, unread2, read]
+
+        let viewModel = HomeViewModel(persistence: mockPersistence)
+        viewModel.loadUnreadArticles()
+
+        #expect(viewModel.unreadArticlesList.count == 2)
+        #expect(viewModel.hasMoreUnreadArticles == false)
+    }
+
+    @Test("loadMoreUnreadArticles appends next page")
+    @MainActor
+    func loadMoreUnreadArticlesAppendsPage() {
+        let feed = TestFixtures.makePersistentFeed()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+
+        let totalCount = HomeViewModel.pageSize + 3
+        let articles = (0..<totalCount).map { i in
+            let article = TestFixtures.makePersistentArticle(
+                articleID: "u\(i)",
+                publishedDate: Date(timeIntervalSince1970: Double(totalCount - i) * 1_000_000),
+                isRead: false
+            )
+            article.feed = feed
+            return article
+        }
+        mockPersistence.articlesByFeedID[feed.id] = articles
+
+        let viewModel = HomeViewModel(persistence: mockPersistence)
+        viewModel.loadUnreadArticles()
+
+        #expect(viewModel.unreadArticlesList.count == HomeViewModel.pageSize)
+        #expect(viewModel.hasMoreUnreadArticles == true)
+
+        viewModel.loadMoreUnreadArticles()
+
+        #expect(viewModel.unreadArticlesList.count == totalCount)
+        #expect(viewModel.hasMoreUnreadArticles == false)
+    }
+
+    @Test("loadUnreadArticles sets errorMessage on failure")
+    @MainActor
+    func loadUnreadArticlesPaginatedError() {
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.errorToThrow = NSError(domain: "test", code: 1)
+
+        let viewModel = HomeViewModel(persistence: mockPersistence)
+        viewModel.loadUnreadArticles()
+
+        #expect(viewModel.unreadArticlesList.isEmpty)
+        #expect(viewModel.errorMessage != nil)
+    }
+
+    @Test("loadAllArticles resets list before loading")
+    @MainActor
+    func loadAllArticlesResetsState() {
+        let feed = TestFixtures.makePersistentFeed()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+
+        let article = TestFixtures.makePersistentArticle(articleID: "a1")
+        article.feed = feed
+        mockPersistence.articlesByFeedID[feed.id] = [article]
+
+        let viewModel = HomeViewModel(persistence: mockPersistence)
+        viewModel.loadAllArticles()
+        #expect(viewModel.allArticlesList.count == 1)
+
+        // Load again should reset, not duplicate
+        viewModel.loadAllArticles()
+        #expect(viewModel.allArticlesList.count == 1)
+    }
+
     // MARK: - Read Status
 
     @Test("markAsRead sets read status and updates unread count")

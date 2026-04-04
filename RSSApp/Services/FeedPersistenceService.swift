@@ -22,10 +22,16 @@ protocol FeedPersisting: Sendable {
     // MARK: Article operations
 
     func articles(for feed: PersistentFeed) throws -> [PersistentArticle]
+    /// Returns articles for a feed with pagination, sorted by published date descending (newest first).
+    func articles(for feed: PersistentFeed, offset: Int, limit: Int) throws -> [PersistentArticle]
     /// Returns all articles across all feeds, sorted by published date descending (newest first).
     func allArticles() throws -> [PersistentArticle]
+    /// Returns articles across all feeds with pagination, sorted by published date descending (newest first).
+    func allArticles(offset: Int, limit: Int) throws -> [PersistentArticle]
     /// Returns all unread articles across all feeds, sorted by published date descending (newest first).
     func allUnreadArticles() throws -> [PersistentArticle]
+    /// Returns unread articles across all feeds with pagination, sorted by published date descending (newest first).
+    func allUnreadArticles(offset: Int, limit: Int) throws -> [PersistentArticle]
     func upsertArticles(_ articles: [Article], for feed: PersistentFeed) throws
     func markArticleRead(_ article: PersistentArticle, isRead: Bool) throws
     func unreadCount(for feed: PersistentFeed) throws -> Int
@@ -134,12 +140,36 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
         return try modelContext.fetch(descriptor)
     }
 
+    func articles(for feed: PersistentFeed, offset: Int, limit: Int) throws -> [PersistentArticle] {
+        let feedID = feed.persistentModelID
+        var descriptor = FetchDescriptor<PersistentArticle>(
+            predicate: #Predicate { $0.feed?.persistentModelID == feedID },
+            sortBy: [SortDescriptor(\.publishedDate, order: .reverse)]
+        )
+        descriptor.fetchOffset = offset
+        descriptor.fetchLimit = limit
+        let articles = try modelContext.fetch(descriptor)
+        Self.logger.debug("Fetched \(articles.count, privacy: .public) articles for feed (offset: \(offset, privacy: .public), limit: \(limit, privacy: .public))")
+        return articles
+    }
+
     func allArticles() throws -> [PersistentArticle] {
         let descriptor = FetchDescriptor<PersistentArticle>(
             sortBy: [SortDescriptor(\.publishedDate, order: .reverse)]
         )
         let articles = try modelContext.fetch(descriptor)
         Self.logger.debug("Fetched \(articles.count, privacy: .public) total articles")
+        return articles
+    }
+
+    func allArticles(offset: Int, limit: Int) throws -> [PersistentArticle] {
+        var descriptor = FetchDescriptor<PersistentArticle>(
+            sortBy: [SortDescriptor(\.publishedDate, order: .reverse)]
+        )
+        descriptor.fetchOffset = offset
+        descriptor.fetchLimit = limit
+        let articles = try modelContext.fetch(descriptor)
+        Self.logger.debug("Fetched \(articles.count, privacy: .public) total articles (offset: \(offset, privacy: .public), limit: \(limit, privacy: .public))")
         return articles
     }
 
@@ -150,6 +180,18 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
         )
         let articles = try modelContext.fetch(descriptor)
         Self.logger.debug("Fetched \(articles.count, privacy: .public) unread articles")
+        return articles
+    }
+
+    func allUnreadArticles(offset: Int, limit: Int) throws -> [PersistentArticle] {
+        var descriptor = FetchDescriptor<PersistentArticle>(
+            predicate: #Predicate { !$0.isRead },
+            sortBy: [SortDescriptor(\.publishedDate, order: .reverse)]
+        )
+        descriptor.fetchOffset = offset
+        descriptor.fetchLimit = limit
+        let articles = try modelContext.fetch(descriptor)
+        Self.logger.debug("Fetched \(articles.count, privacy: .public) unread articles (offset: \(offset, privacy: .public), limit: \(limit, privacy: .public))")
         return articles
     }
 

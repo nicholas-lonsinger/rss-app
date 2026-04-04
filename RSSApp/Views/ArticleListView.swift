@@ -9,7 +9,7 @@ struct ArticleListView: View {
     var body: some View {
         Group {
             if viewModel.isLoading && viewModel.articles.isEmpty {
-                ProgressView("Loading feed…")
+                ProgressView("Loading feed\u{2026}")
             } else if let errorMessage = viewModel.errorMessage, viewModel.articles.isEmpty {
                 ContentUnavailableView {
                     Label("Feed Unavailable", systemImage: "exclamationmark.triangle")
@@ -41,6 +41,11 @@ struct ArticleListView: View {
                             )
                         }
                         .tint(article.isRead ? .blue : .gray)
+                    }
+                    .onAppear {
+                        if article.articleID == viewModel.articles.last?.articleID {
+                            viewModel.loadMoreArticles()
+                        }
                     }
                 }
                 .listStyle(.plain)

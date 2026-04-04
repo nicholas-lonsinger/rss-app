@@ -137,6 +137,96 @@ struct FeedViewModelTests {
         #expect(viewModel.errorMessage != nil)
     }
 
+    // MARK: - Paginated Loading
+
+    @Test("loadMoreArticles appends next page")
+    @MainActor
+    func loadMoreArticlesAppendsPage() async {
+        let feed = TestFixtures.makePersistentFeed(feedURL: URL(string: "https://example.com/feed")!)
+        let mock = MockFeedFetchingService()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+
+        // Create pageSize + 5 articles
+        let totalCount = FeedViewModel.pageSize + 5
+        let articles = (0..<totalCount).map { i in
+            TestFixtures.makeArticle(
+                id: "a\(i)",
+                title: "Article \(i)",
+                publishedDate: Date(timeIntervalSince1970: Double(totalCount - i) * 1_000_000)
+            )
+        }
+        mock.feedToReturn = TestFixtures.makeFeed(articles: articles)
+
+        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence)
+        await viewModel.loadFeed()
+
+        // After loadFeed, should have first page
+        #expect(viewModel.articles.count == FeedViewModel.pageSize)
+        #expect(viewModel.hasMoreArticles == true)
+
+        // Load next page
+        viewModel.loadMoreArticles()
+
+        #expect(viewModel.articles.count == totalCount)
+        #expect(viewModel.hasMoreArticles == false)
+    }
+
+    @Test("loadMoreArticles is no-op when no more pages")
+    @MainActor
+    func loadMoreArticlesNoOp() async {
+        let feed = TestFixtures.makePersistentFeed(feedURL: URL(string: "https://example.com/feed")!)
+        let mock = MockFeedFetchingService()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+
+        // Create fewer articles than page size
+        mock.feedToReturn = TestFixtures.makeFeed(articles: [
+            TestFixtures.makeArticle(id: "1", title: "Article 1"),
+        ])
+
+        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence)
+        await viewModel.loadFeed()
+
+        #expect(viewModel.articles.count == 1)
+        #expect(viewModel.hasMoreArticles == false)
+
+        // Should be no-op
+        viewModel.loadMoreArticles()
+        #expect(viewModel.articles.count == 1)
+    }
+
+    @Test("loadMoreArticles sets errorMessage on persistence failure")
+    @MainActor
+    func loadMoreArticlesPersistenceError() async {
+        let feed = TestFixtures.makePersistentFeed(feedURL: URL(string: "https://example.com/feed")!)
+        let mock = MockFeedFetchingService()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+
+        // Create enough articles for pagination
+        let totalCount = FeedViewModel.pageSize + 5
+        let articles = (0..<totalCount).map { i in
+            TestFixtures.makeArticle(
+                id: "a\(i)",
+                title: "Article \(i)",
+                publishedDate: Date(timeIntervalSince1970: Double(totalCount - i) * 1_000_000)
+            )
+        }
+        mock.feedToReturn = TestFixtures.makeFeed(articles: articles)
+
+        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence)
+        await viewModel.loadFeed()
+
+        #expect(viewModel.hasMoreArticles == true)
+
+        // Now inject error for the next page load
+        mockPersistence.errorToThrow = NSError(domain: "test", code: 1)
+        viewModel.loadMoreArticles()
+
+        #expect(viewModel.errorMessage != nil)
+    }
+
     // MARK: - Read Status
 
     @Test("markAsRead sets read status on unread article")

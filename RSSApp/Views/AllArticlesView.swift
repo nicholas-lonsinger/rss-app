@@ -4,21 +4,20 @@ struct AllArticlesView: View {
     let persistence: FeedPersisting
     let homeViewModel: HomeViewModel
 
-    @State private var articles: [PersistentArticle] = []
     @State private var selectedArticle: PersistentArticle?
 
     private let thumbnailService: ArticleThumbnailCaching = ArticleThumbnailService()
 
     var body: some View {
         Group {
-            if articles.isEmpty {
+            if homeViewModel.allArticlesList.isEmpty {
                 ContentUnavailableView {
                     Label("No Articles", systemImage: "doc.text")
                 } description: {
                     Text("Articles from your feeds will appear here.")
                 }
             } else {
-                List(articles, id: \.articleID) { article in
+                List(homeViewModel.allArticlesList, id: \.articleID) { article in
                     Button {
                         if homeViewModel.markAsRead(article) {
                             selectedArticle = article
@@ -34,7 +33,7 @@ struct AllArticlesView: View {
                     .swipeActions(edge: .leading) {
                         Button {
                             homeViewModel.toggleReadStatus(article)
-                            reloadArticles()
+                            homeViewModel.loadAllArticles()
                         } label: {
                             Label(
                                 article.isRead ? "Unread" : "Read",
@@ -43,13 +42,18 @@ struct AllArticlesView: View {
                         }
                         .tint(article.isRead ? .blue : .gray)
                     }
+                    .onAppear {
+                        if article.articleID == homeViewModel.allArticlesList.last?.articleID {
+                            homeViewModel.loadMoreAllArticles()
+                        }
+                    }
                 }
                 .listStyle(.plain)
             }
         }
         .navigationTitle("All Articles")
         .fullScreenCover(item: $selectedArticle, onDismiss: {
-            reloadArticles()
+            homeViewModel.loadAllArticles()
         }) { article in
             ArticleReaderView(article: article, persistence: persistence)
         }
@@ -59,7 +63,7 @@ struct AllArticlesView: View {
             Text(homeViewModel.errorMessage ?? "")
         }
         .task {
-            reloadArticles()
+            homeViewModel.loadAllArticles()
         }
         .onDisappear {
             homeViewModel.loadUnreadCount()
@@ -73,9 +77,5 @@ struct AllArticlesView: View {
             get: { homeViewModel.errorMessage != nil },
             set: { if !$0 { homeViewModel.clearError() } }
         )
-    }
-
-    private func reloadArticles() {
-        articles = homeViewModel.allArticles()
     }
 }
