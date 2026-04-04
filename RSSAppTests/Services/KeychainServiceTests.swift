@@ -83,6 +83,15 @@ struct KeychainAPIKeyConvenienceTests {
         #expect(mock.loadAPIKey() == nil)
     }
 
+    @Test("saveAPIKey propagates errors from save")
+    func saveAPIKeyPropagatesError() {
+        let mock = MockKeychainService()
+        mock.errorToThrow = KeychainError.saveFailed(-25308)
+        #expect(throws: KeychainError.self) {
+            try mock.saveAPIKey("sk-test")
+        }
+    }
+
     @Test("apiKeyAccount returns the expected account identifier")
     func apiKeyAccountValue() {
         #expect(MockKeychainService.apiKeyAccount == "anthropic-api-key")

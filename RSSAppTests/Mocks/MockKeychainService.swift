@@ -5,8 +5,10 @@ import Foundation
 // single-threaded test contexts where properties are set before the async call.
 final class MockKeychainService: KeychainServicing, @unchecked Sendable {
     private var store: [String: String] = [:]
+    var errorToThrow: (any Error)?
 
     func save(_ value: String, for account: String) throws {
+        if let error = errorToThrow { throw error }
         store[account] = value
     }
 
