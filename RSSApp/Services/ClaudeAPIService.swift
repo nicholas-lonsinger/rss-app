@@ -65,7 +65,7 @@ struct ClaudeAPIService: ClaudeAPIServicing {
         }
 
         let request = try buildRequest(url: url, apiKey: apiKey, systemPrompt: systemPrompt, messages: messages)
-        Self.logger.debug("sendMessage() called with \(messages.count, privacy: .public) messages")
+        Self.logger.debug("sendMessage() called with \(messages.count, privacy: .public) messages, model=\(model, privacy: .public), maxTokens=\(maxTokens, privacy: .public)")
 
         return AsyncThrowingStream { continuation in
             Task {

@@ -107,7 +107,7 @@ struct APIKeySettingsView: View {
     private var modelValidationView: some View {
         let result = ModelValidation.validate(modelInput)
         switch result {
-        case .valid:
+        case .valid(_):
             Label("Valid model identifier", systemImage: "checkmark.circle.fill")
                 .font(.caption)
                 .foregroundStyle(.green)
@@ -126,7 +126,7 @@ struct APIKeySettingsView: View {
     private var maxTokensValidationView: some View {
         let result = MaxTokensValidation.validate(maxTokensInput)
         switch result {
-        case .valid:
+        case .valid(_):
             Label("Valid token count", systemImage: "checkmark.circle.fill")
                 .font(.caption)
                 .foregroundStyle(.green)
@@ -159,65 +159,28 @@ struct APIKeySettingsView: View {
     }
 
     private func saveModelIdentifier(_ value: String) {
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty {
+        switch ModelValidation.validate(value) {
+        case .empty:
             UserDefaults.standard.removeObject(forKey: ClaudeAPIService.modelDefaultsKey)
-            Self.logger.debug("Model identifier cleared, will use default")
-        } else if case .valid = ModelValidation.validate(trimmed) {
-            UserDefaults.standard.set(trimmed, forKey: ClaudeAPIService.modelDefaultsKey)
-            Self.logger.debug("Model identifier saved: \(trimmed, privacy: .public)")
+            Self.logger.notice("Model identifier cleared, will use default")
+        case .valid(let validated):
+            UserDefaults.standard.set(validated, forKey: ClaudeAPIService.modelDefaultsKey)
+            Self.logger.notice("Model identifier saved: \(validated, privacy: .public)")
+        case .invalid(let reason):
+            Self.logger.debug("Model identifier input rejected: \(reason, privacy: .public)")
         }
     }
 
     private func saveMaxTokens(_ value: String) {
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty {
+        switch MaxTokensValidation.validate(value) {
+        case .empty:
             UserDefaults.standard.removeObject(forKey: ClaudeAPIService.maxTokensDefaultsKey)
-            Self.logger.debug("Max tokens cleared, will use default")
-        } else if let intValue = Int(trimmed), intValue >= 1 {
-            UserDefaults.standard.set(intValue, forKey: ClaudeAPIService.maxTokensDefaultsKey)
-            Self.logger.debug("Max tokens saved: \(intValue, privacy: .public)")
+            Self.logger.notice("Max tokens cleared, will use default")
+        case .valid(let validated):
+            UserDefaults.standard.set(validated, forKey: ClaudeAPIService.maxTokensDefaultsKey)
+            Self.logger.notice("Max tokens saved: \(validated, privacy: .public)")
+        case .invalid(let reason):
+            Self.logger.debug("Max tokens input rejected: \(reason, privacy: .public)")
         }
-    }
-}
-
-// MARK: - Validation
-
-enum ModelValidation: Equatable {
-    case valid
-    case empty
-    case invalid(String)
-
-    /// Pattern: lowercase alphanumeric characters, hyphens, and digits.
-    private static let validCharacterSet = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyz0123456789-")
-
-    static func validate(_ input: String) -> ModelValidation {
-        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty { return .empty }
-        if !trimmed.hasPrefix("claude-") {
-            return .invalid("Model ID must start with 'claude-'")
-        }
-        if trimmed.unicodeScalars.contains(where: { !validCharacterSet.contains($0) }) {
-            return .invalid("Only lowercase letters, digits, and hyphens are allowed")
-        }
-        return .valid
-    }
-}
-
-enum MaxTokensValidation: Equatable {
-    case valid
-    case empty
-    case invalid(String)
-
-    static func validate(_ input: String) -> MaxTokensValidation {
-        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty { return .empty }
-        guard let value = Int(trimmed) else {
-            return .invalid("Must be a whole number")
-        }
-        if value < 1 {
-            return .invalid("Must be at least 1")
-        }
-        return .valid
     }
 }

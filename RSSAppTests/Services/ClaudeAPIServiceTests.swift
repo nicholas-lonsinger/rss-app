@@ -9,6 +9,7 @@ struct ClaudeAPIServiceTests {
     private func makeTestDefaults() -> UserDefaults {
         let suiteName = "com.rssapp.test.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
         return defaults
     }
 
@@ -113,6 +114,14 @@ struct ClaudeAPIServiceTests {
     func maxTokensZero() {
         let defaults = makeTestDefaults()
         defaults.set(0, forKey: ClaudeAPIService.maxTokensDefaultsKey)
+        let service = ClaudeAPIService(defaults: defaults)
+        #expect(service.maxTokens == 4096)
+    }
+
+    @Test("maxTokens returns default when stored value is negative")
+    func maxTokensNegative() {
+        let defaults = makeTestDefaults()
+        defaults.set(-100, forKey: ClaudeAPIService.maxTokensDefaultsKey)
         let service = ClaudeAPIService(defaults: defaults)
         #expect(service.maxTokens == 4096)
     }

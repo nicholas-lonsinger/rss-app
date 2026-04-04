@@ -4,14 +4,14 @@ import Testing
 @Suite("ModelValidation")
 struct ModelValidationTests {
 
-    @Test("valid model identifier passes validation")
+    @Test("valid model identifier passes validation and carries trimmed value")
     func validModel() {
-        #expect(ModelValidation.validate("claude-haiku-4-5-20251001") == .valid)
+        #expect(ModelValidation.validate("claude-haiku-4-5-20251001") == .valid("claude-haiku-4-5-20251001"))
     }
 
     @Test("valid model with simple name passes validation")
     func validModelSimple() {
-        #expect(ModelValidation.validate("claude-sonnet-4-6") == .valid)
+        #expect(ModelValidation.validate("claude-sonnet-4-6") == .valid("claude-sonnet-4-6"))
     }
 
     @Test("empty string returns .empty")
@@ -52,26 +52,26 @@ struct ModelValidationTests {
     func claudeHyphenAlone() {
         // Technically starts with "claude-" and all characters valid, so passes client-side.
         // The API will reject it at runtime.
-        #expect(ModelValidation.validate("claude-") == .valid)
+        #expect(ModelValidation.validate("claude-") == .valid("claude-"))
     }
 }
 
 @Suite("MaxTokensValidation")
 struct MaxTokensValidationTests {
 
-    @Test("valid positive integer passes validation")
+    @Test("valid positive integer passes validation and carries parsed value")
     func validNumber() {
-        #expect(MaxTokensValidation.validate("4096") == .valid)
+        #expect(MaxTokensValidation.validate("4096") == .valid(4096))
     }
 
     @Test("1 is valid (minimum)")
     func minimumValue() {
-        #expect(MaxTokensValidation.validate("1") == .valid)
+        #expect(MaxTokensValidation.validate("1") == .valid(1))
     }
 
     @Test("large number is valid")
     func largeNumber() {
-        #expect(MaxTokensValidation.validate("128000") == .valid)
+        #expect(MaxTokensValidation.validate("128000") == .valid(128000))
     }
 
     @Test("empty string returns .empty")
