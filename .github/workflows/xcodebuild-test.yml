@@ -20,13 +20,19 @@ jobs:
         with:
           fetch-depth: 1
 
+      - name: Environment info
+        run: |
+          xcodebuild -version
+          xcrun simctl list runtimes
+          xcrun simctl list devices available
+
       - name: Build for testing
         run: |
           set -o pipefail
           xcodebuild build-for-testing \
             -project RSSApp.xcodeproj \
             -scheme RSSApp \
-            -destination 'platform=iOS Simulator,OS=latest' \
+            -destination 'generic/platform=iOS Simulator' \
             -derivedDataPath DerivedData \
             CODE_SIGN_IDENTITY="-" \
             CODE_SIGNING_REQUIRED=NO \
@@ -39,7 +45,7 @@ jobs:
           xcodebuild test-without-building \
             -project RSSApp.xcodeproj \
             -scheme RSSApp \
-            -destination 'platform=iOS Simulator,OS=latest' \
+            -destination 'generic/platform=iOS Simulator' \
             -derivedDataPath DerivedData \
             -resultBundlePath TestResults.xcresult \
             CODE_SIGN_IDENTITY="-" \
