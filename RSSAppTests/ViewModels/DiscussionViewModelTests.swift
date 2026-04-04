@@ -38,12 +38,32 @@ struct DiscussionViewModelTests {
         )
     }
 
-    @Test("hasAPIKey reflects keychain state")
+    @Test("hasAPIKey reflects keychain state at init")
     func hasAPIKey() {
         let withKey = makeVM(hasKey: true)
         let withoutKey = makeVM(hasKey: false)
         #expect(withKey.hasAPIKey == true)
         #expect(withoutKey.hasAPIKey == false)
+    }
+
+    @Test("refreshHasAPIKey picks up keychain changes after init")
+    func refreshHasAPIKey() throws {
+        let keychainMock = MockKeychainService()
+        let vm = DiscussionViewModel(
+            article: TestFixtures.makeArticle(),
+            content: makeContent(),
+            claudeService: MockClaudeAPIService(),
+            keychainService: keychainMock
+        )
+        #expect(vm.hasAPIKey == false)
+
+        try keychainMock.saveAPIKey("sk-test")
+        vm.refreshHasAPIKey()
+        #expect(vm.hasAPIKey == true)
+
+        keychainMock.deleteAPIKey()
+        vm.refreshHasAPIKey()
+        #expect(vm.hasAPIKey == false)
     }
 
     @Test("sendMessage appends user message then assistant message")

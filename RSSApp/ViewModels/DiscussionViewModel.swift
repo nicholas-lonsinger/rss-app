@@ -12,10 +12,7 @@ final class DiscussionViewModel {
     var currentInput: String = ""
     var isGenerating: Bool = false
     var errorMessage: String?
-
-    var hasAPIKey: Bool {
-        keychainService.hasAPIKey
-    }
+    private(set) var hasAPIKey: Bool = false
 
     private let article: Article
     private let content: ArticleContent
@@ -32,6 +29,12 @@ final class DiscussionViewModel {
         self.content = content
         self.claudeService = claudeService ?? ClaudeAPIService()
         self.keychainService = keychainService ?? KeychainService()
+        self.hasAPIKey = self.keychainService.hasAPIKey
+    }
+
+    /// Re-checks the Keychain for API key presence and updates the cached state.
+    func refreshHasAPIKey() {
+        hasAPIKey = keychainService.hasAPIKey
     }
 
     func sendMessage() async {

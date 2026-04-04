@@ -7,15 +7,11 @@ struct APIKeySettingsView: View {
     @State private var saveError: String?
     @State private var modelInput: String = ""
     @State private var maxTokensInput: String = ""
+    @State private var hasAPIKey: Bool = false
 
     private static let logger = Logger(category: "APIKeySettingsView")
 
     private let keychainService = KeychainService()
-
-    /// Whether an API key is currently stored in the Keychain.
-    private var hasAPIKey: Bool {
-        keychainService.hasAPIKey
-    }
 
     var body: some View {
         Form {
@@ -49,6 +45,7 @@ struct APIKeySettingsView: View {
                 Button("Remove Key", role: .destructive) {
                     keychainService.deleteAPIKey()
                     keyInput = ""
+                    refreshHasAPIKey()
                 }
                 .disabled(!hasAPIKey)
             }
@@ -58,6 +55,7 @@ struct APIKeySettingsView: View {
         .navigationTitle("API Key")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
+            refreshHasAPIKey()
             if let existing = keychainService.loadAPIKey() {
                 // Show a placeholder so the user knows a key is set, without revealing it.
                 keyInput = String(repeating: "•", count: min(existing.count, 20))
@@ -149,6 +147,12 @@ struct APIKeySettingsView: View {
         }
     }
 
+    // MARK: - Keychain State
+
+    private func refreshHasAPIKey() {
+        hasAPIKey = keychainService.hasAPIKey
+    }
+
     // MARK: - Persistence
 
     private func saveKey() {
@@ -160,6 +164,7 @@ struct APIKeySettingsView: View {
         do {
             try keychainService.saveAPIKey(trimmed)
             isSaved = true
+            refreshHasAPIKey()
             Self.logger.notice("API key saved to Keychain")
         } catch {
             saveError = "Unable to save your API key to the Keychain. Please try again."

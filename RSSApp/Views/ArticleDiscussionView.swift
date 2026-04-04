@@ -30,7 +30,12 @@ struct ArticleDiscussionView: View {
                     Button("Done") { dismiss() }
                 }
             }
-            .sheet(isPresented: $showSettings) {
+            .onAppear {
+                viewModel.refreshHasAPIKey()
+            }
+            .sheet(isPresented: $showSettings, onDismiss: {
+                viewModel.refreshHasAPIKey()
+            }) {
                 NavigationStack {
                     APIKeySettingsView()
                         .toolbar {
