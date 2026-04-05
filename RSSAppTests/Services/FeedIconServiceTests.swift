@@ -33,6 +33,30 @@ struct FeedIconServiceTests {
         #expect(result.first == imageURL)
     }
 
+    @Test("Includes favicon.ico fallback for site URL when HTML fetch fails")
+    func resolveFallbackFaviconWhenHTMLFails() async {
+        let siteURL = URL(string: "https://unreachable-test-host.invalid")!
+        let result = await service.resolveIconCandidates(feedSiteURL: siteURL, feedImageURL: nil)
+
+        // HTML fetch fails for unreachable host, but /favicon.ico fallback should still appear
+        #expect(result.contains(URL(string: "https://unreachable-test-host.invalid/favicon.ico")!))
+    }
+
+    @Test("Feed image URL appears before favicon.ico fallback")
+    func resolveFeedImageBeforeFavicon() async {
+        let imageURL = URL(string: "https://example.com/logo.png")!
+        let siteURL = URL(string: "https://unreachable-test-host.invalid")!
+        let result = await service.resolveIconCandidates(feedSiteURL: siteURL, feedImageURL: imageURL)
+
+        #expect(result.first == imageURL)
+        // favicon.ico should come after the feed image URL
+        let faviconURL = URL(string: "https://unreachable-test-host.invalid/favicon.ico")!
+        if let imageIndex = result.firstIndex(of: imageURL),
+           let faviconIndex = result.firstIndex(of: faviconURL) {
+            #expect(imageIndex < faviconIndex)
+        }
+    }
+
     // MARK: - cachedIconFileURL
 
     @Test("Returns nil for uncached feed ID")

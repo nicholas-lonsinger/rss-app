@@ -179,4 +179,17 @@ struct HTMLUtilitiesTests {
     func extractOGImageEmptyHTML() {
         #expect(HTMLUtilities.extractOGImageURL(from: "") == nil)
     }
+
+    @Test("Extracts og:image with CDN URL from platform-hosted blog")
+    func extractOGImageCDNURL() {
+        // Simulates platform-hosted blogs (Medium, Substack) that use CDN URLs for og:image
+        let html = """
+            <html><head>
+            <meta property="og:image" content="https://cdn-images.example.com/max/1200/1*abc123.jpeg">
+            <meta property="og:site_name" content="My Blog">
+            </head></html>
+            """
+        let url = HTMLUtilities.extractOGImageURL(from: html)
+        #expect(url?.absoluteString == "https://cdn-images.example.com/max/1200/1*abc123.jpeg")
+    }
 }
