@@ -285,7 +285,10 @@ final class FeedListViewModel {
         let idToFeed = Dictionary(uniqueKeysWithValues: feeds.map { ($0.id, $0) })
         var failureCount = 0
         for (id, result) in results {
-            guard let feed = idToFeed[id] else { continue }
+            guard let feed = idToFeed[id] else {
+                Self.logger.warning("Skipping refresh result for feed ID \(id, privacy: .public) — feed no longer in list")
+                continue
+            }
             switch result {
             case .success(let fetchResult):
                 guard let fetchResult else {
