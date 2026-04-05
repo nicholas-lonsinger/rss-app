@@ -40,9 +40,13 @@ struct RSSParsingService: Sendable {
         }
 
         let feed = RSSFeed(
-            title: delegate.channelTitle.trimmingCharacters(in: .whitespacesAndNewlines),
+            title: HTMLUtilities.decodeHTMLEntities(
+                delegate.channelTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+            ),
             link: URL(string: delegate.channelLink.trimmingCharacters(in: .whitespacesAndNewlines)),
-            feedDescription: delegate.channelDescription.trimmingCharacters(in: .whitespacesAndNewlines),
+            feedDescription: HTMLUtilities.decodeHTMLEntities(
+                delegate.channelDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+            ),
             articles: delegate.articles,
             lastUpdated: delegate.channelUpdated,
             imageURL: imageURL
@@ -440,7 +444,9 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
     // MARK: - Article Construction
 
     private func buildArticle() -> Article {
-        let title = itemTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        let title = HTMLUtilities.decodeHTMLEntities(
+            itemTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
         let linkString = itemLink.trimmingCharacters(in: .whitespacesAndNewlines)
         let rawDescription = itemDescription.trimmingCharacters(in: .whitespacesAndNewlines)
         let guid = itemGuid.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -475,8 +481,10 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
             thumbnailURL = HTMLUtilities.extractFirstImageURL(from: rawDescription)
         }
 
-        // Author: trimmed, nil if empty
-        let authorTrimmed = itemAuthor.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Author: decode entities, trimmed, nil if empty
+        let authorTrimmed = HTMLUtilities.decodeHTMLEntities(
+            itemAuthor.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
 
         return Article(
             id: id,

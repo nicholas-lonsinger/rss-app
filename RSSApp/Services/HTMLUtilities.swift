@@ -1,27 +1,59 @@
 import Foundation
+import os
 
 enum HTMLUtilities {
 
-    /// Strips HTML tags and decodes common entities, returning plain text.
+    private static let logger = Logger(category: "HTMLUtilities")
+
+    /// Decodes HTML character references (numeric and named) in a string.
+    ///
+    /// Uses a single-pass approach so that decoded output is never re-examined,
+    /// preventing over-decoding of sequences like `&#38;lt;` → `&lt;` (not `<`).
+    /// Handles decimal (`&#8217;`), hexadecimal (`&#x2019;`), and common named
+    /// entities (`&amp;`, `&lt;`, `&gt;`, `&quot;`, `&apos;`, `&nbsp;`).
+    static func decodeHTMLEntities(_ string: String) -> String {
+        guard string.contains("&") else { return string }
+
+        return string.replacing(#/&(#x[0-9A-Fa-f]+|#[0-9]+|[A-Za-z0-9]+);/#) { match in
+            let ref = String(match.1)
+            if ref.hasPrefix("#x") || ref.hasPrefix("#X") {
+                if let codePoint = UInt32(ref.dropFirst(2), radix: 16),
+                   let scalar = Unicode.Scalar(codePoint) {
+                    return String(Character(scalar))
+                }
+                // RATIONALE: Invalid Unicode scalars (surrogates, out-of-range) have no valid
+                // character — pass through the raw entity so the user sees the publisher's original text.
+                logger.warning("Invalid hex entity '\(String(match.0), privacy: .public)' — passing through unchanged")
+            } else if ref.hasPrefix("#") {
+                if let codePoint = UInt32(ref.dropFirst()),
+                   let scalar = Unicode.Scalar(codePoint) {
+                    return String(Character(scalar))
+                }
+                logger.warning("Invalid decimal entity '\(String(match.0), privacy: .public)' — passing through unchanged")
+            } else {
+                switch ref {
+                case "amp": return "&"
+                case "lt": return "<"
+                case "gt": return ">"
+                case "quot": return "\""
+                case "apos": return "'"
+                case "nbsp": return " "
+                default: break
+                }
+            }
+            return String(match.0)
+        }
+    }
+
+    /// Strips HTML tags and decodes entities, returning plain text.
     static func stripHTML(_ html: String) -> String {
         var result = html
 
         // Remove HTML tags
         result = result.replacing(#/<[^>]+>/#, with: "")
 
-        // Decode common HTML entities
-        let entities: [(String, String)] = [
-            ("&amp;", "&"),
-            ("&lt;", "<"),
-            ("&gt;", ">"),
-            ("&quot;", "\""),
-            ("&#39;", "'"),
-            ("&apos;", "'"),
-            ("&nbsp;", " "),
-        ]
-        for (entity, replacement) in entities {
-            result = result.replacingOccurrences(of: entity, with: replacement)
-        }
+        // Decode HTML entities
+        result = decodeHTMLEntities(result)
 
         // Collapse multiple whitespace characters into a single space
         result = result.replacing(#/\s+/#, with: " ")
@@ -112,12 +144,7 @@ enum HTMLUtilities {
     }
 
     private static func resolveURL(_ href: String, base: URL) -> URL? {
-        // Decode HTML entities (e.g., &amp; → &) that appear in attribute values
-        let decoded = href
-            .replacingOccurrences(of: "&amp;", with: "&")
-            .replacingOccurrences(of: "&lt;", with: "<")
-            .replacingOccurrences(of: "&gt;", with: ">")
-            .replacingOccurrences(of: "&quot;", with: "\"")
+        let decoded = decodeHTMLEntities(href)
 
         // Protocol-relative URLs (//cdn.example.com/icon.png)
         if decoded.hasPrefix("//") {
