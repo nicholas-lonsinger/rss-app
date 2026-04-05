@@ -7,47 +7,42 @@ enum HTMLUtilities {
 
     /// Decodes HTML character references (numeric and named) in a string.
     ///
+    /// Uses a single-pass approach so that decoded output is never re-examined,
+    /// preventing over-decoding of sequences like `&#38;lt;` → `&lt;` (not `<`).
     /// Handles decimal (`&#8217;`), hexadecimal (`&#x2019;`), and common named
     /// entities (`&amp;`, `&lt;`, `&gt;`, `&quot;`, `&apos;`, `&nbsp;`).
     static func decodeHTMLEntities(_ string: String) -> String {
         guard string.contains("&") else { return string }
 
-        var result = string
-
-        // Decode numeric character references first (decimal and hex)
-        result = result.replacing(#/&#x([0-9A-Fa-f]+);/#) { match in
-            if let codePoint = UInt32(match.1, radix: 16),
-               let scalar = Unicode.Scalar(codePoint) {
-                return String(Character(scalar))
+        return string.replacing(#/&(#x[0-9A-Fa-f]+|#[0-9]+|[A-Za-z0-9]+);/#) { match in
+            let ref = String(match.1)
+            if ref.hasPrefix("#x") || ref.hasPrefix("#X") {
+                if let codePoint = UInt32(ref.dropFirst(2), radix: 16),
+                   let scalar = Unicode.Scalar(codePoint) {
+                    return String(Character(scalar))
+                }
+                // RATIONALE: Invalid Unicode scalars (surrogates, out-of-range) have no valid
+                // character — pass through the raw entity so the user sees the publisher's original text.
+                logger.warning("Invalid hex entity '\(String(match.0), privacy: .public)' — passing through unchanged")
+            } else if ref.hasPrefix("#") {
+                if let codePoint = UInt32(ref.dropFirst()),
+                   let scalar = Unicode.Scalar(codePoint) {
+                    return String(Character(scalar))
+                }
+                logger.warning("Invalid decimal entity '\(String(match.0), privacy: .public)' — passing through unchanged")
+            } else {
+                switch ref {
+                case "amp": return "&"
+                case "lt": return "<"
+                case "gt": return ">"
+                case "quot": return "\""
+                case "apos": return "'"
+                case "nbsp": return " "
+                default: break
+                }
             }
-            // RATIONALE: Invalid Unicode scalars (surrogates, out-of-range) have no valid
-            // character — pass through the raw entity so the user sees the publisher's original text.
-            logger.warning("Invalid hex entity '\(String(match.0), privacy: .public)' — passing through unchanged")
             return String(match.0)
         }
-        result = result.replacing(#/&#([0-9]+);/#) { match in
-            if let codePoint = UInt32(match.1),
-               let scalar = Unicode.Scalar(codePoint) {
-                return String(Character(scalar))
-            }
-            logger.warning("Invalid decimal entity '\(String(match.0), privacy: .public)' — passing through unchanged")
-            return String(match.0)
-        }
-
-        // Decode common named entities (&amp; last to avoid double-decoding)
-        let entities: [(String, String)] = [
-            ("&lt;", "<"),
-            ("&gt;", ">"),
-            ("&quot;", "\""),
-            ("&apos;", "'"),
-            ("&nbsp;", " "),
-            ("&amp;", "&"),
-        ]
-        for (entity, replacement) in entities {
-            result = result.replacingOccurrences(of: entity, with: replacement)
-        }
-
-        return result
     }
 
     /// Strips HTML tags and decodes entities, returning plain text.

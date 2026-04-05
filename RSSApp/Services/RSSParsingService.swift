@@ -44,7 +44,9 @@ struct RSSParsingService: Sendable {
                 delegate.channelTitle.trimmingCharacters(in: .whitespacesAndNewlines)
             ),
             link: URL(string: delegate.channelLink.trimmingCharacters(in: .whitespacesAndNewlines)),
-            feedDescription: delegate.channelDescription.trimmingCharacters(in: .whitespacesAndNewlines),
+            feedDescription: HTMLUtilities.decodeHTMLEntities(
+                delegate.channelDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+            ),
             articles: delegate.articles,
             lastUpdated: delegate.channelUpdated,
             imageURL: imageURL
@@ -479,8 +481,10 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
             thumbnailURL = HTMLUtilities.extractFirstImageURL(from: rawDescription)
         }
 
-        // Author: trimmed, nil if empty
-        let authorTrimmed = itemAuthor.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Author: decode entities, trimmed, nil if empty
+        let authorTrimmed = HTMLUtilities.decodeHTMLEntities(
+            itemAuthor.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
 
         return Article(
             id: id,

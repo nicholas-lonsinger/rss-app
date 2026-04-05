@@ -81,6 +81,8 @@ struct HTMLUtilitiesTests {
         // &amp;#8217; should become &#8217; (not a right single quote)
         #expect(HTMLUtilities.decodeHTMLEntities("&amp;#8217;") == "&#8217;")
         #expect(HTMLUtilities.decodeHTMLEntities("&amp;lt;") == "&lt;")
+        // &#38; is the numeric encoding of &, so &#38;lt; should become &lt; (not <)
+        #expect(HTMLUtilities.decodeHTMLEntities("&#38;lt;") == "&lt;")
     }
 
     @Test("stripHTML decodes numeric entities in descriptions")
