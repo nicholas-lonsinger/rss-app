@@ -11,6 +11,7 @@ final class HomeViewModel {
     static let pageSize = 50
 
     private(set) var unreadCount: Int = 0
+    private(set) var isRefreshing = false
     private(set) var errorMessage: String?
 
     // MARK: - Pagination state for all articles
@@ -25,12 +26,40 @@ final class HomeViewModel {
 
     private let persistence: FeedPersisting
 
-    init(persistence: FeedPersisting) {
+    /// Async closure that performs the actual network feed refresh.
+    /// Injected by the parent view to delegate to `FeedListViewModel.refreshAllFeeds()`.
+    private let refreshFeeds: (@Sendable () async -> Void)?
+
+    init(persistence: FeedPersisting, refreshFeeds: (@Sendable () async -> Void)? = nil) {
         self.persistence = persistence
+        self.refreshFeeds = refreshFeeds
     }
 
     func clearError() {
         errorMessage = nil
+    }
+
+    // MARK: - Refresh
+
+    /// Triggers a full network refresh of all feeds, then reloads local data.
+    /// When no refresh closure is configured, this is a no-op.
+    func refreshAllFeeds() async {
+        guard let refreshFeeds else {
+            Self.logger.debug("refreshAllFeeds() called but no refresh closure configured")
+            return
+        }
+        guard !isRefreshing else {
+            Self.logger.debug("refreshAllFeeds() skipped — already refreshing")
+            return
+        }
+        Self.logger.debug("refreshAllFeeds() starting network refresh")
+        isRefreshing = true
+        defer { isRefreshing = false }
+
+        await refreshFeeds()
+
+        loadUnreadCount()
+        Self.logger.notice("refreshAllFeeds() completed, unread count updated")
     }
 
     func loadUnreadCount() {

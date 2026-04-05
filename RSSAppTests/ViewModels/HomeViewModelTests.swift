@@ -2,6 +2,15 @@ import Testing
 import Foundation
 @testable import RSSApp
 
+/// Sendable call counter for verifying async closure invocations from `@Sendable` contexts.
+private actor CallCounter {
+    private(set) var value = 0
+
+    func increment() {
+        value += 1
+    }
+}
+
 @Suite("HomeViewModel Tests")
 struct HomeViewModelTests {
 
@@ -504,6 +513,109 @@ struct HomeViewModelTests {
         #expect(viewModel.errorMessage != nil)
         #expect(viewModel.unreadCount == 2)
         #expect(article.isRead == false)
+    }
+
+    // MARK: - Refresh All Feeds
+
+    @Test("refreshAllFeeds calls refresh closure and reloads unread count")
+    @MainActor
+    func refreshAllFeedsCallsClosureAndReloadsCount() async {
+        let feed = TestFixtures.makePersistentFeed()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+
+        let article = TestFixtures.makePersistentArticle(articleID: "a1", isRead: false)
+        article.feed = feed
+        mockPersistence.articlesByFeedID[feed.id] = [article]
+
+        let refreshCallCount = CallCounter()
+        let viewModel = HomeViewModel(
+            persistence: mockPersistence,
+            refreshFeeds: { await refreshCallCount.increment() }
+        )
+
+        await viewModel.refreshAllFeeds()
+
+        #expect(await refreshCallCount.value == 1)
+        #expect(viewModel.unreadCount == 1)
+    }
+
+    @Test("refreshAllFeeds is no-op without refresh closure")
+    @MainActor
+    func refreshAllFeedsNoOpWithoutClosure() async {
+        let mockPersistence = MockFeedPersistenceService()
+        let viewModel = HomeViewModel(persistence: mockPersistence)
+
+        await viewModel.refreshAllFeeds()
+
+        // Should complete without error
+        #expect(viewModel.isRefreshing == false)
+        #expect(viewModel.errorMessage == nil)
+    }
+
+    @Test("refreshAllFeeds resets isRefreshing to false after completion")
+    @MainActor
+    func refreshAllFeedsResetsIsRefreshing() async {
+        let mockPersistence = MockFeedPersistenceService()
+
+        let viewModel = HomeViewModel(
+            persistence: mockPersistence,
+            refreshFeeds: {}
+        )
+
+        #expect(viewModel.isRefreshing == false)
+        await viewModel.refreshAllFeeds()
+        #expect(viewModel.isRefreshing == false)
+    }
+
+    @Test("refreshAllFeeds skips when already refreshing")
+    @MainActor
+    func refreshAllFeedsSkipsWhenAlreadyRefreshing() async {
+        let mockPersistence = MockFeedPersistenceService()
+        let refreshCallCount = CallCounter()
+
+        // Use a continuation to hold the first refresh in-flight
+        // so we can attempt a second refresh while it's running.
+        let (holdStream, holdContinuation) = AsyncStream<Void>.makeStream()
+
+        let viewModel = HomeViewModel(
+            persistence: mockPersistence,
+            refreshFeeds: {
+                await refreshCallCount.increment()
+                // Only the first call waits; subsequent calls should be
+                // rejected by the guard before reaching this closure.
+                var iterator = holdStream.makeAsyncIterator()
+                _ = await iterator.next()
+            }
+        )
+
+        // Start the first refresh — it will block inside the closure
+        let firstRefreshTask = Task { @MainActor in
+            await viewModel.refreshAllFeeds()
+        }
+
+        // Yield to let the first refresh start and set isRefreshing = true
+        await Task.yield()
+
+        // Attempt a second refresh while the first is in-flight
+        await viewModel.refreshAllFeeds()
+
+        // Release the first refresh
+        holdContinuation.finish()
+        await firstRefreshTask.value
+
+        #expect(await refreshCallCount.value == 1)
+    }
+
+    @Test("init without refreshFeeds defaults to nil")
+    @MainActor
+    func initWithoutRefreshFeedsDefaultsToNil() async {
+        let mockPersistence = MockFeedPersistenceService()
+        let viewModel = HomeViewModel(persistence: mockPersistence)
+
+        // Should be safe to call — no-op
+        await viewModel.refreshAllFeeds()
+        #expect(viewModel.isRefreshing == false)
     }
 
     // MARK: - Clear Error

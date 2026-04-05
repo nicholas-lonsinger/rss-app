@@ -59,6 +59,10 @@ struct AllArticlesView: View {
         } message: {
             Text(homeViewModel.errorMessage ?? "")
         }
+        .refreshable {
+            await homeViewModel.refreshAllFeeds()
+            homeViewModel.loadAllArticles()
+        }
         .task {
             homeViewModel.loadAllArticles()
         }
