@@ -1,3 +1,4 @@
+import os
 import SwiftUI
 
 /// Typed navigation destination for push navigation to settings.
@@ -9,6 +10,8 @@ enum SettingsDestination: Hashable {
 }
 
 struct FeedListView: View {
+    private static let logger = Logger(category: "FeedListView")
+
     @State private var viewModel: FeedListViewModel
     @State private var navigationPath = NavigationPath()
     @State private var showAddFeed = false
@@ -58,6 +61,7 @@ struct FeedListView: View {
                     )
                     .onDisappear { viewModel.refreshUnreadCount(for: feed) }
                 } else {
+                    let _ = Self.logger.warning("Feed not found for navigated ID: \(feedID)")
                     ContentUnavailableView {
                         Label("Feed Not Found", systemImage: "exclamationmark.triangle")
                     } description: {
