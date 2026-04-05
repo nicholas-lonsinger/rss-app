@@ -3,11 +3,13 @@ import SwiftUI
 struct HomeView: View {
 
     @State private var viewModel: HomeViewModel
+    @State private var feedListViewModel: FeedListViewModel
     private let persistence: FeedPersisting
 
     init(persistence: FeedPersisting) {
         self.persistence = persistence
         _viewModel = State(initialValue: HomeViewModel(persistence: persistence))
+        _feedListViewModel = State(initialValue: FeedListViewModel(persistence: persistence))
     }
 
     var body: some View {
@@ -29,8 +31,26 @@ struct HomeView: View {
                     FeedListView(persistence: persistence, isEmbedded: true)
                 }
             }
+            .navigationDestination(for: SettingsDestination.self) { destination in
+                switch destination {
+                case .settings:
+                    SettingsView(
+                        persistence: persistence,
+                        viewModel: feedListViewModel
+                    )
+                }
+            }
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    NavigationLink(value: SettingsDestination.settings) {
+                        Image(systemName: "gear")
+                    }
+                    .accessibilityLabel("Settings")
+                }
+            }
             .task {
                 viewModel.loadUnreadCount()
+                feedListViewModel.loadFeeds()
             }
             .alert("Error", isPresented: errorAlertBinding) {
                 Button("OK") { viewModel.clearError() }

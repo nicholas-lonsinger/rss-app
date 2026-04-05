@@ -1,5 +1,13 @@
 import SwiftUI
 
+/// Typed navigation destination for push navigation to settings.
+/// Both `HomeView` and `FeedListView` register `.navigationDestination(for:)`
+/// handlers for this type — `HomeView` handles it when `FeedListView` is
+/// embedded, and `FeedListView` handles it when it owns its own `NavigationStack`.
+enum SettingsDestination: Hashable {
+    case settings
+}
+
 struct FeedListView: View {
     @State private var viewModel: FeedListViewModel
     @State private var navigationPath = NavigationPath()
@@ -28,6 +36,12 @@ struct FeedListView: View {
         } else {
             NavigationStack(path: $navigationPath) {
                 feedListContent
+                    .navigationDestination(for: SettingsDestination.self) { destination in
+                        switch destination {
+                        case .settings:
+                            SettingsView(persistence: persistence, viewModel: viewModel)
+                        }
+                    }
             }
         }
     }
@@ -50,12 +64,6 @@ struct FeedListView: View {
                     } description: {
                         Text("This feed is no longer available.")
                     }
-                }
-            }
-            .navigationDestination(for: SettingsDestination.self) { destination in
-                switch destination {
-                case .settings:
-                    SettingsView(persistence: persistence, viewModel: viewModel)
                 }
             }
             .toolbar { toolbarItems }
@@ -84,13 +92,6 @@ struct FeedListView: View {
                     viewModel.refreshUnreadCount(for: feed)
                 }
             }
-    }
-
-    // MARK: - Navigation Destinations
-
-    /// Typed navigation destinations for push navigation within the feed list NavigationStack.
-    private enum SettingsDestination: Hashable {
-        case settings
     }
 
     // MARK: - Subviews
@@ -148,13 +149,13 @@ struct FeedListView: View {
             }
             .accessibilityLabel("Add Feed")
         }
-        ToolbarItem(placement: .topBarTrailing) {
-            Button {
-                navigationPath.append(SettingsDestination.settings)
-            } label: {
-                Image(systemName: "gear")
+        if !isEmbedded {
+            ToolbarItem(placement: .topBarTrailing) {
+                NavigationLink(value: SettingsDestination.settings) {
+                    Image(systemName: "gear")
+                }
+                .accessibilityLabel("Settings")
             }
-            .accessibilityLabel("Settings")
         }
     }
 
