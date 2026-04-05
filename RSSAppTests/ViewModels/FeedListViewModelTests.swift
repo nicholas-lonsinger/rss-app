@@ -196,6 +196,7 @@ struct FeedListViewModelTests {
         article.isRead = true
         viewModel.refreshUnreadCounts()
         #expect(viewModel.unreadCount(for: feed) == 0)
+        #expect(viewModel.errorMessage == nil)
     }
 
     @Test("unreadCount returns zero for unknown feed")
@@ -353,6 +354,54 @@ struct FeedListViewModelTests {
         // loadFeeds clears errorMessage before calling refreshUnreadCounts,
         // so the unread count error should still be visible.
         #expect(viewModel.errorMessage == "Unable to update unread counts.")
+    }
+
+    @Test("refreshUnreadCounts clears errorMessage on success after previous error")
+    @MainActor
+    func refreshUnreadCountsClearsErrorOnSuccess() {
+        let feed = TestFixtures.makePersistentFeed(title: "Feed A")
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+        mockPersistence.articlesByFeedID = [
+            feed.id: [TestFixtures.makePersistentArticle(articleID: "1", isRead: false)],
+        ]
+
+        let viewModel = FeedListViewModel(persistence: mockPersistence)
+        viewModel.loadFeeds()
+
+        // Induce an error first
+        mockPersistence.unreadCountError = NSError(domain: "test", code: 1)
+        viewModel.refreshUnreadCounts()
+        #expect(viewModel.errorMessage == "Unable to update unread counts.")
+
+        // Clear the error and refresh again — errorMessage should clear
+        mockPersistence.unreadCountError = nil
+        viewModel.refreshUnreadCounts()
+        #expect(viewModel.errorMessage == nil)
+    }
+
+    @Test("refreshUnreadCount clears errorMessage on success after previous error for single feed")
+    @MainActor
+    func refreshUnreadCountClearsErrorOnSuccessForSingleFeed() {
+        let feed = TestFixtures.makePersistentFeed(title: "Feed A")
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+        mockPersistence.articlesByFeedID = [
+            feed.id: [TestFixtures.makePersistentArticle(articleID: "1", isRead: false)],
+        ]
+
+        let viewModel = FeedListViewModel(persistence: mockPersistence)
+        viewModel.loadFeeds()
+
+        // Induce an error first
+        mockPersistence.unreadCountError = NSError(domain: "test", code: 1)
+        viewModel.refreshUnreadCount(for: feed)
+        #expect(viewModel.errorMessage == "Unable to update unread count.")
+
+        // Clear the error and refresh again — errorMessage should clear
+        mockPersistence.unreadCountError = nil
+        viewModel.refreshUnreadCount(for: feed)
+        #expect(viewModel.errorMessage == nil)
     }
 
     @Test("removeFeed cleans up unread counts dictionary")

@@ -68,6 +68,8 @@ final class FeedListViewModel {
         unreadCounts = counts
         if hadError {
             errorMessage = "Unable to update unread counts."
+        } else {
+            errorMessage = nil
         }
     }
 
@@ -109,6 +111,7 @@ final class FeedListViewModel {
     func refreshUnreadCount(for feed: PersistentFeed) {
         do {
             unreadCounts[feed.id] = try persistence.unreadCount(for: feed)
+            errorMessage = nil
         } catch {
             errorMessage = "Unable to update unread count."
             Self.logger.error("Failed to fetch unread count for '\(feed.title, privacy: .public)': \(error, privacy: .public)")
