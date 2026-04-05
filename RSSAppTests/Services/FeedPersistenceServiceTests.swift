@@ -202,6 +202,41 @@ struct FeedPersistenceServiceTests {
         #expect(afterUpsert[0].isRead == true)
     }
 
+    @Test("upsertArticles preserves thumbnail caching fields on existing articles")
+    @MainActor
+    func upsertArticlesPreservesThumbnailFields() throws {
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+
+        // Insert an article
+        let articles = [TestFixtures.makeArticle(id: "thumb1", title: "Thumbnail Article")]
+        try service.upsertArticles(articles, for: feed)
+
+        // Set thumbnail state on the persisted article
+        let persisted = try service.articles(for: feed)
+        #expect(persisted.count == 1)
+        try service.markThumbnailCached(persisted[0])
+        try service.incrementThumbnailRetryCount(persisted[0])
+        try service.incrementThumbnailRetryCount(persisted[0])
+        try service.save()
+
+        // Verify pre-conditions
+        #expect(persisted[0].isThumbnailCached == true)
+        #expect(persisted[0].thumbnailRetryCount == 2)
+
+        // Upsert same article ID again with different title
+        let updatedArticles = [TestFixtures.makeArticle(id: "thumb1", title: "Updated Title")]
+        try service.upsertArticles(updatedArticles, for: feed)
+
+        // Verify thumbnail fields are preserved (article was skipped, not overwritten)
+        let afterUpsert = try service.articles(for: feed)
+        #expect(afterUpsert.count == 1)
+        #expect(afterUpsert[0].isThumbnailCached == true)
+        #expect(afterUpsert[0].thumbnailRetryCount == 2)
+    }
+
     @Test("markArticleRead toggles read status")
     @MainActor
     func markArticleRead() throws {
