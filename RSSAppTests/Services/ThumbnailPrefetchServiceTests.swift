@@ -26,7 +26,7 @@ struct ThumbnailPrefetchServiceTests {
         await service.prefetchThumbnails(persistence: persistence)
 
         #expect(article.isThumbnailCached == true)
-        #expect(mockThumbnail.resolveCallCount >= 1)
+        #expect(mockThumbnail.resolveCallCount == 1)
     }
 
     @Test("prefetchThumbnails skips articles already cached")
@@ -165,7 +165,7 @@ struct ThumbnailPrefetchServiceTests {
         #expect(article2.isThumbnailCached == true)
         #expect(article3.isThumbnailCached == true) // was already true
         // Only 2 articles needed downloads (article3 was already cached)
-        #expect(mockThumbnail.resolveCallCount >= 2)
+        #expect(mockThumbnail.resolveCallCount == 2)
     }
 
     // MARK: - Articles Without Image Sources
@@ -189,9 +189,10 @@ struct ThumbnailPrefetchServiceTests {
         let service = ThumbnailPrefetchService(thumbnailService: mockThumbnail)
         await service.prefetchThumbnails(persistence: persistence)
 
-        // Article has no image source, so resolve is still called but returns false
+        // Article has no image source — skipped without calling resolve or incrementing retry count
         #expect(article.isThumbnailCached == false)
-        #expect(article.thumbnailRetryCount == 1)
+        #expect(article.thumbnailRetryCount == 0)
+        #expect(mockThumbnail.resolveCallCount == 0)
     }
 
     // MARK: - Mixed Success and Failure

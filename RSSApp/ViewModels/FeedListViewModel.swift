@@ -20,6 +20,7 @@ final class FeedListViewModel {
     private let feedFetching: FeedFetching
     let feedIconService: FeedIconResolving
     private let thumbnailPrefetcher: ThumbnailPrefetching
+    private var thumbnailPrefetchTask: Task<Void, Never>?
 
     init(
         persistence: FeedPersisting,
@@ -333,8 +334,9 @@ final class FeedListViewModel {
             errorMessage = "\(failureCount) of \(feedsToRefresh.count) feed(s) could not be updated."
         }
 
-        // Kick off thumbnail prefetching as secondary work — not blocking the refresh
-        Task(priority: .utility) {
+        // Cancel any in-flight prefetch from a previous refresh cycle before starting a new one
+        thumbnailPrefetchTask?.cancel()
+        thumbnailPrefetchTask = Task(priority: .utility) {
             await self.thumbnailPrefetcher.prefetchThumbnails(persistence: self.persistence)
         }
     }

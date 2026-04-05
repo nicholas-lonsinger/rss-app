@@ -8,8 +8,7 @@ import os
 protocol ThumbnailPrefetching: Sendable {
 
     /// Downloads thumbnails for articles that are missing cached thumbnails,
-    /// respecting the retry cap. Runs at background priority so feed refreshing
-    /// is not blocked.
+    /// respecting the retry cap.
     func prefetchThumbnails(persistence: FeedPersisting) async
 }
 
@@ -38,7 +37,16 @@ enum ThumbnailPrefetchConstants {
 /// Outcome of a single thumbnail download attempt.
 private struct ThumbnailDownloadResult: Sendable {
     let articleID: String
-    let success: Bool
+    let outcome: Outcome
+
+    enum Outcome: Sendable {
+        /// Thumbnail was successfully downloaded and cached.
+        case cached
+        /// Download was attempted but failed after retries.
+        case failed
+        /// Article had no image source; no download was attempted.
+        case skipped
+    }
 }
 
 // MARK: - Implementation
@@ -85,19 +93,25 @@ struct ThumbnailPrefetchService: ThumbnailPrefetching {
         // Apply results back to persistence on MainActor
         var successCount = 0
         var failureCount = 0
+        var skippedCount = 0
+        var persistenceFailureCount = 0
 
         let articlesByID = Dictionary(uniqueKeysWithValues: articles.map { ($0.articleID, $0) })
         for result in results {
             guard let article = articlesByID[result.articleID] else { continue }
             do {
-                if result.success {
+                switch result.outcome {
+                case .cached:
                     try persistence.markThumbnailCached(article)
                     successCount += 1
-                } else {
+                case .failed:
                     try persistence.incrementThumbnailRetryCount(article)
                     failureCount += 1
+                case .skipped:
+                    skippedCount += 1
                 }
             } catch {
+                persistenceFailureCount += 1
                 Self.logger.error("Failed to update thumbnail status for '\(article.title, privacy: .public)': \(error, privacy: .public)")
             }
         }
@@ -105,10 +119,10 @@ struct ThumbnailPrefetchService: ThumbnailPrefetching {
         do {
             try persistence.save()
         } catch {
-            Self.logger.error("Failed to save thumbnail status updates: \(error, privacy: .public)")
+            Self.logger.error("Failed to save thumbnail status updates — \(successCount, privacy: .public) cached and \(failureCount, privacy: .public) failed status updates may be lost: \(error, privacy: .public)")
         }
 
-        Self.logger.notice("Thumbnail prefetch complete: \(successCount, privacy: .public) cached, \(failureCount, privacy: .public) failed")
+        Self.logger.notice("Thumbnail prefetch complete: \(successCount, privacy: .public) cached, \(failureCount, privacy: .public) failed, \(skippedCount, privacy: .public) skipped, \(persistenceFailureCount, privacy: .public) persistence errors")
     }
 
     // MARK: - Private
@@ -153,7 +167,9 @@ struct ThumbnailPrefetchService: ThumbnailPrefetching {
 
 // MARK: - Retry Logic
 
-/// Downloads a single thumbnail with retry for transient failures.
+private let downloadRetryLogger = Logger(category: "ThumbnailPrefetchService")
+
+/// Downloads a single thumbnail with within-cycle retry on failure.
 /// This is a free function to avoid capturing `@MainActor self` in the `Sendable` task group closure.
 private func downloadWithRetry(
     articleID: String,
@@ -161,17 +177,25 @@ private func downloadWithRetry(
     articleLink: URL?,
     thumbnailService: ArticleThumbnailCaching
 ) async -> ThumbnailDownloadResult {
-    let logger = Logger(category: "ThumbnailPrefetchService")
 
     // Skip articles with no possible image source
     guard thumbnailURL != nil || articleLink != nil else {
-        return ThumbnailDownloadResult(articleID: articleID, success: false)
+        return ThumbnailDownloadResult(articleID: articleID, outcome: .skipped)
     }
 
     for attempt in 0...ThumbnailPrefetchConstants.maxTransientRetries {
+        guard !Task.isCancelled else {
+            return ThumbnailDownloadResult(articleID: articleID, outcome: .failed)
+        }
+
         if attempt > 0 {
             let delay = ThumbnailPrefetchConstants.baseBackoffDelay * pow(2.0, Double(attempt - 1))
-            try? await Task.sleep(for: .seconds(delay))
+            do {
+                try await Task.sleep(for: .seconds(delay))
+            } catch {
+                // CancellationError — stop retrying immediately
+                return ThumbnailDownloadResult(articleID: articleID, outcome: .failed)
+            }
         }
 
         let cached = await thumbnailService.resolveAndCacheThumbnail(
@@ -181,14 +205,14 @@ private func downloadWithRetry(
         )
 
         if cached {
-            return ThumbnailDownloadResult(articleID: articleID, success: true)
+            return ThumbnailDownloadResult(articleID: articleID, outcome: .cached)
         }
 
         if attempt < ThumbnailPrefetchConstants.maxTransientRetries {
-            logger.debug("Thumbnail download attempt \(attempt + 1, privacy: .public) failed for article \(articleID, privacy: .public), retrying")
+            downloadRetryLogger.debug("Thumbnail download attempt \(attempt + 1, privacy: .public) failed for article \(articleID, privacy: .public), retrying")
         }
     }
 
-    logger.info("Thumbnail download failed after \(ThumbnailPrefetchConstants.maxTransientRetries + 1, privacy: .public) attempts for article \(articleID, privacy: .public)")
-    return ThumbnailDownloadResult(articleID: articleID, success: false)
+    downloadRetryLogger.info("Thumbnail download failed after \(ThumbnailPrefetchConstants.maxTransientRetries + 1, privacy: .public) attempts for article \(articleID, privacy: .public)")
+    return ThumbnailDownloadResult(articleID: articleID, outcome: .failed)
 }

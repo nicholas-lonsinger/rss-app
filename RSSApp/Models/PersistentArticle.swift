@@ -26,6 +26,10 @@ final class PersistentArticle {
 
     // MARK: - Thumbnail caching
 
+    // RATIONALE: Thumbnail state is stored directly on PersistentArticle rather than in a
+    // separate model because SwiftData @Model classes cannot use enums with associated values
+    // as persisted properties, and a separate one-to-one model would add join overhead for
+    // every article query. Two scalar fields are the simplest SwiftData-compatible approach.
     var isThumbnailCached: Bool
     var thumbnailRetryCount: Int
 
