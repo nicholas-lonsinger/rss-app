@@ -76,6 +76,13 @@ struct HTMLUtilitiesTests {
         #expect(HTMLUtilities.decodeHTMLEntities("&#xD800;") == "&#xD800;")
     }
 
+    @Test("Does not double-decode entities containing ampersand")
+    func doesNotDoubleDecode() {
+        // &amp;#8217; should become &#8217; (not a right single quote)
+        #expect(HTMLUtilities.decodeHTMLEntities("&amp;#8217;") == "&#8217;")
+        #expect(HTMLUtilities.decodeHTMLEntities("&amp;lt;") == "&lt;")
+    }
+
     @Test("stripHTML decodes numeric entities in descriptions")
     func stripHTMLDecodesNumericEntities() {
         let html = "<p>Los Thuthanaka&#8217;s Wak&#8217;a</p>"

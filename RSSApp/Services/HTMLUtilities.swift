@@ -1,11 +1,14 @@
 import Foundation
+import os
 
 enum HTMLUtilities {
+
+    private static let logger = Logger(category: "HTMLUtilities")
 
     /// Decodes HTML character references (numeric and named) in a string.
     ///
     /// Handles decimal (`&#8217;`), hexadecimal (`&#x2019;`), and common named
-    /// entities (`&amp;`, `&lt;`, `&gt;`, `&quot;`, `&apos;`, `&nbsp;`, `&#39;`).
+    /// entities (`&amp;`, `&lt;`, `&gt;`, `&quot;`, `&apos;`, `&nbsp;`).
     static func decodeHTMLEntities(_ string: String) -> String {
         guard string.contains("&") else { return string }
 
@@ -17,6 +20,9 @@ enum HTMLUtilities {
                let scalar = Unicode.Scalar(codePoint) {
                 return String(Character(scalar))
             }
+            // RATIONALE: Invalid Unicode scalars (surrogates, out-of-range) have no valid
+            // character — pass through the raw entity so the user sees the publisher's original text.
+            logger.warning("Invalid hex entity '\(String(match.0), privacy: .public)' — passing through unchanged")
             return String(match.0)
         }
         result = result.replacing(#/&#([0-9]+);/#) { match in
@@ -24,6 +30,7 @@ enum HTMLUtilities {
                let scalar = Unicode.Scalar(codePoint) {
                 return String(Character(scalar))
             }
+            logger.warning("Invalid decimal entity '\(String(match.0), privacy: .public)' — passing through unchanged")
             return String(match.0)
         }
 
@@ -32,7 +39,6 @@ enum HTMLUtilities {
             ("&lt;", "<"),
             ("&gt;", ">"),
             ("&quot;", "\""),
-            ("&#39;", "'"),
             ("&apos;", "'"),
             ("&nbsp;", " "),
             ("&amp;", "&"),

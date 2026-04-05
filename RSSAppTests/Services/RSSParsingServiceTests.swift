@@ -257,6 +257,28 @@ struct RSSParsingServiceTests {
         #expect(feed.articles[0].title == "Los Thuthanaka\u{2019}s Wak\u{2019}a is great")
     }
 
+    @Test("Decodes HTML entities in CDATA channel title")
+    func decodesHTMLEntitiesInCDATAChannelTitle() throws {
+        let xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <rss version="2.0">
+            <channel>
+                <title><![CDATA[Tom&#8217;s Feed]]></title>
+                <link>https://example.com</link>
+                <description>Feed</description>
+                <item>
+                    <title>Article</title>
+                    <link>https://example.com/article</link>
+                </item>
+            </channel>
+            </rss>
+            """
+        let data = Data(xml.utf8)
+        let feed = try service.parse(data)
+
+        #expect(feed.title == "Tom\u{2019}s Feed")
+    }
+
     // MARK: - Atom Feed Parsing
 
     @Test("Parses valid Atom feed with correct channel info")
