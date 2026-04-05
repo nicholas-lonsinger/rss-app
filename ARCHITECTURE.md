@@ -44,7 +44,8 @@ RSSApp/
 │   ├── ModelConfigurationValidator.swift # ModelValidation + MaxTokensValidation enums — input validation for model ID and max tokens
 │   ├── OPMLService.swift               # OPMLServing protocol + XMLParser-based OPML parser + XML generator
 │   ├── RSSParsingService.swift         # XMLParser-based RSS 2.0 + Atom parser with XHTML content reconstruction
-│   └── SiteSpecificExtracting.swift    # Protocol for per-hostname content extractors
+│   ├── SiteSpecificExtracting.swift    # Protocol for per-hostname content extractors
+│   └── ThumbnailPrefetchService.swift  # ThumbnailPrefetching protocol + bulk thumbnail download with bounded concurrency, transient retry, and cross-cycle retry cap
 ├── ViewModels/                         # View state management
 │   ├── AddFeedViewModel.swift          # @Observable @MainActor — URL validation + feed subscription via FeedPersisting + icon resolution
 │   ├── EditFeedViewModel.swift         # @Observable @MainActor — URL editing + validation + feed update via FeedPersisting
@@ -99,7 +100,8 @@ RSSAppTests/
 │   ├── MockFeedPersistenceService.swift    # FeedPersisting mock with in-memory store
 │   ├── MockFeedStorageService.swift        # FeedStoring mock with in-memory store (for migration tests)
 │   ├── MockKeychainService.swift           # KeychainServicing mock with in-memory store
-│   └── MockOPMLService.swift               # OPMLServing mock with injectable entries/data/errors
+│   ├── MockOPMLService.swift               # OPMLServing mock with injectable entries/data/errors
+│   └── MockThumbnailPrefetchService.swift  # ThumbnailPrefetching mock with call count tracking
 ├── Models/
 │   ├── ArticleTests.swift              # Article creation, identity, hashable
 │   ├── DOMNodeTests.swift              # DOMNode accessors, text/element queries, tree traversal
@@ -114,7 +116,7 @@ RSSAppTests/
 │   ├── DOMSerializerTests.swift        # WKWebView integration — JS serialization fidelity
 │   ├── ExtractionPipelineTests.swift   # Full pipeline: HTML → WKWebView serialize → Swift extract
 │   ├── FeedIconServiceTests.swift      # Icon resolution, caching, HTMLUtilities icon extraction
-│   ├── FeedPersistenceServiceTests.swift # SwiftData CRUD, upsert, read/unread, cross-feed queries, content cache, cascade delete
+│   ├── FeedPersistenceServiceTests.swift # SwiftData CRUD, upsert, read/unread, cross-feed queries, content cache, cascade delete, thumbnail tracking
 │   ├── FeedStorageServiceTests.swift   # Save/load roundtrip, add/remove, empty state (legacy UserDefaults)
 │   ├── HTMLUtilitiesTests.swift        # Tag stripping, entity decoding, image extraction, og:image extraction
 │   ├── UserDefaultsMigrationTests.swift # Migration from UserDefaults to SwiftData, idempotency, ID preservation
@@ -122,7 +124,8 @@ RSSAppTests/
 │   ├── OPMLServiceTests.swift          # Parse flat/nested/empty OPML, generate + round-trip, XML escaping
 │   ├── MetadataExtractorTests.swift    # Title/byline extraction from meta tags and DOM
 │   ├── ModelConfigurationValidationTests.swift # ModelValidation and MaxTokensValidation input validation
-│   └── RSSParsingServiceTests.swift    # Channel parsing, thumbnails, IDs, edge cases
+│   ├── RSSParsingServiceTests.swift    # Channel parsing, thumbnails, IDs, edge cases
+│   └── ThumbnailPrefetchServiceTests.swift # Bulk prefetch, skip cached/maxed, retry count, mixed results, error handling
 ├── ViewModels/
 │   ├── AddFeedViewModelTests.swift         # URL validation, duplicate detection, success/failure
 │   ├── EditFeedViewModelTests.swift        # URL editing, validation, duplicate detection, success/failure
@@ -133,7 +136,7 @@ RSSAppTests/
 │   └── HomeViewModelTests.swift            # Unread count, cross-feed article queries, read/unread status
 ```
 
-**Total: 62 source files + 1 resource, 44 test source files + 1 fixture.**
+**Total: 63 source files + 1 resource, 46 test source files + 1 fixture.**
 
 ## Key Components
 
@@ -153,7 +156,7 @@ The directory tree annotations describe each file's purpose. This section covers
 
 **Feed icon resolution chain.** `FeedIconService` (`FeedIconResolving` protocol) resolves via priority chain: feed XML image URL → site homepage HTML meta tags (apple-touch-icon, `link rel="icon"`) → `/favicon.ico` fallback. Downloads the resolved image, normalizes to PNG (resizing if larger than 128px), and caches to `{cachesDirectory}/feed-icons/{feedID}.png`. `FeedIconView` loads cached PNG from disk with globe placeholder fallback. Resolution triggered by `FeedListViewModel` during refresh and `AddFeedViewModel` during feed add.
 
-**Article thumbnail resolution.** `ArticleThumbnailService` (`ArticleThumbnailCaching` protocol) resolves via: direct thumbnail URL from the feed → `og:image` meta tag from the article's web page (via `HTMLUtilities.extractOGImageURL`). Resizes to 120×120px (aspect-fill + center-crop), caches as JPEG to `{cachesDirectory}/article-thumbnails/{SHA256(articleID)}.jpg`. `ArticleThumbnailView` resolves and caches on-demand off the main thread, with self-healing for corrupt cache entries.
+**Article thumbnail resolution and prefetch.** `ArticleThumbnailService` (`ArticleThumbnailCaching` protocol) resolves via: direct thumbnail URL from the feed → `og:image` meta tag from the article's web page (via `HTMLUtilities.extractOGImageURL`). Resizes to 120×120px (aspect-fill + center-crop), caches as JPEG to `{cachesDirectory}/article-thumbnails/{SHA256(articleID)}.jpg`. `ThumbnailPrefetchService` (`ThumbnailPrefetching` protocol) eagerly downloads thumbnails during feed refresh: queries `PersistentArticle` records where `isThumbnailCached == false && thumbnailRetryCount < maxRetryCount`, downloads up to 4 thumbnails concurrently, retries transient failures within a cycle with exponential backoff, and increments `thumbnailRetryCount` on failure so broken URLs stop retrying after the cap (3 attempts). Kicked off by `FeedListViewModel.refreshAllFeeds()` as a background `Task(priority: .utility)` after feed save. `ArticleThumbnailView` reads from disk cache first; on-demand resolution is retained as fallback for articles predating the prefetch feature or whose prefetch is still in progress.
 
 ## Data Flow
 
@@ -173,7 +176,7 @@ RSSAppApp (@main)
                               └── ArticleDiscussionView (DiscussionViewModel + ClaudeAPIService + KeychainService)
 ```
 
-**Observation pattern:** SwiftUI views observe `@Observable @MainActor` view models. View models delegate to protocol-abstracted services (`FeedPersisting`, `FeedFetching`, `FeedIconResolving`, `ArticleThumbnailCaching`, `OPMLServing`, `ClaudeAPIServicing`, `KeychainServicing`, `ArticleExtracting`, `ContentExtracting`), enabling mock injection for testing.
+**Observation pattern:** SwiftUI views observe `@Observable @MainActor` view models. View models delegate to protocol-abstracted services (`FeedPersisting`, `FeedFetching`, `FeedIconResolving`, `ArticleThumbnailCaching`, `ThumbnailPrefetching`, `OPMLServing`, `ClaudeAPIServicing`, `KeychainServicing`, `ArticleExtracting`, `ContentExtracting`), enabling mock injection for testing.
 
 ## Design Decisions
 
@@ -215,9 +218,9 @@ RSSAppApp (@main)
 
 ## Test Coverage
 
-**44 test files: 29 test suites, 10 mock implementations, 4 shared helpers, 1 HTML fixture.**
+**46 test files: 30 test suites, 11 mock implementations, 4 shared helpers, 1 HTML fixture.**
 
-**Patterns:** Swift Testing (`@Suite`, `@Test`, `#expect`). Protocol-based dependency injection with 10 mocks (`MockFeedPersistenceService`, `MockFeedFetchingService`, `MockFeedIconService`, `MockArticleThumbnailService`, `MockOPMLService`, `MockClaudeAPIService`, `MockKeychainService`, `MockArticleExtractionService`, `MockContentExtractor`, `MockFeedStorageService`). In-memory `ModelContainer` via `SwiftDataTestHelpers` for SwiftData integration tests. `WKWebView` integration tests via `WebViewTestHelpers` for DOM serialization and extraction pipeline. Shared `TestFixtures` factory methods for `Article`, `RSSFeed`, `PersistentFeed`, `PersistentArticle`, and sample RSS XML.
+**Patterns:** Swift Testing (`@Suite`, `@Test`, `#expect`). Protocol-based dependency injection with 11 mocks (`MockFeedPersistenceService`, `MockFeedFetchingService`, `MockFeedIconService`, `MockArticleThumbnailService`, `MockThumbnailPrefetchService`, `MockOPMLService`, `MockClaudeAPIService`, `MockKeychainService`, `MockArticleExtractionService`, `MockContentExtractor`, `MockFeedStorageService`). In-memory `ModelContainer` via `SwiftDataTestHelpers` for SwiftData integration tests. `WKWebView` integration tests via `WebViewTestHelpers` for DOM serialization and extraction pipeline. Shared `TestFixtures` factory methods for `Article`, `RSSFeed`, `PersistentFeed`, `PersistentArticle`, and sample RSS XML.
 
 **Well-covered:** All models, services, and view models have test suites with mock injection — including happy paths, error paths, edge cases, and state transitions.
 
