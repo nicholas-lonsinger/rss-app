@@ -43,7 +43,7 @@ struct FeedIconServiceTests {
     }
 
     @Test("Feed image URL appears before favicon.ico fallback")
-    func resolveFeedImageBeforeFavicon() async {
+    func resolveFeedImageBeforeFavicon() async throws {
         let imageURL = URL(string: "https://example.com/logo.png")!
         let siteURL = URL(string: "https://unreachable-test-host.invalid")!
         let result = await service.resolveIconCandidates(feedSiteURL: siteURL, feedImageURL: imageURL)
@@ -51,10 +51,150 @@ struct FeedIconServiceTests {
         #expect(result.first == imageURL)
         // favicon.ico should come after the feed image URL
         let faviconURL = URL(string: "https://unreachable-test-host.invalid/favicon.ico")!
-        if let imageIndex = result.firstIndex(of: imageURL),
-           let faviconIndex = result.firstIndex(of: faviconURL) {
-            #expect(imageIndex < faviconIndex)
+        let imageIndex = try #require(result.firstIndex(of: imageURL))
+        let faviconIndex = try #require(result.firstIndex(of: faviconURL))
+        #expect(imageIndex < faviconIndex)
+    }
+
+    // MARK: - assembleCandidates (priority ordering)
+
+    @Test("og:image appears before link icons in candidates")
+    func assembleCandidatesOgImageBeforeLinkIcons() {
+        let siteURL = URL(string: "https://myblog.example.com")!
+        let ogImage = URL(string: "https://cdn.example.com/blog-logo.png")!
+        let linkIcon = URL(string: "https://medium.com/favicon.png")!
+        let htmlResult = FeedIconService.HTMLIconResult(
+            linkIcons: [linkIcon],
+            ogImageURL: ogImage,
+            redirectedHost: "medium.com"
+        )
+
+        let candidates = FeedIconService.assembleCandidates(
+            feedSiteURL: siteURL,
+            feedImageURL: nil,
+            htmlResult: htmlResult
+        )
+
+        // og:image (priority 2) should come before link icon (priority 3)
+        guard let ogIndex = candidates.firstIndex(of: ogImage),
+              let linkIndex = candidates.firstIndex(of: linkIcon) else {
+            Issue.record("Expected both og:image and link icon in candidates")
+            return
         }
+        #expect(ogIndex < linkIndex)
+    }
+
+    @Test("Feed image URL appears before og:image in candidates")
+    func assembleCandidatesFeedImageBeforeOgImage() {
+        let feedImage = URL(string: "https://example.com/feed-logo.png")!
+        let ogImage = URL(string: "https://cdn.example.com/og-logo.png")!
+        let htmlResult = FeedIconService.HTMLIconResult(
+            linkIcons: [],
+            ogImageURL: ogImage,
+            redirectedHost: nil
+        )
+
+        let candidates = FeedIconService.assembleCandidates(
+            feedSiteURL: URL(string: "https://example.com")!,
+            feedImageURL: feedImage,
+            htmlResult: htmlResult
+        )
+
+        #expect(candidates.first == feedImage)
+        guard let feedIndex = candidates.firstIndex(of: feedImage),
+              let ogIndex = candidates.firstIndex(of: ogImage) else {
+            Issue.record("Expected both feed image and og:image in candidates")
+            return
+        }
+        #expect(feedIndex < ogIndex)
+    }
+
+    @Test("Redirected host favicon appears after original host favicon")
+    func assembleCandidatesRedirectedHostFaviconLast() {
+        let siteURL = URL(string: "https://myblog.example.com")!
+        let htmlResult = FeedIconService.HTMLIconResult(
+            linkIcons: [],
+            ogImageURL: nil,
+            redirectedHost: "medium.com"
+        )
+
+        let candidates = FeedIconService.assembleCandidates(
+            feedSiteURL: siteURL,
+            feedImageURL: nil,
+            htmlResult: htmlResult
+        )
+
+        let originalFavicon = URL(string: "https://myblog.example.com/favicon.ico")!
+        let redirectedFavicon = URL(string: "https://medium.com/favicon.ico")!
+        guard let originalIndex = candidates.firstIndex(of: originalFavicon),
+              let redirectedIndex = candidates.firstIndex(of: redirectedFavicon) else {
+            Issue.record("Expected both original and redirected favicons in candidates")
+            return
+        }
+        #expect(originalIndex < redirectedIndex)
+    }
+
+    @Test("No redirected host favicon when hosts match")
+    func assembleCandidatesNoRedirectNoExtraFavicon() {
+        let siteURL = URL(string: "https://example.com")!
+        let htmlResult = FeedIconService.HTMLIconResult(
+            linkIcons: [],
+            ogImageURL: nil,
+            redirectedHost: nil
+        )
+
+        let candidates = FeedIconService.assembleCandidates(
+            feedSiteURL: siteURL,
+            feedImageURL: nil,
+            htmlResult: htmlResult
+        )
+
+        // Only the original host's favicon should appear
+        #expect(candidates.count == 1)
+        #expect(candidates[0] == URL(string: "https://example.com/favicon.ico")!)
+    }
+
+    @Test("Full priority order with all sources present")
+    func assembleCandidatesFullPriorityOrder() {
+        let feedImage = URL(string: "https://myblog.example.com/rss-logo.png")!
+        let siteURL = URL(string: "https://myblog.example.com")!
+        let ogImage = URL(string: "https://cdn.medium.com/blog-cover.jpg")!
+        let appleTouchIcon = URL(string: "https://medium.com/apple-touch.png")!
+        let linkIcon = URL(string: "https://medium.com/favicon.png")!
+        let htmlResult = FeedIconService.HTMLIconResult(
+            linkIcons: [appleTouchIcon, linkIcon],
+            ogImageURL: ogImage,
+            redirectedHost: "medium.com"
+        )
+
+        let candidates = FeedIconService.assembleCandidates(
+            feedSiteURL: siteURL,
+            feedImageURL: feedImage,
+            htmlResult: htmlResult
+        )
+
+        let originalFavicon = URL(string: "https://myblog.example.com/favicon.ico")!
+        let redirectedFavicon = URL(string: "https://medium.com/favicon.ico")!
+
+        // Verify all 6 candidates present in correct priority order
+        #expect(candidates.count == 6)
+        #expect(candidates[0] == feedImage)           // Priority 1
+        #expect(candidates[1] == ogImage)             // Priority 2
+        #expect(candidates[2] == appleTouchIcon)      // Priority 3a
+        #expect(candidates[3] == linkIcon)            // Priority 3b
+        #expect(candidates[4] == originalFavicon)     // Priority 4
+        #expect(candidates[5] == redirectedFavicon)   // Priority 5
+    }
+
+    @Test("assembleCandidates returns empty when no inputs provided")
+    func assembleCandidatesEmpty() {
+        let candidates = FeedIconService.assembleCandidates(
+            feedSiteURL: nil,
+            feedImageURL: nil,
+            htmlResult: nil
+        )
+
+        #expect(candidates.isEmpty)
     }
 
     // MARK: - cachedIconFileURL
