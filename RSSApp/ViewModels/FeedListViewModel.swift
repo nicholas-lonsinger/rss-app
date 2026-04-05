@@ -297,7 +297,7 @@ final class FeedListViewModel {
                         try persistence.updateFeedError(feed, error: nil)
                     } catch {
                         failureCount += 1
-                        Self.logger.error("Failed to clear error state for '\(feed.title, privacy: .public)': \(error, privacy: .public)")
+                        Self.logger.error("Failed to clear error state for '\(feed.title, privacy: .public)': \(error, privacy: .public) — feed will appear to have an error on next launch despite successful 304 response")
                     }
                     Task {
                         await self.resolveAndCacheIconIfNeeded(
@@ -323,12 +323,12 @@ final class FeedListViewModel {
                     failureCount += 1
                     Self.logger.error("Failed to persist refresh for '\(feed.title, privacy: .public)': \(error, privacy: .public)")
                 }
-            case .failure(let error):
+            case .failure(let fetchError):
                 failureCount += 1
                 do {
-                    try persistence.updateFeedError(feed, error: Self.errorDescription(for: error))
+                    try persistence.updateFeedError(feed, error: Self.errorDescription(for: fetchError))
                 } catch {
-                    Self.logger.error("Failed to persist error state for '\(feed.title, privacy: .public)': \(error, privacy: .public)")
+                    Self.logger.error("Failed to persist error state for '\(feed.title, privacy: .public)': \(error, privacy: .public) — feed will appear healthy on next launch despite fetch failure")
                 }
             }
         }
