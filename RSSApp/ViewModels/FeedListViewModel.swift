@@ -27,6 +27,8 @@ final class FeedListViewModel {
         opmlService: OPMLServing = OPMLService(),
         feedFetching: FeedFetching = FeedFetchingService(),
         feedIconService: FeedIconResolving = FeedIconService(),
+        // RATIONALE: Default cannot reference the `persistence` parameter in a default-value
+        // expression, so nil-coalescing is used to construct the default inside the body.
         thumbnailPrefetcher: ThumbnailPrefetching? = nil
     ) {
         self.persistence = persistence
