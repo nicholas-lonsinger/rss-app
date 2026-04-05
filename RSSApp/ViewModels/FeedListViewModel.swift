@@ -58,7 +58,9 @@ final class FeedListViewModel {
                 counts[feed.id] = try persistence.unreadCount(for: feed)
             } catch {
                 Self.logger.error("Failed to fetch unread count for '\(feed.title, privacy: .public)': \(error, privacy: .public)")
-                counts[feed.id] = 0
+                // Preserve previous count — showing a stale value is less misleading than
+                // resetting to 0 and making the user think they have no unread articles.
+                counts[feed.id] = unreadCounts[feed.id] ?? 0
             }
         }
         unreadCounts = counts
@@ -104,7 +106,8 @@ final class FeedListViewModel {
             unreadCounts[feed.id] = try persistence.unreadCount(for: feed)
         } catch {
             Self.logger.error("Failed to fetch unread count for '\(feed.title, privacy: .public)': \(error, privacy: .public)")
-            unreadCounts[feed.id] = 0
+            // Preserve previous count — showing a stale value is less misleading than
+            // resetting to 0 and making the user think they have no unread articles.
         }
     }
 
