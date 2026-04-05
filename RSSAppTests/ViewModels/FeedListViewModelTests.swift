@@ -209,9 +209,9 @@ struct FeedListViewModelTests {
         #expect(viewModel.unreadCount(for: unknownFeed) == 0)
     }
 
-    @Test("refreshUnreadCounts defaults to zero on persistence error")
+    @Test("refreshUnreadCounts preserves previous count on persistence error")
     @MainActor
-    func refreshUnreadCountsDefaultsToZeroOnError() {
+    func refreshUnreadCountsPreservesPreviousCountOnError() {
         let feed = TestFixtures.makePersistentFeed(title: "Feed A")
         let mockPersistence = MockFeedPersistenceService()
         mockPersistence.feeds = [feed]
@@ -225,6 +225,19 @@ struct FeedListViewModelTests {
 
         mockPersistence.unreadCountError = NSError(domain: "test", code: 1)
         viewModel.refreshUnreadCounts()
+        #expect(viewModel.unreadCount(for: feed) == 1)
+    }
+
+    @Test("refreshUnreadCounts falls back to zero when no previous count exists on error")
+    @MainActor
+    func refreshUnreadCountsFallsBackToZeroWhenNoPreviousCount() {
+        let feed = TestFixtures.makePersistentFeed(title: "Feed A")
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+        mockPersistence.unreadCountError = NSError(domain: "test", code: 1)
+
+        let viewModel = FeedListViewModel(persistence: mockPersistence)
+        viewModel.loadFeeds()
         #expect(viewModel.unreadCount(for: feed) == 0)
     }
 
@@ -250,6 +263,42 @@ struct FeedListViewModelTests {
         viewModel.refreshUnreadCount(for: feed1)
         #expect(viewModel.unreadCount(for: feed1) == 0)
         #expect(viewModel.unreadCount(for: feed2) == 1)
+    }
+
+    @Test("refreshUnreadCount preserves previous count on persistence error for single feed")
+    @MainActor
+    func refreshUnreadCountPreservesPreviousCountOnError() {
+        let feed = TestFixtures.makePersistentFeed(title: "Feed A")
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+        mockPersistence.articlesByFeedID = [
+            feed.id: [
+                TestFixtures.makePersistentArticle(articleID: "1", isRead: false),
+                TestFixtures.makePersistentArticle(articleID: "2", isRead: false),
+            ],
+        ]
+
+        let viewModel = FeedListViewModel(persistence: mockPersistence)
+        viewModel.loadFeeds()
+        #expect(viewModel.unreadCount(for: feed) == 2)
+
+        mockPersistence.unreadCountError = NSError(domain: "test", code: 1)
+        viewModel.refreshUnreadCount(for: feed)
+        #expect(viewModel.unreadCount(for: feed) == 2)
+    }
+
+    @Test("refreshUnreadCount returns zero when no previous count exists on error for single feed")
+    @MainActor
+    func refreshUnreadCountFallsBackToZeroWhenNoPreviousCountForSingleFeed() {
+        let feed = TestFixtures.makePersistentFeed(title: "Feed A")
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+        mockPersistence.unreadCountError = NSError(domain: "test", code: 1)
+
+        let viewModel = FeedListViewModel(persistence: mockPersistence)
+        // Do not call loadFeeds() — no previous count is established
+        viewModel.refreshUnreadCount(for: feed)
+        #expect(viewModel.unreadCount(for: feed) == 0)
     }
 
     @Test("removeFeed cleans up unread counts dictionary")
