@@ -376,6 +376,10 @@ final class FeedListViewModel {
         do {
             try persistence.updateFeedIcon(feed, iconURL: iconURL)
         } catch {
+            // RATIONALE: No errorMessage set here. This runs inside a fire-and-forget Task
+            // spawned by refreshAllFeeds(), so setting errorMessage would race with the
+            // post-refresh errorMessage assignments. Icon persistence failure is also cosmetic
+            // and self-healing — the icon is re-resolved and re-cached on the next refresh.
             Self.logger.error("Failed to persist icon URL for '\(feed.title, privacy: .public)': \(error, privacy: .public)")
         }
     }
