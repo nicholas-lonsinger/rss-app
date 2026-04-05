@@ -308,20 +308,59 @@ final class FeedListViewModel {
                     }
                     continue
                 }
+                // Each persistence operation has its own catch block so a failure
+                // in one does not prevent the others from running. In particular,
+                // cache headers must only be written when upsertArticles succeeds —
+                // leaving stale headers ensures the next refresh re-fetches the
+                // articles rather than receiving a 304 Not Modified for data that
+                // was never persisted.
                 do {
                     try persistence.updateFeedMetadata(feed, title: fetchResult.feed.title, description: fetchResult.feed.feedDescription)
+                } catch {
+                    // Cosmetic — does not increment failureCount. Title/description
+                    // remain stale but articles and cache headers still proceed.
+                    Self.logger.warning("Failed to update metadata for '\(feed.title, privacy: .public)': \(error, privacy: .public) — title/description may be stale")
+                }
+
+                // Always clear error state on successful fetch, regardless of
+                // whether the metadata update above succeeded. updateFeedMetadata
+                // clears lastFetchError as a side effect, but if it threw, the
+                // feed would retain a stale error indicator despite a good fetch.
+                do {
+                    try persistence.updateFeedError(feed, error: nil)
+                } catch {
+                    Self.logger.warning("Failed to clear error state for '\(feed.title, privacy: .public)': \(error, privacy: .public) — feed may show stale error indicator")
+                }
+
+                // Only upsert failure increments failureCount — it is the one
+                // operation that loses user-visible data (new articles). Metadata
+                // and cache header failures are cosmetic or self-healing.
+                var upsertSucceeded = false
+                do {
                     try persistence.upsertArticles(fetchResult.feed.articles, for: feed)
-                    try persistence.updateFeedCacheHeaders(feed, etag: fetchResult.etag, lastModified: fetchResult.lastModified)
-                    Task {
-                        await self.resolveAndCacheIconIfNeeded(
-                            for: feed,
-                            siteURL: fetchResult.feed.link,
-                            feedImageURL: fetchResult.feed.imageURL
-                        )
-                    }
+                    upsertSucceeded = true
                 } catch {
                     failureCount += 1
-                    Self.logger.error("Failed to persist refresh for '\(feed.title, privacy: .public)': \(error, privacy: .public)")
+                    Self.logger.error("Failed to upsert articles for '\(feed.title, privacy: .public)': \(error, privacy: .public)")
+                }
+
+                if upsertSucceeded {
+                    do {
+                        try persistence.updateFeedCacheHeaders(feed, etag: fetchResult.etag, lastModified: fetchResult.lastModified)
+                    } catch {
+                        // Cosmetic — does not increment failureCount. The feed
+                        // will re-fetch unchanged content on the next refresh,
+                        // which is wasteful but not data-losing.
+                        Self.logger.warning("Failed to update cache headers for '\(feed.title, privacy: .public)': \(error, privacy: .public) — feed may re-fetch unchanged content on next refresh")
+                    }
+                }
+
+                Task {
+                    await self.resolveAndCacheIconIfNeeded(
+                        for: feed,
+                        siteURL: fetchResult.feed.link,
+                        feedImageURL: fetchResult.feed.imageURL
+                    )
                 }
             case .failure(let fetchError):
                 failureCount += 1
