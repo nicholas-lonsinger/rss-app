@@ -7,7 +7,8 @@ import UIKit
 protocol FeedIconResolving: Sendable {
 
     /// Returns candidate icon URLs from multiple sources in priority order:
-    /// feed XML image → site HTML link tags → /favicon.ico fallback.
+    /// feed XML image → og:image → site HTML link tags → original-host /favicon.ico →
+    /// redirected-host /favicon.ico (when a cross-domain redirect occurred).
     /// Callers should try each URL until one successfully downloads.
     func resolveIconCandidates(feedSiteURL: URL?, feedImageURL: URL?) async -> [URL]
 
@@ -42,26 +43,17 @@ struct FeedIconService: FeedIconResolving {
     func resolveIconCandidates(feedSiteURL: URL?, feedImageURL: URL?) async -> [URL] {
         Self.logger.debug("resolveIconCandidates() feedImageURL=\(feedImageURL?.absoluteString ?? "nil", privacy: .public) siteURL=\(feedSiteURL?.absoluteString ?? "nil", privacy: .public)")
 
-        var candidates: [URL] = []
-
-        // Priority 1: Image URL from feed XML
-        if let feedImageURL, feedImageURL.scheme == "http" || feedImageURL.scheme == "https" {
-            candidates.append(Self.normalizeIconURL(feedImageURL))
-        }
-
-        // Priority 2: Parse site homepage HTML for icon links
+        // Fetch site homepage HTML and extract icon sources
+        var htmlResult: HTMLIconResult?
         if let siteURL = feedSiteURL {
-            let htmlIcons = await resolveFromHTML(siteURL: siteURL)
-            candidates.append(contentsOf: htmlIcons)
+            htmlResult = await resolveFromHTML(siteURL: siteURL)
         }
 
-        // Priority 3: Fallback to /favicon.ico
-        if let siteURL = feedSiteURL,
-           let host = siteURL.host(percentEncoded: false),
-           !host.isEmpty,
-           let faviconURL = URL(string: "\(siteURL.scheme ?? "https")://\(host)/favicon.ico") {
-            candidates.append(faviconURL)
-        }
+        let candidates = Self.assembleCandidates(
+            feedSiteURL: feedSiteURL,
+            feedImageURL: feedImageURL,
+            htmlResult: htmlResult
+        )
 
         Self.logger.debug("Found \(candidates.count, privacy: .public) icon candidates")
         return candidates
@@ -143,26 +135,112 @@ struct FeedIconService: FeedIconResolving {
         }
     }
 
+    // MARK: - Internal (visible to tests)
+
+    /// Result of parsing a site's homepage HTML for icon-related URLs.
+    struct HTMLIconResult {
+        /// Icon URLs extracted from `<link>` tags, ordered by priority: apple-touch-icon first, then rel="icon".
+        let linkIcons: [URL]
+        /// The `og:image` URL from `<meta property="og:image">`, if present.
+        /// Expected to be absolute per the Open Graph protocol, so no base-URL resolution is applied.
+        let ogImageURL: URL?
+        /// The host of the final URL after redirects, if it differs from the
+        /// requested host (indicates a platform-hosted blog like Medium/Substack).
+        let redirectedHost: String?
+    }
+
+    /// Assembles icon candidate URLs in priority order from the given inputs.
+    /// Pure function — no I/O — enabling direct unit testing of the ordering logic.
+    static func assembleCandidates(
+        feedSiteURL: URL?,
+        feedImageURL: URL?,
+        htmlResult: HTMLIconResult?
+    ) -> [URL] {
+        var candidates: [URL] = []
+
+        // Priority 1: Image URL from feed XML
+        if let feedImageURL, feedImageURL.scheme == "http" || feedImageURL.scheme == "https" {
+            candidates.append(normalizeIconURL(feedImageURL))
+        }
+
+        if let htmlResult {
+            // Priority 2: og:image from homepage — often blog-specific branding, which
+            // survives platform redirects (Medium, Substack, Ghost) better than link icons
+            if let ogImageURL = htmlResult.ogImageURL {
+                candidates.append(ogImageURL)
+            }
+
+            // Priority 3: HTML link icons (apple-touch-icon first, then rel="icon")
+            candidates.append(contentsOf: htmlResult.linkIcons)
+        }
+
+        // Priority 4: /favicon.ico fallback from the original site host
+        if let siteURL = feedSiteURL,
+           let host = siteURL.host(percentEncoded: false),
+           !host.isEmpty,
+           let faviconURL = URL(string: "\(siteURL.scheme ?? "https")://\(host)/favicon.ico") {
+            candidates.append(faviconURL)
+        }
+
+        // Priority 5: When a cross-domain redirect occurred (e.g., bothsidesofthetable.com
+        // → medium.com), also try the redirected host's /favicon.ico as a last resort
+        // RATIONALE: The host inequality check is redundant with HTMLIconResult's own guard,
+        // but kept as a defensive safety net in case the struct's construction logic changes.
+        if let redirectedHost = htmlResult?.redirectedHost,
+           let siteURL = feedSiteURL,
+           redirectedHost != siteURL.host(percentEncoded: false),
+           let faviconURL = URL(string: "\(siteURL.scheme ?? "https")://\(redirectedHost)/favicon.ico") {
+            candidates.append(faviconURL)
+        }
+
+        return candidates
+    }
+
     // MARK: - Private
 
-    private func resolveFromHTML(siteURL: URL) async -> [URL] {
+    private func resolveFromHTML(siteURL: URL) async -> HTMLIconResult? {
         do {
             let request = URLRequest(url: siteURL, timeoutInterval: Self.htmlFetchTimeout)
             let (data, response) = try await URLSession.shared.data(for: request)
 
             guard let httpResponse = response as? HTTPURLResponse,
                   (200...299).contains(httpResponse.statusCode) else {
-                return []
+                let code = (response as? HTTPURLResponse)?.statusCode ?? -1
+                Self.logger.warning("Site HTML fetch returned HTTP \(code, privacy: .public) for \(siteURL.absoluteString, privacy: .public)")
+                return nil
             }
 
             // Use the final URL (after redirects) as the base for resolving relative hrefs
             let baseURL = httpResponse.url ?? siteURL
 
-            guard let html = String(data: data, encoding: .utf8) else { return [] }
-            return HTMLUtilities.extractIconURLs(from: html, baseURL: baseURL)
+            guard let html = String(data: data, encoding: .utf8) else {
+                let contentType = httpResponse.value(forHTTPHeaderField: "Content-Type") ?? "unknown"
+                Self.logger.warning("Failed to decode site HTML as UTF-8 (\(contentType, privacy: .public), \(data.count, privacy: .public) bytes) from \(siteURL.absoluteString, privacy: .public)")
+                return nil
+            }
+
+            let linkIcons = HTMLUtilities.extractIconURLs(from: html, baseURL: baseURL)
+            let ogImageURL = HTMLUtilities.extractOGImageURL(from: html)
+
+            // Detect cross-domain redirects (e.g., bothsidesofthetable.com → medium.com)
+            let originalHost = siteURL.host(percentEncoded: false)
+            let finalHost = baseURL.host(percentEncoded: false)
+            let redirectedHost: String?
+            if let originalHost, let finalHost, originalHost != finalHost {
+                Self.logger.debug("Cross-domain redirect detected: \(originalHost, privacy: .public) → \(finalHost, privacy: .public)")
+                redirectedHost = finalHost
+            } else {
+                redirectedHost = nil
+            }
+
+            return HTMLIconResult(
+                linkIcons: linkIcons,
+                ogImageURL: ogImageURL,
+                redirectedHost: redirectedHost
+            )
         } catch {
             Self.logger.warning("Failed to fetch site HTML from \(siteURL.absoluteString, privacy: .public): \(error, privacy: .public)")
-            return []
+            return nil
         }
     }
 
