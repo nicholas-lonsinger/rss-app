@@ -302,6 +302,55 @@ struct FeedListViewModelTests {
         #expect(viewModel.unreadCount(for: feed) == 0)
     }
 
+    @Test("refreshUnreadCounts updates successful feeds and preserves previous counts for failed feeds in mixed batch")
+    @MainActor
+    func refreshUnreadCountsMixedSuccessAndFailure() {
+        let feedA = TestFixtures.makePersistentFeed(title: "Feed A")
+        let feedB = TestFixtures.makePersistentFeed(title: "Feed B")
+        let feedC = TestFixtures.makePersistentFeed(title: "Feed C")
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feedA, feedB, feedC]
+        mockPersistence.articlesByFeedID = [
+            feedA.id: [
+                TestFixtures.makePersistentArticle(articleID: "a1", isRead: false),
+                TestFixtures.makePersistentArticle(articleID: "a2", isRead: false),
+            ],
+            feedB.id: [
+                TestFixtures.makePersistentArticle(articleID: "b1", isRead: false),
+            ],
+            feedC.id: [
+                TestFixtures.makePersistentArticle(articleID: "c1", isRead: false),
+                TestFixtures.makePersistentArticle(articleID: "c2", isRead: false),
+                TestFixtures.makePersistentArticle(articleID: "c3", isRead: false),
+            ],
+        ]
+
+        let viewModel = FeedListViewModel(persistence: mockPersistence)
+        viewModel.loadFeeds()
+
+        // Establish initial counts: A=2, B=1, C=3
+        #expect(viewModel.unreadCount(for: feedA) == 2)
+        #expect(viewModel.unreadCount(for: feedB) == 1)
+        #expect(viewModel.unreadCount(for: feedC) == 3)
+
+        // Mark one article read in Feed A so the real count changes
+        mockPersistence.articlesByFeedID[feedA.id]?[0].isRead = true
+
+        // Inject per-feed errors: Feed B fails, A and C succeed
+        mockPersistence.unreadCountErrorByFeedID[feedB.id] = NSError(domain: "test", code: 1)
+
+        viewModel.refreshUnreadCounts()
+
+        // Feed A: succeeded — should reflect the updated count (1 unread now)
+        #expect(viewModel.unreadCount(for: feedA) == 1)
+        // Feed B: failed — should preserve the previous count (1)
+        #expect(viewModel.unreadCount(for: feedB) == 1)
+        // Feed C: succeeded — should reflect the current count (3)
+        #expect(viewModel.unreadCount(for: feedC) == 3)
+        // Error message should be set because at least one feed failed
+        #expect(viewModel.errorMessage == "Unable to update unread counts.")
+    }
+
     @Test("refreshUnreadCounts sets errorMessage on persistence error")
     @MainActor
     func refreshUnreadCountsSetsErrorMessageOnError() {

@@ -10,6 +10,7 @@ final class MockFeedPersistenceService: FeedPersisting {
     var feeds: [PersistentFeed] = []
     var errorToThrow: (any Error)?
     var unreadCountError: (any Error)?
+    var unreadCountErrorByFeedID: [UUID: any Error] = [:]
     var saveError: (any Error)?
     var updateFeedErrorError: (any Error)?
     var addFeedFailureAfterCount: Int?
@@ -143,6 +144,7 @@ final class MockFeedPersistenceService: FeedPersisting {
     }
 
     func unreadCount(for feed: PersistentFeed) throws -> Int {
+        if let perFeedError = unreadCountErrorByFeedID[feed.id] { throw perFeedError }
         if let error = unreadCountError ?? errorToThrow { throw error }
         return (articlesByFeedID[feed.id] ?? []).filter { !$0.isRead }.count
     }
