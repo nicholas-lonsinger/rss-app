@@ -27,13 +27,13 @@ final class FeedListViewModel {
         opmlService: OPMLServing = OPMLService(),
         feedFetching: FeedFetching = FeedFetchingService(),
         feedIconService: FeedIconResolving = FeedIconService(),
-        thumbnailPrefetcher: ThumbnailPrefetching = ThumbnailPrefetchService()
+        thumbnailPrefetcher: ThumbnailPrefetching? = nil
     ) {
         self.persistence = persistence
         self.opmlService = opmlService
         self.feedFetching = feedFetching
         self.feedIconService = feedIconService
-        self.thumbnailPrefetcher = thumbnailPrefetcher
+        self.thumbnailPrefetcher = thumbnailPrefetcher ?? ThumbnailPrefetchService(persistence: persistence)
     }
 
     func loadFeeds() {
@@ -337,7 +337,7 @@ final class FeedListViewModel {
         // Cancel any in-flight prefetch from a previous refresh cycle before starting a new one
         thumbnailPrefetchTask?.cancel()
         thumbnailPrefetchTask = Task(priority: .utility) {
-            await self.thumbnailPrefetcher.prefetchThumbnails(persistence: self.persistence)
+            await self.thumbnailPrefetcher.prefetchThumbnails()
         }
     }
 

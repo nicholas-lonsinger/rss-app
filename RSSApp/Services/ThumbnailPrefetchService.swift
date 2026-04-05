@@ -9,7 +9,7 @@ protocol ThumbnailPrefetching: Sendable {
 
     /// Downloads thumbnails for articles that are missing cached thumbnails,
     /// respecting the retry cap.
-    func prefetchThumbnails(persistence: FeedPersisting) async
+    func prefetchThumbnails() async
 }
 
 // MARK: - Constants
@@ -56,13 +56,15 @@ struct ThumbnailPrefetchService: ThumbnailPrefetching {
 
     private static let logger = Logger(category: "ThumbnailPrefetchService")
 
+    private let persistence: FeedPersisting
     private let thumbnailService: ArticleThumbnailCaching
 
-    init(thumbnailService: ArticleThumbnailCaching = ArticleThumbnailService()) {
+    init(persistence: FeedPersisting, thumbnailService: ArticleThumbnailCaching = ArticleThumbnailService()) {
+        self.persistence = persistence
         self.thumbnailService = thumbnailService
     }
 
-    func prefetchThumbnails(persistence: FeedPersisting) async {
+    func prefetchThumbnails() async {
         Self.logger.debug("prefetchThumbnails() called")
 
         let articles: [PersistentArticle]
