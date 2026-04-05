@@ -9,6 +9,20 @@ protocol ClaudeAPIServicing: Sendable {
     ) async throws -> AsyncThrowingStream<String, Error>
 }
 
+/// Abstracts URLSession's `bytes(for:)` so `ClaudeAPIService.sendMessage` can be
+/// tested with controlled SSE line sequences without hitting the network.
+protocol URLSessionBytesProviding: Sendable {
+    func bytes(for request: URLRequest, delegate: (any URLSessionTaskDelegate)?) async throws -> (URLSession.AsyncBytes, URLResponse)
+}
+
+extension URLSessionBytesProviding {
+    func bytes(for request: URLRequest) async throws -> (URLSession.AsyncBytes, URLResponse) {
+        try await bytes(for: request, delegate: nil)
+    }
+}
+
+extension URLSession: URLSessionBytesProviding {}
+
 enum ClaudeAPIError: Error, Sendable, LocalizedError {
     case invalidURL
     case httpError(statusCode: Int)
@@ -68,9 +82,11 @@ struct ClaudeAPIService: ClaudeAPIServicing {
     // RATIONALE: UserDefaults is thread-safe but not marked Sendable in the ObjC headers.
     // nonisolated(unsafe) is appropriate here since UserDefaults operations are internally synchronized.
     private nonisolated(unsafe) let defaults: UserDefaults
+    private let session: any URLSessionBytesProviding
 
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults = .standard, session: any URLSessionBytesProviding = URLSession.shared) {
         self.defaults = defaults
+        self.session = session
     }
 
     /// The current model identifier, read from UserDefaults at call time.
@@ -107,7 +123,7 @@ struct ClaudeAPIService: ClaudeAPIServicing {
         return AsyncThrowingStream { continuation in
             Task {
                 do {
-                    let (bytes, response) = try await URLSession.shared.bytes(for: request)
+                    let (bytes, response) = try await self.session.bytes(for: request)
                     guard let httpResponse = response as? HTTPURLResponse else {
                         continuation.finish(throwing: ClaudeAPIError.httpError(statusCode: 0))
                         return

@@ -27,7 +27,7 @@ RSSApp/
 ├── Services/                           # Business logic and networking
 │   ├── ArticleExtractionService.swift  # WKWebView + domSerializer.js + native content extraction
 │   ├── CandidateScorer.swift           # Readability-style DOM scoring to find article content node
-│   ├── ClaudeAPIService.swift          # Claude API client — streaming SSE via URLSession
+│   ├── ClaudeAPIService.swift          # Claude API client — streaming SSE via URLSessionBytesProviding (injectable, defaults to URLSession.shared)
 │   ├── ContentAssembler.swift          # Reconstructs clean HTML + plain text from winning DOM subtree
 │   ├── ContentExtractor.swift          # ContentExtracting protocol + extraction pipeline orchestrator
 │   ├── DOMSerializerConstants.swift    # Shared JS bridge constants (message handler name, serializer call)
@@ -101,7 +101,8 @@ RSSAppTests/
 │   ├── MockFeedStorageService.swift        # FeedStoring mock with in-memory store (for migration tests)
 │   ├── MockKeychainService.swift           # KeychainServicing mock with in-memory store
 │   ├── MockOPMLService.swift               # OPMLServing mock with injectable entries/data/errors
-│   └── MockThumbnailPrefetchService.swift  # ThumbnailPrefetching mock with call count tracking
+│   ├── MockThumbnailPrefetchService.swift  # ThumbnailPrefetching mock with call count tracking
+│   └── MockURLSessionBytesProvider.swift   # URLSessionBytesProviding mock with URLProtocol-backed controlled SSE lines
 ├── Models/
 │   ├── ArticleTests.swift              # Article creation, identity, hashable
 │   ├── DOMNodeTests.swift              # DOMNode accessors, text/element queries, tree traversal
@@ -110,6 +111,7 @@ RSSAppTests/
 ├── Services/
 │   ├── ArticleThumbnailServiceTests.swift # Thumbnail cache miss, delete safety, filename hashing
 │   ├── CandidateScorerTests.swift      # Content node identification, scoring, pruning
+│   ├── ClaudeAPIServiceSendMessageTests.swift # sendMessage integration — consecutive decode failure counter, stream completion, SSE routing
 │   ├── ClaudeAPIServiceTests.swift     # Request encoding, SSE parsing, error handling
 │   ├── ContentAssemblerTests.swift     # HTML/text assembly from DOM subtrees
 │   ├── ContentExtractorTests.swift     # End-to-end extraction pipeline, site-specific fallback
@@ -136,7 +138,7 @@ RSSAppTests/
 │   └── HomeViewModelTests.swift            # Unread count, cross-feed article queries, read/unread status
 ```
 
-**Total: 63 source files + 1 resource, 46 test source files + 1 fixture.**
+**Total: 63 source files + 1 resource, 48 test source files + 1 fixture.**
 
 ## Key Components
 
@@ -148,7 +150,7 @@ The directory tree annotations describe each file's purpose. This section covers
 
 **Cache-first loading (`FeedViewModel`).** On `loadFeed()`, displays the first page of cached `[PersistentArticle]` immediately (page size 50), then fetches from network and upserts new articles, reloading up to `max(articles.count, pageSize)` to preserve scroll position. `loadMoreArticles()` provides infinite scroll with deduplication and error-stop (`hasMore` set to `false` on error). Loading spinner only shown when no cached articles; error only shown when network fails and no cached articles (offline resilience). Pagination errors surface via `.alert` when articles are already loaded.
 
-**Claude API streaming flow.** `KeychainService` (`KeychainServicing` protocol, wraps `Security` framework `kSecClassGenericPassword`) loads the Anthropic API key → `ClaudeAPIService` (`ClaudeAPIServicing` protocol) POSTs to the Messages API with `stream: true`, reads SSE lines via `URLSession.bytes(for:).lines`, yields text deltas via `AsyncThrowingStream<String, Error>` → `DiscussionViewModel` appends user turn, creates empty assistant placeholder, then streams chunks into `messages[lastIndex].content`. Model identifier and max output tokens read from `UserDefaults` at call time (keys: `claude_model_identifier`, `claude_max_tokens`) with fallback defaults (`claude-haiku-4-5-20251001`, `4096`).
+**Claude API streaming flow.** `KeychainService` (`KeychainServicing` protocol, wraps `Security` framework `kSecClassGenericPassword`) loads the Anthropic API key → `ClaudeAPIService` (`ClaudeAPIServicing` protocol) POSTs to the Messages API with `stream: true`, reads SSE lines via `URLSessionBytesProviding` (injectable, defaults to `URLSession.shared`), yields text deltas via `AsyncThrowingStream<String, Error>` → `DiscussionViewModel` appends user turn, creates empty assistant placeholder, then streams chunks into `messages[lastIndex].content`. Model identifier and max output tokens read from `UserDefaults` at call time (keys: `claude_model_identifier`, `claude_max_tokens`) with fallback defaults (`claude-haiku-4-5-20251001`, `4096`).
 
 **OPML import pipeline.** `OPMLService` (`OPMLServing` protocol) parses OPML via `XMLParser` with a private `OPMLParserDelegate` that captures all `<outline>` elements with `xmlUrl` attributes regardless of nesting depth (flattening folders), accepting outlines without `type="rss"` for compatibility. Result is `[OPMLFeedEntry]` (intermediate type decoupled from persistence — lacks `id`/`addedDate`). `FeedListViewModel.importOPML(from:)` deduplicates via `FeedPersisting.feedExists(url:)` and calls `addFeed` for new entries. `importOPMLAndRefresh(from:)` extends this by fetching each feed's RSS XML to populate metadata. Export converts `PersistentFeed` → `SubscribedFeed` via `ModelConversion` for OPML generation.
 
@@ -218,9 +220,9 @@ RSSAppApp (@main)
 
 ## Test Coverage
 
-**46 test files: 30 test suites, 11 mock implementations, 4 shared helpers, 1 HTML fixture.**
+**48 test files: 31 test suites, 12 mock implementations, 4 shared helpers, 1 HTML fixture.**
 
-**Patterns:** Swift Testing (`@Suite`, `@Test`, `#expect`). Protocol-based dependency injection with 11 mocks (`MockFeedPersistenceService`, `MockFeedFetchingService`, `MockFeedIconService`, `MockArticleThumbnailService`, `MockThumbnailPrefetchService`, `MockOPMLService`, `MockClaudeAPIService`, `MockKeychainService`, `MockArticleExtractionService`, `MockContentExtractor`, `MockFeedStorageService`). In-memory `ModelContainer` via `SwiftDataTestHelpers` for SwiftData integration tests. `WKWebView` integration tests via `WebViewTestHelpers` for DOM serialization and extraction pipeline. Shared `TestFixtures` factory methods for `Article`, `RSSFeed`, `PersistentFeed`, `PersistentArticle`, and sample RSS XML.
+**Patterns:** Swift Testing (`@Suite`, `@Test`, `#expect`). Protocol-based dependency injection with 12 mocks (`MockFeedPersistenceService`, `MockFeedFetchingService`, `MockFeedIconService`, `MockArticleThumbnailService`, `MockThumbnailPrefetchService`, `MockOPMLService`, `MockClaudeAPIService`, `MockKeychainService`, `MockArticleExtractionService`, `MockContentExtractor`, `MockFeedStorageService`, `MockURLSessionBytesProvider`). In-memory `ModelContainer` via `SwiftDataTestHelpers` for SwiftData integration tests. `WKWebView` integration tests via `WebViewTestHelpers` for DOM serialization and extraction pipeline. `MockURLSessionBytesProvider` with `URLProtocol` interception for `ClaudeAPIService.sendMessage` integration tests. Shared `TestFixtures` factory methods for `Article`, `RSSFeed`, `PersistentFeed`, `PersistentArticle`, and sample RSS XML.
 
 **Well-covered:** All models, services, and view models have test suites with mock injection — including happy paths, error paths, edge cases, and state transitions.
 
