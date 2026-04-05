@@ -13,7 +13,6 @@ struct FeedListView: View {
     @State private var navigationPath = NavigationPath()
     @State private var showAddFeed = false
     @State private var feedToEdit: PersistentFeed?
-    @State private var lastViewedFeedID: PersistentFeed.ID?
 
     private let persistence: FeedPersisting
     private let thumbnailService: ArticleThumbnailCaching = ArticleThumbnailService()
@@ -57,7 +56,7 @@ struct FeedListView: View {
                         persistence: persistence,
                         thumbnailService: thumbnailService
                     )
-                    .onAppear { lastViewedFeedID = feedID }
+                    .onDisappear { viewModel.refreshUnreadCount(for: feed) }
                 } else {
                     ContentUnavailableView {
                         Label("Feed Not Found", systemImage: "exclamationmark.triangle")
@@ -84,13 +83,6 @@ struct FeedListView: View {
             }
             .task {
                 viewModel.loadFeeds()
-            }
-            .onChange(of: navigationPath.count) { oldCount, newCount in
-                if newCount < oldCount,
-                   let feedID = lastViewedFeedID,
-                   let feed = viewModel.feeds.first(where: { $0.id == feedID }) {
-                    viewModel.refreshUnreadCount(for: feed)
-                }
             }
     }
 
