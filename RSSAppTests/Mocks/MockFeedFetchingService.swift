@@ -9,6 +9,8 @@ final class MockFeedFetchingService: FeedFetching, @unchecked Sendable {
     var errorToThrow: (any Error)?
     var errorsByURL: [URL: any Error] = [:]
     var shouldReturn304 = false
+    var etagToReturn: String?
+    var lastModifiedToReturn: String?
 
     func fetchFeed(from url: URL) async throws -> RSSFeed {
         if let error = errorsByURL[url] { throw error }
@@ -23,6 +25,6 @@ final class MockFeedFetchingService: FeedFetching, @unchecked Sendable {
     func fetchFeed(from url: URL, etag: String?, lastModified: String?) async throws -> FeedFetchResult? {
         if shouldReturn304 { return nil }
         let feed = try await fetchFeed(from: url)
-        return FeedFetchResult(feed: feed, etag: nil, lastModified: nil)
+        return FeedFetchResult(feed: feed, etag: etagToReturn, lastModified: lastModifiedToReturn)
     }
 }

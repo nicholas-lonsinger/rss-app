@@ -13,6 +13,9 @@ final class MockFeedPersistenceService: FeedPersisting {
     var unreadCountErrorByFeedID: [UUID: any Error] = [:]
     var saveError: (any Error)?
     var updateFeedErrorError: (any Error)?
+    var updateFeedMetadataError: (any Error)?
+    var upsertArticlesError: (any Error)?
+    var updateFeedCacheHeadersError: (any Error)?
     var addFeedFailureAfterCount: Int?
 
     var articlesByFeedID: [UUID: [PersistentArticle]] = [:]
@@ -42,7 +45,7 @@ final class MockFeedPersistenceService: FeedPersisting {
     }
 
     func updateFeedMetadata(_ feed: PersistentFeed, title: String, description: String) throws {
-        if let error = errorToThrow { throw error }
+        if let error = updateFeedMetadataError ?? errorToThrow { throw error }
         feed.title = title
         feed.feedDescription = description
         feed.lastRefreshDate = Date()
@@ -64,7 +67,7 @@ final class MockFeedPersistenceService: FeedPersisting {
     }
 
     func updateFeedCacheHeaders(_ feed: PersistentFeed, etag: String?, lastModified: String?) throws {
-        if let error = errorToThrow { throw error }
+        if let error = updateFeedCacheHeadersError ?? errorToThrow { throw error }
         feed.etag = etag
         feed.lastModifiedHeader = lastModified
     }
@@ -126,7 +129,7 @@ final class MockFeedPersistenceService: FeedPersisting {
     }
 
     func upsertArticles(_ articles: [Article], for feed: PersistentFeed) throws {
-        if let error = errorToThrow { throw error }
+        if let error = upsertArticlesError ?? errorToThrow { throw error }
         let existingIDs = Set((articlesByFeedID[feed.id] ?? []).map(\.articleID))
         for article in articles where !existingIDs.contains(article.id) {
             let persistent = PersistentArticle(from: article)

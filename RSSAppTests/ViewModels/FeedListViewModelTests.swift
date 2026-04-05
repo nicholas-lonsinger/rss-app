@@ -1214,6 +1214,166 @@ struct FeedListViewModelTests {
 
     // MARK: - Thumbnail Prefetch
 
+    // MARK: - Separate Persistence Error Handling
+
+    @Test("refreshAllFeeds continues upsert when metadata update fails")
+    @MainActor
+    func refreshAllFeedsContinuesUpsertWhenMetadataFails() async {
+        let url = URL(string: "https://example.com/feed")!
+        let feed = TestFixtures.makePersistentFeed(title: "Original", feedURL: url)
+
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+        let mockFetching = MockFeedFetchingService()
+        let article = TestFixtures.makeArticle(id: "new-article")
+        mockFetching.feedsByURL = [url: TestFixtures.makeFeed(title: "Updated", articles: [article])]
+        mockFetching.etagToReturn = "etag-123"
+        mockFetching.lastModifiedToReturn = "Mon, 01 Jan 2024"
+
+        // Metadata update fails, but upsert and cache header update should still run
+        mockPersistence.updateFeedMetadataError = NSError(domain: "test", code: 1)
+
+        let viewModel = FeedListViewModel(
+            persistence: mockPersistence,
+            feedFetching: mockFetching,
+            feedIconService: MockFeedIconService()
+        )
+        viewModel.loadFeeds()
+        await viewModel.refreshAllFeeds()
+
+        // Title should remain unchanged because metadata update failed
+        #expect(viewModel.feeds[0].title == "Original")
+        // Articles should still be upserted despite metadata failure
+        #expect(mockPersistence.articlesByFeedID[feed.id]?.isEmpty == false)
+        // Cache headers should still be written since upsert succeeded
+        #expect(feed.etag == "etag-123")
+        #expect(feed.lastModifiedHeader == "Mon, 01 Jan 2024")
+        // Metadata failure is cosmetic — should not count as a feed failure
+        #expect(viewModel.errorMessage == nil)
+    }
+
+    @Test("refreshAllFeeds skips cache header update when upsert fails")
+    @MainActor
+    func refreshAllFeedsSkipsCacheHeadersWhenUpsertFails() async {
+        let url = URL(string: "https://example.com/feed")!
+        let feed = TestFixtures.makePersistentFeed(title: "Feed", feedURL: url)
+
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+        let mockFetching = MockFeedFetchingService()
+        mockFetching.feedsByURL = [url: TestFixtures.makeFeed(title: "Updated")]
+        mockFetching.etagToReturn = "etag-should-not-be-written"
+        mockFetching.lastModifiedToReturn = "should-not-be-written"
+
+        // Upsert fails — cache headers must NOT be written
+        mockPersistence.upsertArticlesError = NSError(domain: "test", code: 1)
+
+        let viewModel = FeedListViewModel(
+            persistence: mockPersistence,
+            feedFetching: mockFetching,
+            feedIconService: MockFeedIconService()
+        )
+        viewModel.loadFeeds()
+        await viewModel.refreshAllFeeds()
+
+        // Cache headers should remain nil since upsert failed
+        #expect(feed.etag == nil)
+        #expect(feed.lastModifiedHeader == nil)
+        // Upsert failure counts toward the failure total
+        #expect(viewModel.errorMessage == "1 of 1 feed(s) could not be updated.")
+    }
+
+    @Test("refreshAllFeeds updates metadata even when cache header update fails")
+    @MainActor
+    func refreshAllFeedsUpdatesMetadataWhenCacheHeadersFail() async {
+        let url = URL(string: "https://example.com/feed")!
+        let feed = TestFixtures.makePersistentFeed(title: "Old Title", feedURL: url)
+
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+        let mockFetching = MockFeedFetchingService()
+        let article = TestFixtures.makeArticle(id: "article-1")
+        mockFetching.feedsByURL = [url: TestFixtures.makeFeed(title: "New Title", articles: [article])]
+
+        // Cache header update fails — should not affect metadata or articles
+        mockPersistence.updateFeedCacheHeadersError = NSError(domain: "test", code: 1)
+
+        let viewModel = FeedListViewModel(
+            persistence: mockPersistence,
+            feedFetching: mockFetching,
+            feedIconService: MockFeedIconService()
+        )
+        viewModel.loadFeeds()
+        await viewModel.refreshAllFeeds()
+
+        // Metadata should be updated
+        #expect(viewModel.feeds[0].title == "New Title")
+        // Articles should be upserted
+        #expect(mockPersistence.articlesByFeedID[feed.id]?.isEmpty == false)
+        // Cache header failure is non-critical — should not count as a feed failure
+        #expect(viewModel.errorMessage == nil)
+    }
+
+    @Test("refreshAllFeeds resolves icon even when metadata update fails")
+    @MainActor
+    func refreshAllFeedsResolvesIconWhenMetadataFails() async {
+        let url = URL(string: "https://example.com/feed")!
+        let feed = TestFixtures.makePersistentFeed(feedURL: url)
+
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+        let mockFetching = MockFeedFetchingService()
+        mockFetching.feedsByURL = [url: TestFixtures.makeFeed()]
+        let mockIconService = MockFeedIconService()
+
+        // Metadata update fails, but icon resolution should still happen
+        mockPersistence.updateFeedMetadataError = NSError(domain: "test", code: 1)
+
+        let viewModel = FeedListViewModel(
+            persistence: mockPersistence,
+            feedFetching: mockFetching,
+            feedIconService: mockIconService
+        )
+        viewModel.loadFeeds()
+        await viewModel.refreshAllFeeds()
+
+        // Allow fire-and-forget icon resolution tasks to complete
+        for _ in 0..<10 { await Task.yield() }
+
+        #expect(mockIconService.resolveAndCacheCallCount == 1)
+    }
+
+    @Test("refreshAllFeeds resolves icon even when upsert fails")
+    @MainActor
+    func refreshAllFeedsResolvesIconWhenUpsertFails() async {
+        let url = URL(string: "https://example.com/feed")!
+        let feed = TestFixtures.makePersistentFeed(feedURL: url)
+
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+        let mockFetching = MockFeedFetchingService()
+        mockFetching.feedsByURL = [url: TestFixtures.makeFeed()]
+        let mockIconService = MockFeedIconService()
+
+        // Upsert fails, but icon resolution should still happen
+        mockPersistence.upsertArticlesError = NSError(domain: "test", code: 1)
+
+        let viewModel = FeedListViewModel(
+            persistence: mockPersistence,
+            feedFetching: mockFetching,
+            feedIconService: mockIconService
+        )
+        viewModel.loadFeeds()
+        await viewModel.refreshAllFeeds()
+
+        // Allow fire-and-forget icon resolution tasks to complete
+        for _ in 0..<10 { await Task.yield() }
+
+        #expect(mockIconService.resolveAndCacheCallCount == 1)
+    }
+
+    // MARK: - Thumbnail Prefetch
+
     @Test("refreshAllFeeds invokes thumbnail prefetcher after refresh")
     @MainActor
     func refreshAllFeedsInvokesPrefetcher() async {
