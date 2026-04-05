@@ -40,7 +40,9 @@ struct RSSParsingService: Sendable {
         }
 
         let feed = RSSFeed(
-            title: delegate.channelTitle.trimmingCharacters(in: .whitespacesAndNewlines),
+            title: HTMLUtilities.decodeHTMLEntities(
+                delegate.channelTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+            ),
             link: URL(string: delegate.channelLink.trimmingCharacters(in: .whitespacesAndNewlines)),
             feedDescription: delegate.channelDescription.trimmingCharacters(in: .whitespacesAndNewlines),
             articles: delegate.articles,
@@ -440,7 +442,9 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
     // MARK: - Article Construction
 
     private func buildArticle() -> Article {
-        let title = itemTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        let title = HTMLUtilities.decodeHTMLEntities(
+            itemTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
         let linkString = itemLink.trimmingCharacters(in: .whitespacesAndNewlines)
         let rawDescription = itemDescription.trimmingCharacters(in: .whitespacesAndNewlines)
         let guid = itemGuid.trimmingCharacters(in: .whitespacesAndNewlines)

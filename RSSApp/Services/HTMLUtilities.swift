@@ -2,26 +2,57 @@ import Foundation
 
 enum HTMLUtilities {
 
-    /// Strips HTML tags and decodes common entities, returning plain text.
-    static func stripHTML(_ html: String) -> String {
-        var result = html
+    /// Decodes HTML character references (numeric and named) in a string.
+    ///
+    /// Handles decimal (`&#8217;`), hexadecimal (`&#x2019;`), and common named
+    /// entities (`&amp;`, `&lt;`, `&gt;`, `&quot;`, `&apos;`, `&nbsp;`, `&#39;`).
+    static func decodeHTMLEntities(_ string: String) -> String {
+        guard string.contains("&") else { return string }
 
-        // Remove HTML tags
-        result = result.replacing(#/<[^>]+>/#, with: "")
+        var result = string
 
-        // Decode common HTML entities
+        // Decode numeric character references first (decimal and hex)
+        result = result.replacing(#/&#x([0-9A-Fa-f]+);/#) { match in
+            if let codePoint = UInt32(match.1, radix: 16),
+               let scalar = Unicode.Scalar(codePoint) {
+                return String(Character(scalar))
+            }
+            return String(match.0)
+        }
+        result = result.replacing(#/&#([0-9]+);/#) { match in
+            if let codePoint = UInt32(match.1),
+               let scalar = Unicode.Scalar(codePoint) {
+                return String(Character(scalar))
+            }
+            return String(match.0)
+        }
+
+        // Decode common named entities (&amp; last to avoid double-decoding)
         let entities: [(String, String)] = [
-            ("&amp;", "&"),
             ("&lt;", "<"),
             ("&gt;", ">"),
             ("&quot;", "\""),
             ("&#39;", "'"),
             ("&apos;", "'"),
             ("&nbsp;", " "),
+            ("&amp;", "&"),
         ]
         for (entity, replacement) in entities {
             result = result.replacingOccurrences(of: entity, with: replacement)
         }
+
+        return result
+    }
+
+    /// Strips HTML tags and decodes entities, returning plain text.
+    static func stripHTML(_ html: String) -> String {
+        var result = html
+
+        // Remove HTML tags
+        result = result.replacing(#/<[^>]+>/#, with: "")
+
+        // Decode HTML entities
+        result = decodeHTMLEntities(result)
 
         // Collapse multiple whitespace characters into a single space
         result = result.replacing(#/\s+/#, with: " ")

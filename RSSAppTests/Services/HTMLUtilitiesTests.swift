@@ -48,6 +48,40 @@ struct HTMLUtilitiesTests {
         #expect(HTMLUtilities.stripHTML(html) == "Hello World")
     }
 
+    // MARK: - decodeHTMLEntities
+
+    @Test("Decodes decimal numeric character references")
+    func decodeDecimalNumericEntities() {
+        #expect(HTMLUtilities.decodeHTMLEntities("Wak&#8217;a") == "Wak\u{2019}a")
+    }
+
+    @Test("Decodes hexadecimal numeric character references")
+    func decodeHexNumericEntities() {
+        #expect(HTMLUtilities.decodeHTMLEntities("&#x201C;hello&#x201D;") == "\u{201C}hello\u{201D}")
+    }
+
+    @Test("Decodes mixed numeric and named entities")
+    func decodeMixedEntities() {
+        #expect(HTMLUtilities.decodeHTMLEntities("Tom &amp; Jerry&#8217;s") == "Tom & Jerry\u{2019}s")
+    }
+
+    @Test("Returns string unchanged when no entities present")
+    func decodeNoEntities() {
+        #expect(HTMLUtilities.decodeHTMLEntities("plain text") == "plain text")
+    }
+
+    @Test("Handles invalid numeric entity gracefully")
+    func decodeInvalidNumericEntity() {
+        // Invalid Unicode scalar (surrogate) — should pass through unchanged
+        #expect(HTMLUtilities.decodeHTMLEntities("&#xD800;") == "&#xD800;")
+    }
+
+    @Test("stripHTML decodes numeric entities in descriptions")
+    func stripHTMLDecodesNumericEntities() {
+        let html = "<p>Los Thuthanaka&#8217;s Wak&#8217;a</p>"
+        #expect(HTMLUtilities.stripHTML(html) == "Los Thuthanaka\u{2019}s Wak\u{2019}a")
+    }
+
     // MARK: - escapeHTML
 
     @Test("Escapes ampersand in HTML text")
