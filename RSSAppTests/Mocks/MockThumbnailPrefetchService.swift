@@ -9,7 +9,7 @@ final class MockThumbnailPrefetchService: ThumbnailPrefetching {
     /// Useful for tests that need to wait for the fire-and-forget prefetch Task.
     var prefetchContinuation: CheckedContinuation<Void, Never>?
 
-    func prefetchThumbnails(persistence: FeedPersisting) async {
+    func prefetchThumbnails() async {
         prefetchCallCount += 1
         prefetchContinuation?.resume()
         prefetchContinuation = nil

@@ -22,8 +22,8 @@ struct ThumbnailPrefetchServiceTests {
         let mockThumbnail = MockArticleThumbnailService()
         mockThumbnail.resolveResult = true
 
-        let service = ThumbnailPrefetchService(thumbnailService: mockThumbnail)
-        await service.prefetchThumbnails(persistence: persistence)
+        let service = ThumbnailPrefetchService(persistence: persistence, thumbnailService: mockThumbnail)
+        await service.prefetchThumbnails()
 
         #expect(article.isThumbnailCached == true)
         #expect(mockThumbnail.resolveCallCount == 1)
@@ -43,8 +43,8 @@ struct ThumbnailPrefetchServiceTests {
         persistence.articlesByFeedID = [feed.id: [article]]
 
         let mockThumbnail = MockArticleThumbnailService()
-        let service = ThumbnailPrefetchService(thumbnailService: mockThumbnail)
-        await service.prefetchThumbnails(persistence: persistence)
+        let service = ThumbnailPrefetchService(persistence: persistence, thumbnailService: mockThumbnail)
+        await service.prefetchThumbnails()
 
         #expect(mockThumbnail.resolveCallCount == 0)
     }
@@ -63,8 +63,8 @@ struct ThumbnailPrefetchServiceTests {
         persistence.articlesByFeedID = [feed.id: [article]]
 
         let mockThumbnail = MockArticleThumbnailService()
-        let service = ThumbnailPrefetchService(thumbnailService: mockThumbnail)
-        await service.prefetchThumbnails(persistence: persistence)
+        let service = ThumbnailPrefetchService(persistence: persistence, thumbnailService: mockThumbnail)
+        await service.prefetchThumbnails()
 
         #expect(mockThumbnail.resolveCallCount == 0)
         #expect(article.isThumbnailCached == false)
@@ -87,8 +87,8 @@ struct ThumbnailPrefetchServiceTests {
         let mockThumbnail = MockArticleThumbnailService()
         mockThumbnail.resolveResult = false
 
-        let service = ThumbnailPrefetchService(thumbnailService: mockThumbnail)
-        await service.prefetchThumbnails(persistence: persistence)
+        let service = ThumbnailPrefetchService(persistence: persistence, thumbnailService: mockThumbnail)
+        await service.prefetchThumbnails()
 
         #expect(article.isThumbnailCached == false)
         #expect(article.thumbnailRetryCount == 1)
@@ -109,8 +109,8 @@ struct ThumbnailPrefetchServiceTests {
         persistence.articlesByFeedID = [feed.id: [article]]
 
         let mockThumbnail = MockArticleThumbnailService()
-        let service = ThumbnailPrefetchService(thumbnailService: mockThumbnail)
-        await service.prefetchThumbnails(persistence: persistence)
+        let service = ThumbnailPrefetchService(persistence: persistence, thumbnailService: mockThumbnail)
+        await service.prefetchThumbnails()
 
         #expect(mockThumbnail.resolveCallCount == 0)
     }
@@ -122,8 +122,8 @@ struct ThumbnailPrefetchServiceTests {
         persistence.errorToThrow = NSError(domain: "test", code: 1)
 
         let mockThumbnail = MockArticleThumbnailService()
-        let service = ThumbnailPrefetchService(thumbnailService: mockThumbnail)
-        await service.prefetchThumbnails(persistence: persistence)
+        let service = ThumbnailPrefetchService(persistence: persistence, thumbnailService: mockThumbnail)
+        await service.prefetchThumbnails()
 
         #expect(mockThumbnail.resolveCallCount == 0)
     }
@@ -158,8 +158,8 @@ struct ThumbnailPrefetchServiceTests {
         let mockThumbnail = MockArticleThumbnailService()
         mockThumbnail.resolveResult = true
 
-        let service = ThumbnailPrefetchService(thumbnailService: mockThumbnail)
-        await service.prefetchThumbnails(persistence: persistence)
+        let service = ThumbnailPrefetchService(persistence: persistence, thumbnailService: mockThumbnail)
+        await service.prefetchThumbnails()
 
         #expect(article1.isThumbnailCached == true)
         #expect(article2.isThumbnailCached == true)
@@ -185,8 +185,8 @@ struct ThumbnailPrefetchServiceTests {
         // Fail the first call, succeed on the second (retry)
         let mock = SequenceThumbnailMock(failCountBeforeSuccess: ["retry-article": 1])
 
-        let service = ThumbnailPrefetchService(thumbnailService: mock)
-        await service.prefetchThumbnails(persistence: persistence)
+        let service = ThumbnailPrefetchService(persistence: persistence, thumbnailService: mock)
+        await service.prefetchThumbnails()
 
         // The article should be marked as cached (retry succeeded)
         #expect(article.isThumbnailCached == true)
@@ -211,8 +211,8 @@ struct ThumbnailPrefetchServiceTests {
         let totalAttempts = ThumbnailPrefetchConstants.maxTransientRetries + 1
         let mock = SequenceThumbnailMock(failCountBeforeSuccess: ["always-fail": totalAttempts])
 
-        let service = ThumbnailPrefetchService(thumbnailService: mock)
-        await service.prefetchThumbnails(persistence: persistence)
+        let service = ThumbnailPrefetchService(persistence: persistence, thumbnailService: mock)
+        await service.prefetchThumbnails()
 
         // The article should NOT be cached and retry count incremented
         #expect(article.isThumbnailCached == false)
@@ -238,8 +238,8 @@ struct ThumbnailPrefetchServiceTests {
             failCountBeforeSuccess: ["last-chance": ThumbnailPrefetchConstants.maxTransientRetries]
         )
 
-        let service = ThumbnailPrefetchService(thumbnailService: mock)
-        await service.prefetchThumbnails(persistence: persistence)
+        let service = ThumbnailPrefetchService(persistence: persistence, thumbnailService: mock)
+        await service.prefetchThumbnails()
 
         // Should succeed on the last allowed attempt
         #expect(article.isThumbnailCached == true)
@@ -267,8 +267,8 @@ struct ThumbnailPrefetchServiceTests {
         let mockThumbnail = MockArticleThumbnailService()
         mockThumbnail.resolveResult = false
 
-        let service = ThumbnailPrefetchService(thumbnailService: mockThumbnail)
-        await service.prefetchThumbnails(persistence: persistence)
+        let service = ThumbnailPrefetchService(persistence: persistence, thumbnailService: mockThumbnail)
+        await service.prefetchThumbnails()
 
         // Article has no image source — skipped without calling resolve or incrementing retry count
         #expect(article.isThumbnailCached == false)
@@ -299,8 +299,8 @@ struct ThumbnailPrefetchServiceTests {
             successArticleIDs: Set(["success-article"])
         )
 
-        let service = ThumbnailPrefetchService(thumbnailService: selectiveMock)
-        await service.prefetchThumbnails(persistence: persistence)
+        let service = ThumbnailPrefetchService(persistence: persistence, thumbnailService: selectiveMock)
+        await service.prefetchThumbnails()
 
         #expect(successArticle.isThumbnailCached == true)
         #expect(failArticle.isThumbnailCached == false)
