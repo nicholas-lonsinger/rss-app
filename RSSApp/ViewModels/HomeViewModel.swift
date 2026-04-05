@@ -11,6 +11,7 @@ final class HomeViewModel {
     static let pageSize = 50
 
     private(set) var unreadCount: Int = 0
+    private(set) var isRefreshing = false
     private(set) var errorMessage: String?
 
     // MARK: - Pagination state for all articles
@@ -25,12 +26,49 @@ final class HomeViewModel {
 
     private let persistence: FeedPersisting
 
-    init(persistence: FeedPersisting) {
+    /// Async closure that performs the actual network feed refresh.
+    /// Returns an error message string on failure, or nil on success.
+    /// Injected by the caller to perform the actual network feed refresh.
+    private let refreshFeeds: (@Sendable () async -> String?)?
+
+    init(persistence: FeedPersisting, refreshFeeds: (@Sendable () async -> String?)? = nil) {
         self.persistence = persistence
+        self.refreshFeeds = refreshFeeds
     }
 
     func clearError() {
         errorMessage = nil
+    }
+
+    // MARK: - Refresh
+
+    /// Triggers a full network refresh of all feeds.
+    /// When no refresh closure is configured, this is a no-op.
+    ///
+    /// This method only performs the network refresh and sets `errorMessage` on failure.
+    /// Callers are responsible for reloading local data afterward (e.g., `loadUnreadCount()`,
+    /// `loadAllArticles()`) so each view reloads exactly what it needs.
+    func refreshAllFeeds() async {
+        guard let refreshFeeds else {
+            Self.logger.debug("refreshAllFeeds() called but no refresh closure configured")
+            return
+        }
+        guard !isRefreshing else {
+            Self.logger.debug("refreshAllFeeds() skipped — already refreshing")
+            return
+        }
+        Self.logger.debug("refreshAllFeeds() starting network refresh")
+        errorMessage = nil
+        isRefreshing = true
+        defer { isRefreshing = false }
+
+        let refreshError = await refreshFeeds()
+        if let refreshError {
+            errorMessage = refreshError
+            Self.logger.error("refreshAllFeeds() finished with error: \(refreshError, privacy: .public)")
+        } else {
+            Self.logger.notice("refreshAllFeeds() completed successfully")
+        }
     }
 
     func loadUnreadCount() {

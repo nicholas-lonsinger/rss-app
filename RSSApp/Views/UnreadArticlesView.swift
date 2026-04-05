@@ -63,6 +63,11 @@ struct UnreadArticlesView: View {
         } message: {
             Text(homeViewModel.errorMessage ?? "")
         }
+        .refreshable {
+            await homeViewModel.refreshAllFeeds()
+            homeViewModel.loadUnreadArticles()
+            homeViewModel.loadUnreadCount()
+        }
         .task {
             homeViewModel.loadUnreadArticles()
         }

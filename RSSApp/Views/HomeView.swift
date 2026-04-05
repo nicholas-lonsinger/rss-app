@@ -8,8 +8,15 @@ struct HomeView: View {
 
     init(persistence: FeedPersisting) {
         self.persistence = persistence
-        _viewModel = State(initialValue: HomeViewModel(persistence: persistence))
-        _feedListViewModel = State(initialValue: FeedListViewModel(persistence: persistence))
+        let feedListVM = FeedListViewModel(persistence: persistence)
+        _feedListViewModel = State(initialValue: feedListVM)
+        _viewModel = State(initialValue: HomeViewModel(
+            persistence: persistence,
+            refreshFeeds: { [feedListVM] in
+                await feedListVM.refreshAllFeeds()
+                return await feedListVM.errorMessage
+            }
+        ))
     }
 
     var body: some View {
@@ -20,6 +27,10 @@ struct HomeView: View {
                 }
             }
             .listStyle(.plain)
+            .refreshable {
+                await viewModel.refreshAllFeeds()
+                viewModel.loadUnreadCount()
+            }
             .navigationTitle("Home")
             .navigationDestination(for: HomeGroup.self) { group in
                 switch group {
