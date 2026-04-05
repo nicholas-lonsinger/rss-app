@@ -24,6 +24,11 @@ final class PersistentArticle {
     var isRead: Bool
     var readDate: Date?
 
+    // MARK: - Thumbnail caching
+
+    var isThumbnailCached: Bool
+    var thumbnailRetryCount: Int
+
     // MARK: - Caching
 
     var fetchedDate: Date
@@ -47,6 +52,8 @@ final class PersistentArticle {
         categories: [String] = [],
         isRead: Bool = false,
         readDate: Date? = nil,
+        isThumbnailCached: Bool = false,
+        thumbnailRetryCount: Int = 0,
         fetchedDate: Date = Date()
     ) {
         self.articleID = articleID
@@ -60,6 +67,8 @@ final class PersistentArticle {
         self.categories = categories
         self.isRead = isRead
         self.readDate = readDate
+        self.isThumbnailCached = isThumbnailCached
+        self.thumbnailRetryCount = thumbnailRetryCount
         self.fetchedDate = fetchedDate
     }
 }

@@ -35,9 +35,10 @@ struct ArticleThumbnailView: View {
         }
     }
 
-    // RATIONALE: Unlike FeedIconView which only reads from cache (icons are resolved during
-    // feed refresh in FeedListViewModel), thumbnails are resolved on-demand when the view
-    // appears. This avoids blocking feed load and handles the full article list naturally.
+    // RATIONALE: Thumbnails are primarily resolved during feed refresh via
+    // ThumbnailPrefetchService. This view reads from disk cache first. On-demand
+    // resolution is retained as a fallback for articles that predate the eager
+    // prefetch feature or whose prefetch is still in progress.
     private func loadThumbnail() async {
         if let fileURL = thumbnailService.cachedThumbnailFileURL(for: articleID) {
             let image = await Task.detached(priority: .userInitiated) {

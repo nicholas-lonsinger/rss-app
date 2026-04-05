@@ -19,17 +19,20 @@ final class FeedListViewModel {
     private let opmlService: OPMLServing
     private let feedFetching: FeedFetching
     let feedIconService: FeedIconResolving
+    private let thumbnailPrefetcher: ThumbnailPrefetching
 
     init(
         persistence: FeedPersisting,
         opmlService: OPMLServing = OPMLService(),
         feedFetching: FeedFetching = FeedFetchingService(),
-        feedIconService: FeedIconResolving = FeedIconService()
+        feedIconService: FeedIconResolving = FeedIconService(),
+        thumbnailPrefetcher: ThumbnailPrefetching = ThumbnailPrefetchService()
     ) {
         self.persistence = persistence
         self.opmlService = opmlService
         self.feedFetching = feedFetching
         self.feedIconService = feedIconService
+        self.thumbnailPrefetcher = thumbnailPrefetcher
     }
 
     func loadFeeds() {
@@ -328,6 +331,11 @@ final class FeedListViewModel {
             errorMessage = "Unable to save updated feeds."
         } else if failureCount > 0 {
             errorMessage = "\(failureCount) of \(feedsToRefresh.count) feed(s) could not be updated."
+        }
+
+        // Kick off thumbnail prefetching as secondary work — not blocking the refresh
+        Task(priority: .utility) {
+            await self.thumbnailPrefetcher.prefetchThumbnails(persistence: self.persistence)
         }
     }
 
