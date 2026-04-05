@@ -155,6 +155,16 @@ struct DiscussionViewModelTests {
         #expect(vm.messages[1].content.hasPrefix("Error:"))
     }
 
+    @Test("sendMessage surfaces serverError message in assistant bubble")
+    func sendHandlesServerError() async {
+        let vm = makeVM(error: ClaudeAPIError.serverError(message: "Rate limit exceeded"))
+        vm.currentInput = "A question"
+        await vm.sendMessage()
+        #expect(vm.messages.count == 2)
+        #expect(vm.messages[1].role == .assistant)
+        #expect(vm.messages[1].content == "Error: Rate limit exceeded")
+    }
+
     @Test("sendMessage does nothing when input is empty")
     func sendIgnoresEmptyInput() async {
         let vm = makeVM()
