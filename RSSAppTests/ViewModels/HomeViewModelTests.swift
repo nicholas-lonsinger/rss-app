@@ -11,6 +11,15 @@ private actor CallCounter {
     }
 }
 
+/// Sendable toggle for controlling closure behavior across `@Sendable` boundaries in tests.
+private actor FailToggle {
+    private(set) var shouldFail = true
+
+    func setShouldFail(_ value: Bool) {
+        shouldFail = value
+    }
+}
+
 @Suite("HomeViewModel Tests")
 struct HomeViewModelTests {
 
@@ -517,27 +526,23 @@ struct HomeViewModelTests {
 
     // MARK: - Refresh All Feeds
 
-    @Test("refreshAllFeeds calls refresh closure and reloads unread count")
+    @Test("refreshAllFeeds calls refresh closure")
     @MainActor
-    func refreshAllFeedsCallsClosureAndReloadsCount() async {
-        let feed = TestFixtures.makePersistentFeed()
+    func refreshAllFeedsCallsClosure() async {
         let mockPersistence = MockFeedPersistenceService()
-        mockPersistence.feeds = [feed]
-
-        let article = TestFixtures.makePersistentArticle(articleID: "a1", isRead: false)
-        article.feed = feed
-        mockPersistence.articlesByFeedID[feed.id] = [article]
-
         let refreshCallCount = CallCounter()
         let viewModel = HomeViewModel(
             persistence: mockPersistence,
-            refreshFeeds: { await refreshCallCount.increment() }
+            refreshFeeds: {
+                await refreshCallCount.increment()
+                return nil
+            }
         )
 
         await viewModel.refreshAllFeeds()
 
         #expect(await refreshCallCount.value == 1)
-        #expect(viewModel.unreadCount == 1)
+        #expect(viewModel.errorMessage == nil)
     }
 
     @Test("refreshAllFeeds is no-op without refresh closure")
@@ -560,12 +565,49 @@ struct HomeViewModelTests {
 
         let viewModel = HomeViewModel(
             persistence: mockPersistence,
-            refreshFeeds: {}
+            refreshFeeds: { return nil }
         )
 
         #expect(viewModel.isRefreshing == false)
         await viewModel.refreshAllFeeds()
         #expect(viewModel.isRefreshing == false)
+    }
+
+    @Test("refreshAllFeeds sets errorMessage when refresh closure returns error")
+    @MainActor
+    func refreshAllFeedsSetsErrorFromClosure() async {
+        let mockPersistence = MockFeedPersistenceService()
+        let viewModel = HomeViewModel(
+            persistence: mockPersistence,
+            refreshFeeds: { return "2 of 5 feed(s) could not be updated." }
+        )
+
+        await viewModel.refreshAllFeeds()
+
+        #expect(viewModel.errorMessage == "2 of 5 feed(s) could not be updated.")
+        #expect(viewModel.isRefreshing == false)
+    }
+
+    @Test("refreshAllFeeds clears previous errorMessage on success")
+    @MainActor
+    func refreshAllFeedsClearsPreviousError() async {
+        let mockPersistence = MockFeedPersistenceService()
+        let failToggle = FailToggle()
+
+        let viewModel = HomeViewModel(
+            persistence: mockPersistence,
+            refreshFeeds: {
+                return await failToggle.shouldFail ? "Error" : nil
+            }
+        )
+
+        await viewModel.refreshAllFeeds()
+        #expect(viewModel.errorMessage == "Error")
+
+        // Second call succeeds — error should be cleared
+        await failToggle.setShouldFail(false)
+        await viewModel.refreshAllFeeds()
+        #expect(viewModel.errorMessage == nil)
     }
 
     @Test("refreshAllFeeds skips when already refreshing")
@@ -586,6 +628,7 @@ struct HomeViewModelTests {
                 // rejected by the guard before reaching this closure.
                 var iterator = holdStream.makeAsyncIterator()
                 _ = await iterator.next()
+                return nil
             }
         )
 
@@ -607,15 +650,31 @@ struct HomeViewModelTests {
         #expect(await refreshCallCount.value == 1)
     }
 
-    @Test("init without refreshFeeds defaults to nil")
+    @Test("refreshAllFeeds does not call loadUnreadCount — callers are responsible")
     @MainActor
-    func initWithoutRefreshFeedsDefaultsToNil() async {
+    func refreshAllFeedsDoesNotReloadUnreadCount() async {
+        let feed = TestFixtures.makePersistentFeed()
         let mockPersistence = MockFeedPersistenceService()
-        let viewModel = HomeViewModel(persistence: mockPersistence)
+        mockPersistence.feeds = [feed]
 
-        // Should be safe to call — no-op
+        let article = TestFixtures.makePersistentArticle(articleID: "a1", isRead: false)
+        article.feed = feed
+        mockPersistence.articlesByFeedID[feed.id] = [article]
+
+        let viewModel = HomeViewModel(
+            persistence: mockPersistence,
+            refreshFeeds: { return nil }
+        )
+
+        // Unread count starts at 0 (not yet loaded)
+        #expect(viewModel.unreadCount == 0)
         await viewModel.refreshAllFeeds()
-        #expect(viewModel.isRefreshing == false)
+        // refreshAllFeeds does NOT reload unread count — caller must do it
+        #expect(viewModel.unreadCount == 0)
+
+        // Caller explicitly reloads
+        viewModel.loadUnreadCount()
+        #expect(viewModel.unreadCount == 1)
     }
 
     // MARK: - Clear Error

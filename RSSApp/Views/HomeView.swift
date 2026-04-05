@@ -14,6 +14,7 @@ struct HomeView: View {
             persistence: persistence,
             refreshFeeds: { [feedListVM] in
                 await feedListVM.refreshAllFeeds()
+                return await feedListVM.errorMessage
             }
         ))
     }
@@ -28,6 +29,7 @@ struct HomeView: View {
             .listStyle(.plain)
             .refreshable {
                 await viewModel.refreshAllFeeds()
+                viewModel.loadUnreadCount()
             }
             .navigationTitle("Home")
             .navigationDestination(for: HomeGroup.self) { group in

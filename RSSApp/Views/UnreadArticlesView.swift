@@ -66,6 +66,7 @@ struct UnreadArticlesView: View {
         .refreshable {
             await homeViewModel.refreshAllFeeds()
             homeViewModel.loadUnreadArticles()
+            homeViewModel.loadUnreadCount()
         }
         .task {
             homeViewModel.loadUnreadArticles()
