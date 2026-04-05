@@ -41,8 +41,8 @@ final class FeedListViewModel {
     func loadFeeds() {
         do {
             feeds = try persistence.allFeeds()
-            refreshUnreadCounts()
             errorMessage = nil
+            refreshUnreadCounts()
             Self.logger.debug("Loaded \(self.feeds.count, privacy: .public) feeds")
         } catch {
             errorMessage = "Unable to load your feeds."
@@ -53,10 +53,12 @@ final class FeedListViewModel {
     func refreshUnreadCounts() {
         Self.logger.debug("refreshUnreadCounts() called for \(self.feeds.count, privacy: .public) feeds")
         var counts: [UUID: Int] = [:]
+        var hadError = false
         for feed in feeds {
             do {
                 counts[feed.id] = try persistence.unreadCount(for: feed)
             } catch {
+                hadError = true
                 Self.logger.error("Failed to fetch unread count for '\(feed.title, privacy: .public)': \(error, privacy: .public)")
                 // Preserve previous count — showing a stale value is less misleading than
                 // resetting to 0 and making the user think they have no unread articles.
@@ -64,6 +66,9 @@ final class FeedListViewModel {
             }
         }
         unreadCounts = counts
+        if hadError {
+            errorMessage = "Unable to update unread counts."
+        }
     }
 
     func removeFeed(_ feed: PersistentFeed) {
@@ -105,6 +110,7 @@ final class FeedListViewModel {
         do {
             unreadCounts[feed.id] = try persistence.unreadCount(for: feed)
         } catch {
+            errorMessage = "Unable to update unread count."
             Self.logger.error("Failed to fetch unread count for '\(feed.title, privacy: .public)': \(error, privacy: .public)")
             // Preserve previous count — showing a stale value is less misleading than
             // resetting to 0 and making the user think they have no unread articles.
