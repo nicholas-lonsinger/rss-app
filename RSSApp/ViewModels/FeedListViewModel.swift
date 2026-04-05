@@ -323,12 +323,12 @@ final class FeedListViewModel {
                     failureCount += 1
                     Self.logger.error("Failed to persist refresh for '\(feed.title, privacy: .public)': \(error, privacy: .public)")
                 }
-            case .failure(let error):
+            case .failure(let fetchError):
                 failureCount += 1
                 do {
-                    try persistence.updateFeedError(feed, error: Self.errorDescription(for: error))
+                    try persistence.updateFeedError(feed, error: Self.errorDescription(for: fetchError))
                 } catch {
-                    Self.logger.error("Failed to persist error state for '\(feed.title, privacy: .public)': \(error, privacy: .public)")
+                    Self.logger.warning("Failed to persist error state for '\(feed.title, privacy: .public)': \(error, privacy: .public) — feed will appear healthy on next launch despite fetch failure")
                 }
             }
         }

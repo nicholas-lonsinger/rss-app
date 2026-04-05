@@ -1127,6 +1127,33 @@ struct FeedListViewModelTests {
         #expect(viewModel.errorMessage?.contains("1 of 1") == true)
     }
 
+    @Test("refreshAllFeeds counts fetch failure even when updateFeedError persistence also fails")
+    @MainActor
+    func refreshAllFeedsFetchFailureCountedWhenErrorPersistenceFails() async {
+        let url = URL(string: "https://fail.com/feed")!
+        let feed = TestFixtures.makePersistentFeed(title: "Broken", feedURL: url)
+
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+        let mockFetching = MockFeedFetchingService()
+        mockFetching.errorsByURL = [url: FeedFetchingError.invalidResponse(statusCode: 503)]
+        // Make updateFeedError throw to simulate persistence failure on .failure path
+        mockPersistence.updateFeedErrorError = NSError(domain: "test", code: 1)
+
+        let viewModel = FeedListViewModel(
+            persistence: mockPersistence,
+            feedFetching: mockFetching,
+            feedIconService: MockFeedIconService()
+        )
+        viewModel.loadFeeds()
+        await viewModel.refreshAllFeeds()
+
+        // Fetch failure is still counted even though error state persistence also failed
+        #expect(viewModel.errorMessage == "1 of 1 feed(s) could not be updated.")
+        // Error state was not persisted since updateFeedError threw
+        #expect(feed.lastFetchError == nil)
+    }
+
     @Test("refreshAllFeeds save failure takes priority over fetch failure message")
     @MainActor
     func refreshAllFeedsSaveFailurePriorityOverFetchFailure() async {
