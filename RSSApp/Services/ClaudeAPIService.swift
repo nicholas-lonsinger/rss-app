@@ -14,6 +14,7 @@ enum ClaudeAPIError: Error, Sendable, LocalizedError {
     case httpError(statusCode: Int)
     case missingAPIKey
     case serverError(message: String)
+    case excessiveDecodeFailures(count: Int)
 
     var errorDescription: String? {
         switch self {
@@ -25,8 +26,25 @@ enum ClaudeAPIError: Error, Sendable, LocalizedError {
             "No API key configured."
         case .serverError(let message):
             message
+        case .excessiveDecodeFailures(let count):
+            "Unable to read the AI response (\(count) consecutive events could not be decoded). Please try again or check for app updates."
         }
     }
+}
+
+/// Result of parsing a single SSE data line.
+///
+/// Distinguishes between successfully extracted text, intentionally skipped
+/// non-delta event types, and actual JSON decode failures so the caller can
+/// count only real failures toward the consecutive-failure threshold.
+enum SSEParseResult: Sendable, Equatable {
+    /// Successfully extracted text content from a `content_block_delta` event.
+    case text(String)
+    /// The event was a known non-delta type (e.g., `message_start`, `content_block_stop`)
+    /// or a delta with no text field — not a decode failure.
+    case skipped
+    /// The JSON could not be decoded at all, indicating a possible format change.
+    case decodeFailed
 }
 
 struct ClaudeAPIService: ClaudeAPIServicing {
@@ -34,6 +52,11 @@ struct ClaudeAPIService: ClaudeAPIServicing {
     private static let logger = Logger(category: "ClaudeAPIService")
 
     private static let apiURL = "https://api.anthropic.com/v1/messages"
+    /// Maximum number of consecutive `.decodeFailed` results from `parseSSELine` before the
+    /// stream is terminated with `ClaudeAPIError.excessiveDecodeFailures`. Only actual JSON
+    /// decode failures count toward this threshold — intentionally skipped non-delta events
+    /// (`.skipped`) do not increment the counter.
+    private static let consecutiveDecodeFailureThreshold = 5
 
     // MARK: - UserDefaults keys and defaults
 
@@ -95,12 +118,25 @@ struct ClaudeAPIService: ClaudeAPIServicing {
                         return
                     }
 
+                    var consecutiveDecodeFailures = 0
                     for try await line in bytes.lines {
                         guard line.hasPrefix("data: ") else { continue }
                         let json = String(line.dropFirst(6))
                         guard json != "[DONE]" else { break }
-                        if let chunk = try parseSSELine(json) {
+                        switch try parseSSELine(json) {
+                        case .text(let chunk):
+                            consecutiveDecodeFailures = 0
                             continuation.yield(chunk)
+                        case .skipped:
+                            break
+                        case .decodeFailed:
+                            consecutiveDecodeFailures += 1
+                            Self.logger.debug("Consecutive decode failure #\(consecutiveDecodeFailures, privacy: .public). JSON: \(json, privacy: .private)")
+                            if consecutiveDecodeFailures >= Self.consecutiveDecodeFailureThreshold {
+                                Self.logger.error("Exceeded consecutive decode failure threshold (\(Self.consecutiveDecodeFailureThreshold, privacy: .public) failures)")
+                                continuation.finish(throwing: ClaudeAPIError.excessiveDecodeFailures(count: consecutiveDecodeFailures))
+                                return
+                            }
                         }
                     }
                     Self.logger.info("Claude stream finished")
@@ -133,10 +169,10 @@ struct ClaudeAPIService: ClaudeAPIServicing {
         return request
     }
 
-    func parseSSELine(_ json: String) throws -> String? {
+    func parseSSELine(_ json: String) throws -> SSEParseResult {
         guard let data = json.data(using: .utf8) else {
             Self.logger.warning("SSE line could not be encoded to UTF-8 data")
-            return nil
+            return .decodeFailed
         }
 
         let event: ClaudeStreamEvent
@@ -144,7 +180,7 @@ struct ClaudeAPIService: ClaudeAPIServicing {
             event = try JSONDecoder().decode(ClaudeStreamEvent.self, from: data)
         } catch {
             Self.logger.warning("Failed to decode SSE JSON: \(error, privacy: .public). Input: \(json, privacy: .private)")
-            return nil
+            return .decodeFailed
         }
 
         if event.type == "error" {
@@ -160,10 +196,14 @@ struct ClaudeAPIService: ClaudeAPIServicing {
         }
 
         guard event.type == "content_block_delta" else {
-            return nil
+            return .skipped
         }
 
-        return event.delta?.text
+        guard let text = event.delta?.text else {
+            return .skipped
+        }
+
+        return .text(text)
     }
 }
 

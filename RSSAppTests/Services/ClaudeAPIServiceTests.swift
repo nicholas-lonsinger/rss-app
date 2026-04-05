@@ -137,31 +137,31 @@ struct ClaudeAPIServiceTests {
 
     // MARK: - SSE parsing
 
-    @Test("parseSSELine extracts text from content_block_delta event")
+    @Test("parseSSELine returns .text for content_block_delta event with text")
     func parseTextDelta() throws {
         let service = ClaudeAPIService(defaults: makeTestDefaults())
         let json = #"{"type":"content_block_delta","delta":{"type":"text_delta","text":"Hello"}}"#
-        #expect(try service.parseSSELine(json) == "Hello")
+        #expect(try service.parseSSELine(json) == .text("Hello"))
     }
 
-    @Test("parseSSELine returns nil for non-delta event types")
+    @Test("parseSSELine returns .skipped for non-delta event types")
     func parseNonDelta() throws {
         let service = ClaudeAPIService(defaults: makeTestDefaults())
         let json = #"{"type":"message_start","message":{"id":"abc"}}"#
-        #expect(try service.parseSSELine(json) == nil)
+        #expect(try service.parseSSELine(json) == .skipped)
     }
 
-    @Test("parseSSELine returns nil for malformed JSON")
+    @Test("parseSSELine returns .decodeFailed for malformed JSON")
     func parseMalformed() throws {
         let service = ClaudeAPIService(defaults: makeTestDefaults())
-        #expect(try service.parseSSELine("not json at all") == nil)
+        #expect(try service.parseSSELine("not json at all") == .decodeFailed)
     }
 
-    @Test("parseSSELine returns nil for content_block_delta with no text field")
+    @Test("parseSSELine returns .skipped for content_block_delta with no text field")
     func parseDeltaNoText() throws {
         let service = ClaudeAPIService(defaults: makeTestDefaults())
         let json = #"{"type":"content_block_delta","delta":{"type":"input_json_delta","partial_json":"{}"}}"#
-        #expect(try service.parseSSELine(json) == nil)
+        #expect(try service.parseSSELine(json) == .skipped)
     }
 
     // MARK: - SSE error event handling
@@ -253,5 +253,28 @@ struct ClaudeAPIServiceTests {
     func localizedDescriptionInvalidURL() {
         let error = ClaudeAPIError.invalidURL
         #expect(error.localizedDescription == "The API URL is invalid.")
+    }
+
+    @Test("localizedDescription returns descriptive message for excessiveDecodeFailures")
+    func localizedDescriptionExcessiveDecodeFailures() {
+        let error = ClaudeAPIError.excessiveDecodeFailures(count: 5)
+        #expect(error.localizedDescription == "Unable to read the AI response (5 consecutive events could not be decoded). Please try again or check for app updates.")
+    }
+
+    // MARK: - SSEParseResult discrimination
+
+    @Test("parseSSELine returns .skipped for all known non-delta SSE event types")
+    func parseNonDeltaEventsReturnSkipped() throws {
+        let service = ClaudeAPIService(defaults: makeTestDefaults())
+        let knownNonDeltaEvents = [
+            #"{"type":"message_start","message":{"id":"msg_123"}}"#,
+            #"{"type":"content_block_start","index":0,"content_block":{"type":"text"}}"#,
+            #"{"type":"content_block_stop","index":0}"#,
+            #"{"type":"message_delta","delta":{"stop_reason":"end_turn"}}"#,
+            #"{"type":"message_stop"}"#,
+        ]
+        for json in knownNonDeltaEvents {
+            #expect(try service.parseSSELine(json) == .skipped)
+        }
     }
 }
