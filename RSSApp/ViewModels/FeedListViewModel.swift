@@ -286,7 +286,7 @@ final class FeedListViewModel {
         var failureCount = 0
         for (id, result) in results {
             guard let feed = idToFeed[id] else {
-                Self.logger.warning("Skipping refresh result for feed ID \(id) — feed no longer in list")
+                Self.logger.warning("Skipping refresh result for feed ID \(id, privacy: .public) — feed no longer in list")
                 continue
             }
             switch result {
