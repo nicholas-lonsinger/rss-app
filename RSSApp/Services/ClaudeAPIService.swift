@@ -14,6 +14,7 @@ enum ClaudeAPIError: Error, Sendable, LocalizedError {
     case httpError(statusCode: Int)
     case missingAPIKey
     case serverError(message: String)
+    case excessiveDecodeFailures(count: Int)
 
     var errorDescription: String? {
         switch self {
@@ -25,6 +26,8 @@ enum ClaudeAPIError: Error, Sendable, LocalizedError {
             "No API key configured."
         case .serverError(let message):
             message
+        case .excessiveDecodeFailures(let count):
+            "Failed to decode \(count) consecutive server events. The response format may have changed."
         }
     }
 }
@@ -34,6 +37,7 @@ struct ClaudeAPIService: ClaudeAPIServicing {
     private static let logger = Logger(category: "ClaudeAPIService")
 
     private static let apiURL = "https://api.anthropic.com/v1/messages"
+    static let consecutiveDecodeFailureThreshold = 5
 
     // MARK: - UserDefaults keys and defaults
 
@@ -95,12 +99,21 @@ struct ClaudeAPIService: ClaudeAPIServicing {
                         return
                     }
 
+                    var consecutiveDecodeFailures = 0
                     for try await line in bytes.lines {
                         guard line.hasPrefix("data: ") else { continue }
                         let json = String(line.dropFirst(6))
                         guard json != "[DONE]" else { break }
                         if let chunk = try parseSSELine(json) {
+                            consecutiveDecodeFailures = 0
                             continuation.yield(chunk)
+                        } else {
+                            consecutiveDecodeFailures += 1
+                            if consecutiveDecodeFailures >= Self.consecutiveDecodeFailureThreshold {
+                                Self.logger.error("Exceeded consecutive decode failure threshold (\(Self.consecutiveDecodeFailureThreshold, privacy: .public) failures)")
+                                continuation.finish(throwing: ClaudeAPIError.excessiveDecodeFailures(count: consecutiveDecodeFailures))
+                                return
+                            }
                         }
                     }
                     Self.logger.info("Claude stream finished")

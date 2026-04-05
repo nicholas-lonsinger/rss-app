@@ -254,4 +254,50 @@ struct ClaudeAPIServiceTests {
         let error = ClaudeAPIError.invalidURL
         #expect(error.localizedDescription == "The API URL is invalid.")
     }
+
+    @Test("localizedDescription returns descriptive message for excessiveDecodeFailures")
+    func localizedDescriptionExcessiveDecodeFailures() {
+        let error = ClaudeAPIError.excessiveDecodeFailures(count: 5)
+        #expect(error.localizedDescription == "Failed to decode 5 consecutive server events. The response format may have changed.")
+    }
+
+    // MARK: - Consecutive decode failure threshold
+
+    @Test("consecutiveDecodeFailureThreshold is 5")
+    func consecutiveDecodeFailureThreshold() {
+        #expect(ClaudeAPIService.consecutiveDecodeFailureThreshold == 5)
+    }
+
+    @Test("parseSSELine returns nil for non-delta events without affecting caller state")
+    func parseNonDeltaEventsReturnNil() throws {
+        let service = ClaudeAPIService(defaults: makeTestDefaults())
+        // These known event types should return nil (not throw) and would
+        // increment a caller's consecutive-failure counter
+        let knownNonDeltaEvents = [
+            #"{"type":"message_start","message":{"id":"msg_123"}}"#,
+            #"{"type":"content_block_start","index":0,"content_block":{"type":"text"}}"#,
+            #"{"type":"content_block_stop","index":0}"#,
+            #"{"type":"message_delta","delta":{"stop_reason":"end_turn"}}"#,
+            #"{"type":"message_stop"}"#,
+        ]
+        for json in knownNonDeltaEvents {
+            #expect(try service.parseSSELine(json) == nil)
+        }
+    }
+
+    @Test("parseSSELine returns text for content_block_delta, allowing caller to reset failure counter")
+    func parseDeltaResetsCounter() throws {
+        let service = ClaudeAPIService(defaults: makeTestDefaults())
+        let delta = #"{"type":"content_block_delta","delta":{"type":"text_delta","text":"chunk"}}"#
+        let result = try service.parseSSELine(delta)
+        #expect(result == "chunk")
+    }
+
+    @Test("excessiveDecodeFailures includes count in error description")
+    func excessiveDecodeFailuresCount() {
+        let error7 = ClaudeAPIError.excessiveDecodeFailures(count: 7)
+        #expect(error7.localizedDescription.contains("7"))
+        let error10 = ClaudeAPIError.excessiveDecodeFailures(count: 10)
+        #expect(error10.localizedDescription.contains("10"))
+    }
 }
