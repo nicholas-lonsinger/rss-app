@@ -149,12 +149,7 @@ enum HTMLUtilities {
     }
 
     private static func resolveURL(_ href: String, base: URL) -> URL? {
-        // Decode HTML entities (e.g., &amp; → &) that appear in attribute values
-        let decoded = href
-            .replacingOccurrences(of: "&amp;", with: "&")
-            .replacingOccurrences(of: "&lt;", with: "<")
-            .replacingOccurrences(of: "&gt;", with: ">")
-            .replacingOccurrences(of: "&quot;", with: "\"")
+        let decoded = decodeHTMLEntities(href)
 
         // Protocol-relative URLs (//cdn.example.com/icon.png)
         if decoded.hasPrefix("//") {
