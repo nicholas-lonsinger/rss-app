@@ -83,21 +83,36 @@ final class MockSSEURLProtocol: URLProtocol {
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
     override func startLoading() {
-        let requestID = request.value(forHTTPHeaderField: Self.requestIDHeader) ?? ""
-        let data = Self.retrieve(requestID: requestID)
-        let payload = data?.payload ?? Data()
-        let statusCode = data?.statusCode ?? 200
-        let url = request.url ?? URL(string: "https://mock.test")!
-        let response = HTTPURLResponse(
+        guard let requestID = request.value(forHTTPHeaderField: Self.requestIDHeader) else {
+            assertionFailure("MockSSEURLProtocol: request missing \(Self.requestIDHeader) header")
+            client?.urlProtocol(self, didFailWithError: URLError(.unknown))
+            return
+        }
+        guard let data = Self.retrieve(requestID: requestID) else {
+            assertionFailure("MockSSEURLProtocol: no stored data for requestID '\(requestID)'")
+            client?.urlProtocol(self, didFailWithError: URLError(.unknown))
+            return
+        }
+        guard let url = request.url else {
+            assertionFailure("MockSSEURLProtocol: request has no URL")
+            client?.urlProtocol(self, didFailWithError: URLError(.badURL))
+            return
+        }
+        guard let response = HTTPURLResponse(
             url: url,
-            statusCode: statusCode,
+            statusCode: data.statusCode,
             httpVersion: "HTTP/1.1",
             headerFields: ["Content-Type": "text/event-stream"]
-        )!
+        ) else {
+            assertionFailure("MockSSEURLProtocol: failed to create HTTPURLResponse")
+            client?.urlProtocol(self, didFailWithError: URLError(.unknown))
+            return
+        }
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        client?.urlProtocol(self, didLoad: payload)
+        client?.urlProtocol(self, didLoad: data.payload)
         client?.urlProtocolDidFinishLoading(self)
     }
 
+    // RATIONALE: Data is delivered synchronously in startLoading(); nothing to cancel.
     override func stopLoading() {}
 }
