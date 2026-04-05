@@ -1,9 +1,9 @@
 import SwiftUI
 
 /// Typed navigation destination for push navigation to settings.
-/// Shared by `HomeView` and `FeedListView` so that the settings gear button
-/// works whether `FeedListView` owns its own `NavigationStack` or is embedded
-/// inside `HomeView`'s stack.
+/// Both `HomeView` and `FeedListView` register `.navigationDestination(for:)`
+/// handlers for this type — `HomeView` handles it when `FeedListView` is
+/// embedded, and `FeedListView` handles it when it owns its own `NavigationStack`.
 enum SettingsDestination: Hashable {
     case settings
 }
@@ -36,6 +36,12 @@ struct FeedListView: View {
         } else {
             NavigationStack(path: $navigationPath) {
                 feedListContent
+                    .navigationDestination(for: SettingsDestination.self) { destination in
+                        switch destination {
+                        case .settings:
+                            SettingsView(persistence: persistence, viewModel: viewModel)
+                        }
+                    }
             }
         }
     }
@@ -58,12 +64,6 @@ struct FeedListView: View {
                     } description: {
                         Text("This feed is no longer available.")
                     }
-                }
-            }
-            .navigationDestination(for: SettingsDestination.self) { destination in
-                switch destination {
-                case .settings:
-                    SettingsView(persistence: persistence, viewModel: viewModel)
                 }
             }
             .toolbar { toolbarItems }
@@ -149,11 +149,13 @@ struct FeedListView: View {
             }
             .accessibilityLabel("Add Feed")
         }
-        ToolbarItem(placement: .topBarTrailing) {
-            NavigationLink(value: SettingsDestination.settings) {
-                Image(systemName: "gear")
+        if !isEmbedded {
+            ToolbarItem(placement: .topBarTrailing) {
+                NavigationLink(value: SettingsDestination.settings) {
+                    Image(systemName: "gear")
+                }
+                .accessibilityLabel("Settings")
             }
-            .accessibilityLabel("Settings")
         }
     }
 

@@ -3,11 +3,13 @@ import SwiftUI
 struct HomeView: View {
 
     @State private var viewModel: HomeViewModel
+    @State private var feedListViewModel: FeedListViewModel
     private let persistence: FeedPersisting
 
     init(persistence: FeedPersisting) {
         self.persistence = persistence
         _viewModel = State(initialValue: HomeViewModel(persistence: persistence))
+        _feedListViewModel = State(initialValue: FeedListViewModel(persistence: persistence))
     }
 
     var body: some View {
@@ -34,7 +36,7 @@ struct HomeView: View {
                 case .settings:
                     SettingsView(
                         persistence: persistence,
-                        viewModel: FeedListViewModel(persistence: persistence)
+                        viewModel: feedListViewModel
                     )
                 }
             }
@@ -48,6 +50,7 @@ struct HomeView: View {
             }
             .task {
                 viewModel.loadUnreadCount()
+                feedListViewModel.loadFeeds()
             }
             .alert("Error", isPresented: errorAlertBinding) {
                 Button("OK") { viewModel.clearError() }
