@@ -29,6 +29,23 @@ struct HomeView: View {
                     FeedListView(persistence: persistence, isEmbedded: true)
                 }
             }
+            .navigationDestination(for: SettingsDestination.self) { destination in
+                switch destination {
+                case .settings:
+                    SettingsView(
+                        persistence: persistence,
+                        viewModel: FeedListViewModel(persistence: persistence)
+                    )
+                }
+            }
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    NavigationLink(value: SettingsDestination.settings) {
+                        Image(systemName: "gear")
+                    }
+                    .accessibilityLabel("Settings")
+                }
+            }
             .task {
                 viewModel.loadUnreadCount()
             }

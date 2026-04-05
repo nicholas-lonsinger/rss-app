@@ -1,5 +1,13 @@
 import SwiftUI
 
+/// Typed navigation destination for push navigation to settings.
+/// Shared by `HomeView` and `FeedListView` so that the settings gear button
+/// works whether `FeedListView` owns its own `NavigationStack` or is embedded
+/// inside `HomeView`'s stack.
+enum SettingsDestination: Hashable {
+    case settings
+}
+
 struct FeedListView: View {
     @State private var viewModel: FeedListViewModel
     @State private var navigationPath = NavigationPath()
@@ -86,13 +94,6 @@ struct FeedListView: View {
             }
     }
 
-    // MARK: - Navigation Destinations
-
-    /// Typed navigation destinations for push navigation within the feed list NavigationStack.
-    private enum SettingsDestination: Hashable {
-        case settings
-    }
-
     // MARK: - Subviews
 
     @ViewBuilder
@@ -149,9 +150,7 @@ struct FeedListView: View {
             .accessibilityLabel("Add Feed")
         }
         ToolbarItem(placement: .topBarTrailing) {
-            Button {
-                navigationPath.append(SettingsDestination.settings)
-            } label: {
+            NavigationLink(value: SettingsDestination.settings) {
                 Image(systemName: "gear")
             }
             .accessibilityLabel("Settings")
