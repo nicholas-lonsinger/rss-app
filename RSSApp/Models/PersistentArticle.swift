@@ -24,6 +24,15 @@ final class PersistentArticle {
     var isRead: Bool
     var readDate: Date?
 
+    // MARK: - Thumbnail caching
+
+    // RATIONALE: Thumbnail state is stored directly on PersistentArticle rather than in a
+    // separate model because SwiftData @Model classes cannot use enums with associated values
+    // as persisted properties, and a separate one-to-one model would add join overhead for
+    // every article query. Two scalar fields are the simplest SwiftData-compatible approach.
+    var isThumbnailCached: Bool
+    var thumbnailRetryCount: Int
+
     // MARK: - Caching
 
     var fetchedDate: Date
@@ -47,6 +56,8 @@ final class PersistentArticle {
         categories: [String] = [],
         isRead: Bool = false,
         readDate: Date? = nil,
+        isThumbnailCached: Bool = false,
+        thumbnailRetryCount: Int = 0,
         fetchedDate: Date = Date()
     ) {
         self.articleID = articleID
@@ -60,6 +71,8 @@ final class PersistentArticle {
         self.categories = categories
         self.isRead = isRead
         self.readDate = readDate
+        self.isThumbnailCached = isThumbnailCached
+        self.thumbnailRetryCount = thumbnailRetryCount
         self.fetchedDate = fetchedDate
     }
 }

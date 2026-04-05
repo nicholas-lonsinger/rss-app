@@ -166,6 +166,25 @@ final class MockFeedPersistenceService: FeedPersisting {
         contentByArticleID[article.articleID] = persistent
     }
 
+    // MARK: - Thumbnail Tracking
+
+    func articlesNeedingThumbnails(maxRetryCount: Int) throws -> [PersistentArticle] {
+        if let error = errorToThrow { throw error }
+        return articlesByFeedID.values
+            .flatMap { $0 }
+            .filter { !$0.isThumbnailCached && $0.thumbnailRetryCount < maxRetryCount }
+    }
+
+    func markThumbnailCached(_ article: PersistentArticle) throws {
+        if let error = errorToThrow { throw error }
+        article.isThumbnailCached = true
+    }
+
+    func incrementThumbnailRetryCount(_ article: PersistentArticle) throws {
+        if let error = errorToThrow { throw error }
+        article.thumbnailRetryCount += 1
+    }
+
     // MARK: - Persistence
 
     func save() throws {

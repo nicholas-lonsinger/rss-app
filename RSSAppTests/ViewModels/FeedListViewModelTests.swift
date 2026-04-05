@@ -983,4 +983,38 @@ struct FeedListViewModelTests {
         // Save failure message must be set even when loadFeeds() itself fails
         #expect(viewModel.errorMessage == "Unable to save updated feeds.")
     }
+
+    // MARK: - Thumbnail Prefetch
+
+    @Test("refreshAllFeeds invokes thumbnail prefetcher after refresh")
+    @MainActor
+    func refreshAllFeedsInvokesPrefetcher() async {
+        let url = URL(string: "https://example.com/feed")!
+        let feed = TestFixtures.makePersistentFeed(title: "Feed", feedURL: url)
+
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+        let mockFetching = MockFeedFetchingService()
+        mockFetching.feedsByURL = [url: TestFixtures.makeFeed(title: "Updated")]
+
+        let mockPrefetcher = MockThumbnailPrefetchService()
+
+        let viewModel = FeedListViewModel(
+            persistence: mockPersistence,
+            feedFetching: mockFetching,
+            feedIconService: MockFeedIconService(),
+            thumbnailPrefetcher: mockPrefetcher
+        )
+        viewModel.loadFeeds()
+
+        // Set up a continuation so we can await the fire-and-forget prefetch Task
+        await withCheckedContinuation { continuation in
+            mockPrefetcher.prefetchContinuation = continuation
+            Task {
+                await viewModel.refreshAllFeeds()
+            }
+        }
+
+        #expect(mockPrefetcher.prefetchCallCount == 1)
+    }
 }

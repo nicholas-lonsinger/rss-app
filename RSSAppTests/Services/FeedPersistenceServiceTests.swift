@@ -515,4 +515,89 @@ struct FeedPersistenceServiceTests {
         #expect(try container.mainContext.fetchCount(articleDescriptor) == 0)
         #expect(try container.mainContext.fetchCount(contentDescriptor) == 0)
     }
+
+    // MARK: - Thumbnail Tracking
+
+    @Test("articlesNeedingThumbnails returns uncached articles under retry cap")
+    @MainActor
+    func articlesNeedingThumbnailsReturnsUncached() throws {
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+        try service.upsertArticles([
+            TestFixtures.makeArticle(id: "uncached"),
+            TestFixtures.makeArticle(id: "cached"),
+        ], for: feed)
+
+        let articles = try service.articles(for: feed)
+        let cachedArticle = articles.first { $0.articleID == "cached" }!
+        try service.markThumbnailCached(cachedArticle)
+        try service.save()
+
+        let needing = try service.articlesNeedingThumbnails(maxRetryCount: 3)
+        #expect(needing.count == 1)
+        #expect(needing[0].articleID == "uncached")
+    }
+
+    @Test("articlesNeedingThumbnails excludes articles at retry cap")
+    @MainActor
+    func articlesNeedingThumbnailsExcludesAtCap() throws {
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+        try service.upsertArticles([TestFixtures.makeArticle(id: "maxed")], for: feed)
+
+        let articles = try service.articles(for: feed)
+        let article = articles[0]
+        for _ in 0..<3 {
+            try service.incrementThumbnailRetryCount(article)
+        }
+        try service.save()
+
+        let needing = try service.articlesNeedingThumbnails(maxRetryCount: 3)
+        #expect(needing.isEmpty)
+    }
+
+    @Test("markThumbnailCached sets isThumbnailCached to true")
+    @MainActor
+    func markThumbnailCachedSetsFlag() throws {
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+        try service.upsertArticles([TestFixtures.makeArticle(id: "a1")], for: feed)
+
+        let articles = try service.articles(for: feed)
+        #expect(articles[0].isThumbnailCached == false)
+
+        try service.markThumbnailCached(articles[0])
+        try service.save()
+
+        #expect(articles[0].isThumbnailCached == true)
+    }
+
+    @Test("incrementThumbnailRetryCount increases count by one")
+    @MainActor
+    func incrementThumbnailRetryCountIncreases() throws {
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+        try service.upsertArticles([TestFixtures.makeArticle(id: "a1")], for: feed)
+
+        let articles = try service.articles(for: feed)
+        #expect(articles[0].thumbnailRetryCount == 0)
+
+        try service.incrementThumbnailRetryCount(articles[0])
+        try service.save()
+
+        #expect(articles[0].thumbnailRetryCount == 1)
+
+        try service.incrementThumbnailRetryCount(articles[0])
+        try service.save()
+
+        #expect(articles[0].thumbnailRetryCount == 2)
+    }
 }

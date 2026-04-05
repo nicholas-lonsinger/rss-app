@@ -53,6 +53,17 @@ protocol FeedPersisting: Sendable {
     func cachedContent(for article: PersistentArticle) throws -> PersistentArticleContent?
     func cacheContent(_ content: ArticleContent, for article: PersistentArticle) throws
 
+    // MARK: Thumbnail tracking
+
+    /// Returns articles that need thumbnail downloads: not yet cached and under the retry cap.
+    func articlesNeedingThumbnails(maxRetryCount: Int) throws -> [PersistentArticle]
+
+    /// Marks an article's thumbnail as successfully cached.
+    func markThumbnailCached(_ article: PersistentArticle) throws
+
+    /// Increments the thumbnail retry count for an article after a failed download attempt.
+    func incrementThumbnailRetryCount(_ article: PersistentArticle) throws
+
     // MARK: Persistence
 
     func save() throws
@@ -238,6 +249,30 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
         article.readDate = isRead ? Date() : nil
         try modelContext.save()
         Self.logger.debug("Marked article '\(article.title, privacy: .public)' as \(isRead ? "read" : "unread", privacy: .public)")
+    }
+
+    // MARK: - Thumbnail Tracking
+
+    func articlesNeedingThumbnails(maxRetryCount: Int) throws -> [PersistentArticle] {
+        let descriptor = FetchDescriptor<PersistentArticle>(
+            predicate: #Predicate {
+                !$0.isThumbnailCached && $0.thumbnailRetryCount < maxRetryCount
+            },
+            sortBy: [SortDescriptor(\.publishedDate, order: .reverse)]
+        )
+        let articles = try modelContext.fetch(descriptor)
+        Self.logger.debug("Found \(articles.count, privacy: .public) articles needing thumbnails (max retries: \(maxRetryCount, privacy: .public))")
+        return articles
+    }
+
+    func markThumbnailCached(_ article: PersistentArticle) throws {
+        article.isThumbnailCached = true
+        Self.logger.debug("Marked thumbnail cached for '\(article.title, privacy: .public)'")
+    }
+
+    func incrementThumbnailRetryCount(_ article: PersistentArticle) throws {
+        article.thumbnailRetryCount += 1
+        Self.logger.debug("Incremented thumbnail retry count to \(article.thumbnailRetryCount, privacy: .public) for '\(article.title, privacy: .public)'")
     }
 
     func save() throws {

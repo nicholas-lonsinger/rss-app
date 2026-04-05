@@ -578,7 +578,9 @@ enum TestFixtures {
         thumbnailURL: URL? = URL(string: "https://example.com/thumb.jpg"),
         author: String? = nil,
         categories: [String] = [],
-        isRead: Bool = false
+        isRead: Bool = false,
+        isThumbnailCached: Bool = false,
+        thumbnailRetryCount: Int = 0
     ) -> PersistentArticle {
         PersistentArticle(
             articleID: articleID,
@@ -590,7 +592,9 @@ enum TestFixtures {
             thumbnailURL: thumbnailURL,
             author: author,
             categories: categories,
-            isRead: isRead
+            isRead: isRead,
+            isThumbnailCached: isThumbnailCached,
+            thumbnailRetryCount: thumbnailRetryCount
         )
     }
 
