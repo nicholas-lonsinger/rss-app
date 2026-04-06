@@ -16,7 +16,7 @@ struct SettingsView: View {
             }
 
             NavigationLink {
-                ArticleLimitView()
+                ArticleLimitView(persistence: persistence)
             } label: {
                 Label("Article Limit", systemImage: "tray.full")
             }
@@ -35,11 +35,24 @@ struct SettingsView: View {
 
 struct ArticleLimitView: View {
 
+    private static let logger = Logger(category: "ArticleLimitView")
+
     @State private var selectedLimit: ArticleLimit
     private let retentionService: ArticleRetentionService
+    private let persistence: FeedPersisting
+    private let thumbnailService: ArticleThumbnailCaching
 
-    init(retentionService: ArticleRetentionService = ArticleRetentionService()) {
+    /// The limit when the view appeared, used to detect whether the user lowered it.
+    @State private var limitOnAppear: ArticleLimit?
+
+    init(
+        persistence: FeedPersisting,
+        retentionService: ArticleRetentionService = ArticleRetentionService(),
+        thumbnailService: ArticleThumbnailCaching = ArticleThumbnailService()
+    ) {
+        self.persistence = persistence
         self.retentionService = retentionService
+        self.thumbnailService = thumbnailService
         _selectedLimit = State(initialValue: retentionService.articleLimit)
     }
 
@@ -64,10 +77,33 @@ struct ArticleLimitView: View {
                     }
                 }
             } footer: {
-                Text("The maximum number of articles stored across all feeds. Oldest articles are removed during feed refresh when the limit is exceeded.")
+                Text("The maximum number of articles stored across all feeds. Oldest articles are removed when the limit is exceeded.")
             }
         }
         .navigationTitle("Article Limit")
+        .onAppear {
+            limitOnAppear = retentionService.articleLimit
+        }
+        .onDisappear {
+            guard let initial = limitOnAppear else {
+                Self.logger.warning("limitOnAppear was nil at disappear time — skipping retention enforcement")
+                return
+            }
+            guard selectedLimit.rawValue < initial.rawValue else { return }
+            Task {
+                do {
+                    try retentionService.enforceArticleLimit(
+                        persistence: persistence,
+                        thumbnailService: thumbnailService
+                    )
+                } catch {
+                    // RATIONALE: onDisappear fires as this view leaves the navigation stack, so presenting
+                    // an alert here is unreliable. The error is logged for diagnostics; enforcement will
+                    // retry automatically on the next feed refresh.
+                    Self.logger.error("Article retention cleanup on settings exit failed: \(error, privacy: .public)")
+                }
+            }
+        }
     }
 }
 
