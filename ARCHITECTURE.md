@@ -111,6 +111,7 @@ RSSAppTests/
 │   ├── ArticleTests.swift              # Article creation, identity, hashable
 │   ├── DOMNodeTests.swift              # DOMNode accessors, text/element queries, tree traversal
 │   ├── HomeGroupTests.swift            # HomeGroup enum cases, IDs, properties, Hashable conformance
+│   ├── IdentifiableIndexTests.swift    # IdentifiableIndex value storage, id derivation, distinctness
 │   └── SubscribedFeedTests.swift       # updatingMetadata preserves identity, does not mutate
 ├── Services/
 │   ├── ArticleRetentionServiceTests.swift # ArticleLimit enum validation, retention enforcement, thumbnail cleanup, cross-feed global cleanup, error propagation
@@ -236,7 +237,7 @@ RSSAppApp (@main)
 | DB-first deletion order in article cleanup | SwiftData cascade delete removes `PersistentArticleContent` automatically, but disk-cached JPEG thumbnails are not auto-deleted; DB records are deleted first, then thumbnail files, so articles still in the DB always have intact thumbnails on partial failure; orphaned thumbnail files are harmless disk waste purged by the OS under storage pressure |
 | Index-based article reader navigation | Reader receives the article array + `Binding<Int>` index rather than a single article; enables previous/next without the reader owning or modifying the list. `IdentifiableIndex` wraps `Int` for `fullScreenCover(item:)` compatibility |
 | Bottom toolbar for navigation buttons | Previous/next buttons placed in bottom toolbar — keeps the top bar clean (Done, bookmark, AI sparkles) and matches Safari's bottom toolbar pattern |
-| Pagination-on-demand at list boundary | When navigating past the last loaded article, the reader's `loadMore` closure triggers the list's pagination and advances only if new articles were appended; prevents dead ends without speculative prefetching |
+| Pagination-on-demand at list boundary | When navigating past the last loaded article, the reader's `loadMore` closure triggers the list's pagination and advances only if new articles were appended. The `loadMore` closure is conditionally nil when the view model reports no more data (`hasMore*` flag), so the next button disables at the true end of the list. After `loadMore` succeeds, `onArticleChanged()` is deferred via `onChange(of: currentIndex)` because the local `articles` snapshot is stale until SwiftUI re-renders with the view model's updated array |
 | ReaderExtractionState reset on navigation | Each article navigation creates a fresh `ReaderExtractionState` and forces a web view reload via `.id(article.articleID)`, preventing stale extracted content from leaking between articles |
 
 ## Test Coverage

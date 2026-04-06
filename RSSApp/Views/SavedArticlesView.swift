@@ -89,7 +89,7 @@ struct SavedArticlesView: View {
                 persistence: persistence,
                 articles: homeViewModel.savedArticlesList,
                 currentIndex: selectedArticleIndexNonOptionalBinding,
-                loadMore: { homeViewModel.loadMoreSavedArticlesAndReport() }
+                loadMore: homeViewModel.hasMoreSavedArticles ? { homeViewModel.loadMoreSavedArticlesAndReport() } : nil
             )
         }
         .alert("Error", isPresented: errorAlertBinding) {
@@ -133,9 +133,16 @@ struct SavedArticlesView: View {
     }
 
     /// Provides a non-optional binding to the current index for the reader view.
+    /// Defaults to 0 when `selectedArticleIndex` is nil (should never happen while the cover is presented).
     private var selectedArticleIndexNonOptionalBinding: Binding<Int> {
         Binding(
-            get: { selectedArticleIndex ?? 0 },
+            get: {
+                guard let index = selectedArticleIndex else {
+                    assertionFailure("selectedArticleIndexNonOptionalBinding read while selectedArticleIndex is nil")
+                    return 0
+                }
+                return index
+            },
             set: { selectedArticleIndex = $0 }
         )
     }
