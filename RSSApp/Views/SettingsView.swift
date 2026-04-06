@@ -6,9 +6,16 @@ struct SettingsView: View {
 
     let persistence: FeedPersisting
     let viewModel: FeedListViewModel
+    let homeViewModel: HomeViewModel
 
     var body: some View {
         List {
+            NavigationLink {
+                AppBadgeView(homeViewModel: homeViewModel)
+            } label: {
+                Label("App Badge", systemImage: "app.badge")
+            }
+
             NavigationLink {
                 APIKeySettingsView()
             } label: {
@@ -28,6 +35,64 @@ struct SettingsView: View {
             }
         }
         .navigationTitle("Settings")
+    }
+}
+
+// MARK: - App Badge Sub-screen
+
+struct AppBadgeView: View {
+
+    private static let logger = Logger(category: "AppBadgeView")
+
+    @State private var selectedMode: AppBadgeMode
+    let homeViewModel: HomeViewModel
+    private let badgeService: AppBadgeService
+
+    init(
+        homeViewModel: HomeViewModel,
+        badgeService: AppBadgeService = AppBadgeService()
+    ) {
+        self.homeViewModel = homeViewModel
+        self.badgeService = badgeService
+        _selectedMode = State(initialValue: badgeService.badgeMode)
+    }
+
+    var body: some View {
+        List {
+            Section {
+                ForEach(AppBadgeMode.allCases) { mode in
+                    Button {
+                        selectedMode = mode
+                        badgeService.badgeMode = mode
+                        Task { await applyBadgeChange(mode: mode) }
+                    } label: {
+                        HStack {
+                            Text(mode.displayLabel)
+                                .foregroundStyle(.primary)
+                            Spacer()
+                            if mode == selectedMode {
+                                Image(systemName: "checkmark")
+                                    .foregroundStyle(Color.accentColor)
+                                    .fontWeight(.semibold)
+                            }
+                        }
+                    }
+                }
+            } footer: {
+                Text("Count shows the total unread articles. Indicator shows a dot when any are unread. Off hides the badge.")
+            }
+        }
+        .navigationTitle("App Badge")
+    }
+
+    private func applyBadgeChange(mode: AppBadgeMode) async {
+        if mode == .off {
+            await badgeService.clearBadge()
+            Self.logger.notice("Badge cleared (mode set to Off)")
+        } else {
+            await homeViewModel.updateBadge()
+            Self.logger.notice("Badge updated (mode set to '\(mode.rawValue, privacy: .public)')")
+        }
     }
 }
 
