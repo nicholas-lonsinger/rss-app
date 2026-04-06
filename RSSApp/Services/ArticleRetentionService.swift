@@ -104,8 +104,9 @@ struct ArticleRetentionService: ArticleRetaining {
         // batch leaves earlier batches committed. Deleting DB records before thumbnails
         // ensures articles still in the DB always have their thumbnail files intact.
         // On partial failure, orphaned thumbnail files from successfully-deleted articles
-        // are harmless disk waste — they will be cleaned up on the next enforcement run
-        // when those articles are no longer found in the DB.
+        // are harmless disk waste — they remain on disk until the OS purges the Caches
+        // directory under storage pressure. There is no orphan-scanning mechanism;
+        // only articles still in the DB have their thumbnails cleaned up.
         let articleIDs = Set(articlesToDelete.map(\.articleID))
         try persistence.deleteArticles(withIDs: articleIDs)
 
