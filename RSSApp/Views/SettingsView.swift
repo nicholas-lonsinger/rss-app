@@ -9,6 +9,10 @@ struct SettingsView: View {
     let homeViewModel: HomeViewModel
 
     @State private var badgeEnabled: Bool
+    // RATIONALE: Concrete AppBadgeService instead of `any AppBadgeUpdating` because
+    // the protocol's `badgeEnabled` setter requires mutable access through existentials,
+    // which is incompatible with SwiftUI's immutable view structs. Protocol abstraction
+    // is used in HomeViewModel for testing.
     private let badgeService: AppBadgeService
 
     init(persistence: FeedPersisting, viewModel: FeedListViewModel, homeViewModel: HomeViewModel, badgeService: AppBadgeService = AppBadgeService()) {

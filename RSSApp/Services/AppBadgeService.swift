@@ -28,8 +28,23 @@ struct AppBadgeService: AppBadgeUpdating {
 
     private let notificationCenter: UNUserNotificationCenter
 
+    private static let legacyBadgeModeKey = "appBadgeMode"
+
     init(notificationCenter: UNUserNotificationCenter = .current()) {
         self.notificationCenter = notificationCenter
+        Self.migrateFromBadgeModeIfNeeded()
+    }
+
+    /// One-time migration from the old 3-mode `appBadgeMode` key to `appBadgeEnabled`.
+    private static func migrateFromBadgeModeIfNeeded() {
+        let defaults = UserDefaults.standard
+        guard let oldMode = defaults.string(forKey: legacyBadgeModeKey) else { return }
+        guard defaults.object(forKey: badgeEnabledDefaultsKey) == nil else { return }
+
+        let enabled = oldMode != "off"
+        defaults.set(enabled, forKey: badgeEnabledDefaultsKey)
+        defaults.removeObject(forKey: legacyBadgeModeKey)
+        logger.notice("Migrated badge mode '\(oldMode, privacy: .public)' to badgeEnabled=\(enabled, privacy: .public)")
     }
 
     var badgeEnabled: Bool {
@@ -55,6 +70,8 @@ struct AppBadgeService: AppBadgeUpdating {
             await clearBadge()
             return
         }
+
+        Self.logger.debug("updateBadge(unreadCount: \(unreadCount, privacy: .public), badgeEnabled: \(badgeEnabled, privacy: .public))")
 
         if badgeEnabled {
             await setBadgeCount(unreadCount)
