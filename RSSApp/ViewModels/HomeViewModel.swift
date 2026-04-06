@@ -118,6 +118,34 @@ final class HomeViewModel {
         await badgeService.updateBadge(unreadCount: unreadCount)
     }
 
+    /// Handles the badge toggle being switched ON.
+    ///
+    /// Checks notification permission and either updates the badge (if authorized
+    /// or newly granted) or signals the caller to revert the toggle (if denied,
+    /// including the case where the user denies the system prompt).
+    ///
+    /// - Returns: `true` if the toggle should remain ON, `false` if it must revert to OFF.
+    func handleBadgeToggleEnabled() async -> Bool {
+        let status = await badgeService.checkPermission()
+        if status == .denied {
+            Self.logger.notice("Badge toggle enabled but notification permission denied — caller should revert toggle")
+            return false
+        }
+
+        // Permission is .authorized or .notDetermined. updateBadge() triggers the
+        // system prompt when .notDetermined, so the user may still deny. Re-check
+        // permission afterward to catch that case.
+        await updateBadge()
+
+        let postPromptStatus = await badgeService.checkPermission()
+        if postPromptStatus == .denied {
+            Self.logger.notice("Badge toggle enabled but user denied system permission prompt — caller should revert toggle")
+            return false
+        }
+
+        return true
+    }
+
     func loadSavedCount() {
         do {
             savedCount = try persistence.savedCount()

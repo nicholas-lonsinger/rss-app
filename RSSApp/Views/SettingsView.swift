@@ -1,14 +1,19 @@
 import SwiftUI
+import UIKit
 import UniformTypeIdentifiers
 import os
 
 struct SettingsView: View {
+
+    private static let logger = Logger(category: "SettingsView")
 
     let persistence: FeedPersisting
     let viewModel: FeedListViewModel
     let homeViewModel: HomeViewModel
 
     @State private var badgeEnabled: Bool
+    @State private var showPermissionDeniedAlert = false
+    @State private var isRevertingToggle = false
     // RATIONALE: Concrete AppBadgeService instead of `any AppBadgeUpdating` because
     // the protocol's `badgeEnabled` setter requires mutable access through existentials,
     // which is incompatible with SwiftUI's immutable view structs. Protocol abstraction
@@ -29,10 +34,18 @@ struct SettingsView: View {
                 Label("App Badge", systemImage: "app.badge")
             }
             .onChange(of: badgeEnabled) { _, newValue in
+                guard !isRevertingToggle else { return }
                 badgeService.badgeEnabled = newValue
                 Task {
                     if newValue {
-                        await homeViewModel.updateBadge()
+                        let shouldKeepOn = await homeViewModel.handleBadgeToggleEnabled()
+                        if !shouldKeepOn {
+                            isRevertingToggle = true
+                            badgeEnabled = false
+                            badgeService.badgeEnabled = false
+                            isRevertingToggle = false
+                            showPermissionDeniedAlert = true
+                        }
                     } else {
                         await badgeService.clearBadge()
                     }
@@ -58,6 +71,23 @@ struct SettingsView: View {
             }
         }
         .navigationTitle("Settings")
+        .alert("Notifications Disabled", isPresented: $showPermissionDeniedAlert) {
+            Button("Open Settings") {
+                guard let url = URL(string: UIApplication.openSettingsURLString) else {
+                    Self.logger.fault("Failed to create URL from UIApplication.openSettingsURLString '\(UIApplication.openSettingsURLString, privacy: .public)'")
+                    assertionFailure("Failed to create URL from UIApplication.openSettingsURLString")
+                    return
+                }
+                UIApplication.shared.open(url) { success in
+                    if !success {
+                        Self.logger.error("UIApplication.shared.open failed for settings URL")
+                    }
+                }
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("Badge notifications require permission. Please enable notifications for this app in Settings.")
+        }
     }
 }
 

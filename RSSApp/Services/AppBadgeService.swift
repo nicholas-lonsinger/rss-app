@@ -4,6 +4,22 @@ import os
 
 // MARK: - Protocol
 
+/// The result of checking notification badge permission.
+///
+/// This is a lossy projection of Apple's `UNAuthorizationStatus` into three
+/// application-relevant cases. `.authorized` collapses `.authorized`,
+/// `.provisional`, and `.ephemeral`; `.denied` maps directly; `.notDetermined`
+/// maps directly. Any future `@unknown default` cases are treated as `.denied`
+/// for safety.
+enum BadgePermissionStatus: Sendable {
+    /// Badge permission is authorized (or provisional/ephemeral).
+    case authorized
+    /// The user has explicitly denied notification permission.
+    case denied
+    /// Permission has not been requested yet.
+    case notDetermined
+}
+
 @MainActor
 protocol AppBadgeUpdating: Sendable {
     /// Whether the app icon badge is enabled. Changes are persisted to UserDefaults.
@@ -16,6 +32,10 @@ protocol AppBadgeUpdating: Sendable {
 
     /// Clears the app icon badge immediately (sets badge count to 0).
     func clearBadge() async
+
+    /// Checks the current notification authorization status without requesting permission.
+    /// - Returns: The current badge permission status.
+    func checkPermission() async -> BadgePermissionStatus
 }
 
 // MARK: - Implementation
@@ -82,6 +102,21 @@ struct AppBadgeService: AppBadgeUpdating {
 
     func clearBadge() async {
         await setBadgeCount(0)
+    }
+
+    func checkPermission() async -> BadgePermissionStatus {
+        let settings = await notificationCenter.notificationSettings()
+        switch settings.authorizationStatus {
+        case .authorized, .provisional, .ephemeral:
+            return .authorized
+        case .denied:
+            return .denied
+        case .notDetermined:
+            return .notDetermined
+        @unknown default:
+            Self.logger.warning("Unknown notification authorization status: \(String(describing: settings.authorizationStatus), privacy: .public)")
+            return .denied
+        }
     }
 
     // MARK: - Private
