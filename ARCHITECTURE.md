@@ -34,7 +34,7 @@ RSSApp/
 │   ├── FeedFetchingService.swift       # FeedFetching protocol + URLSession implementation
 │   ├── ArticleThumbnailService.swift   # ArticleThumbnailCaching protocol + thumbnail download, resize-to-120px, JPEG disk caching
 │   ├── FeedIconService.swift           # FeedIconResolving protocol + icon URL resolution (feed XML → site HTML → /favicon.ico) and file-system caching
-│   ├── FeedPersistenceService.swift    # FeedPersisting protocol + SwiftData implementation (feeds, articles, content cache, read/unread)
+│   ├── FeedPersistenceService.swift    # FeedPersisting protocol + SwiftData implementation (feeds, articles, content cache, read/unread, bulk mark all read, sort order)
 │   ├── FeedStorageService.swift        # FeedStoring protocol + UserDefaults persistence — retained for migration only
 │   ├── FeedURLValidator.swift          # Shared URL normalization + validation (trim, scheme prepend, HTTP/HTTPS + host check)
 │   ├── UserDefaultsMigrationService.swift # One-time migration from UserDefaults SubscribedFeed list to SwiftData PersistentFeed
@@ -52,8 +52,8 @@ RSSApp/
 │   ├── ArticleSummaryViewModel.swift   # @Observable @MainActor — extraction state machine
 │   ├── DiscussionViewModel.swift       # @Observable @MainActor — chat history + Claude streaming
 │   ├── FeedListViewModel.swift         # @Observable @MainActor — feed list management, refresh, OPML, unread counts, icon resolution via FeedPersisting
-│   ├── FeedViewModel.swift             # @Observable @MainActor — cached + network article loading, read/unread via FeedPersisting
-│   └── HomeViewModel.swift             # @Observable @MainActor — total unread count, cross-feed article queries, read/unread via FeedPersisting
+│   ├── FeedViewModel.swift             # @Observable @MainActor — cached + network article loading, read/unread, sort order, read filter, mark all as read via FeedPersisting
+│   └── HomeViewModel.swift             # @Observable @MainActor — total unread count, cross-feed article queries, read/unread, sort order, mark all as read via FeedPersisting
 ├── Views/                              # SwiftUI views
 │   ├── ActivityShareView.swift          # UIViewControllerRepresentable wrapping UIActivityViewController
 │   ├── AddFeedView.swift               # Sheet for adding a new feed — URL input + validation
@@ -118,7 +118,7 @@ RSSAppTests/
 │   ├── DOMSerializerTests.swift        # WKWebView integration — JS serialization fidelity
 │   ├── ExtractionPipelineTests.swift   # Full pipeline: HTML → WKWebView serialize → Swift extract
 │   ├── FeedIconServiceTests.swift      # Icon resolution, caching, HTMLUtilities icon extraction
-│   ├── FeedPersistenceServiceTests.swift # SwiftData CRUD, upsert, read/unread, cross-feed queries, content cache, cascade delete, thumbnail tracking
+│   ├── FeedPersistenceServiceTests.swift # SwiftData CRUD, upsert, read/unread, cross-feed queries, content cache, cascade delete, thumbnail tracking, sort order, mark all as read, unread per-feed queries
 │   ├── FeedStorageServiceTests.swift   # Save/load roundtrip, add/remove, empty state (legacy UserDefaults)
 │   ├── HTMLUtilitiesTests.swift        # Tag stripping, entity decoding, image extraction, og:image extraction
 │   ├── UserDefaultsMigrationTests.swift # Migration from UserDefaults to SwiftData, idempotency, ID preservation
@@ -134,8 +134,8 @@ RSSAppTests/
 │   ├── ArticleReaderViewModelTests.swift   # ArticleSummaryViewModel pre-extraction state tests
 │   ├── DiscussionViewModelTests.swift      # Message flow, streaming, no-key behavior
 │   ├── FeedListViewModelTests.swift        # Load, remove by object, remove by IndexSet
-│   ├── FeedViewModelTests.swift            # Load success/failure, state transitions
-│   └── HomeViewModelTests.swift            # Unread count, cross-feed article queries, read/unread status
+│   ├── FeedViewModelTests.swift            # Load success/failure, state transitions, sort order, read filter, mark all as read
+│   └── HomeViewModelTests.swift            # Unread count, cross-feed article queries, read/unread status, sort order, mark all as read
 ```
 
 **Total: 63 source files + 1 resource, 48 test source files + 1 fixture.**
@@ -146,9 +146,9 @@ The directory tree annotations describe each file's purpose. This section covers
 
 **Native content extraction pipeline.** `ArticleExtractionService` (`@MainActor`) loads the article URL in a hidden 1×1 `WKWebView`, injects `domSerializer.js` (which serializes the DOM tree to JSON), and bridges the result into Swift via `evaluateJavaScript` using `withCheckedThrowingContinuation` + `WKNavigationDelegate` with a 35-second safety timeout. `DOMSerializerConstants` shares the JS bridge constants (`messageHandlerName`, `serializerCall`) between `ArticleExtractionService` and `ArticleReaderWebView`. `ContentExtractor` (`ContentExtracting` protocol) orchestrates the Swift-side pipeline: `SiteSpecificExtracting` per-hostname extractors (checked first) → `MetadataExtractor` (title/byline from OpenGraph/article meta tags and DOM elements like `<h1>`, byline class patterns) → `CandidateScorer` (Readability-style algorithm that prunes unlikely nodes like nav/sidebar/footer, scores paragraphs and propagates to ancestors with decay, penalizes high link-density nodes) → `ContentAssembler` (produces clean `htmlContent` preserving semantic tags and `textContent` with paragraph breaks from the winning subtree). `CandidateScorer` internally wraps `DOMNode` values in reference-type `NodeWrapper` to add parent pointers during scoring. Falls back to the RSS `articleDescription` if extraction fails.
 
-**SwiftData persistence model.** `PersistentFeed` → `@Relationship(deleteRule: .cascade)` → `[PersistentArticle]` → `@Relationship(deleteRule: .cascade)` → optional `PersistentArticleContent`. All `@Model` properties use optionals or defaults for future CloudKit compatibility. `ModelConversion` provides bidirectional conversion extensions: `PersistentFeed` ↔ `SubscribedFeed`, `PersistentArticle` ↔ `Article`, `PersistentArticleContent` ↔ `ArticleContent`. Transient parser structs (`Article`, `RSSFeed`, `ArticleContent`) remain as transfer objects from the RSS parser and content extractor. `FeedPersisting` (`@MainActor` protocol) defines the persistence API; `SwiftDataFeedPersistenceService` implements it with feed CRUD, article upsert (deduplicating by `articleID` within a feed, preserving read status), content caching, and paginated queries via `FetchDescriptor.fetchOffset`/`fetchLimit`.
+**SwiftData persistence model.** `PersistentFeed` → `@Relationship(deleteRule: .cascade)` → `[PersistentArticle]` → `@Relationship(deleteRule: .cascade)` → optional `PersistentArticleContent`. All `@Model` properties use optionals or defaults for future CloudKit compatibility. `ModelConversion` provides bidirectional conversion extensions: `PersistentFeed` ↔ `SubscribedFeed`, `PersistentArticle` ↔ `Article`, `PersistentArticleContent` ↔ `ArticleContent`. Transient parser structs (`Article`, `RSSFeed`, `ArticleContent`) remain as transfer objects from the RSS parser and content extractor. `FeedPersisting` (`@MainActor` protocol) defines the persistence API; `SwiftDataFeedPersistenceService` implements it with feed CRUD, article upsert (deduplicating by `articleID` within a feed, preserving read status), content caching, paginated queries via `FetchDescriptor.fetchOffset`/`fetchLimit` with configurable sort order (`ascending` parameter), per-feed unread article queries, and bulk `markAllArticlesRead()` / `markAllArticlesRead(for:)` operations.
 
-**Cache-first loading (`FeedViewModel`).** On `loadFeed()`, displays the first page of cached `[PersistentArticle]` immediately (page size 50), then fetches from network and upserts new articles, reloading up to `max(articles.count, pageSize)` to preserve scroll position. `loadMoreArticles()` provides infinite scroll with deduplication and error-stop (`hasMore` set to `false` on error). Loading spinner only shown when no cached articles; error only shown when network fails and no cached articles (offline resilience). Pagination errors surface via `.alert` when articles are already loaded.
+**Cache-first loading (`FeedViewModel`).** On `loadFeed()`, displays the first page of cached `[PersistentArticle]` immediately (page size 50), then fetches from network and upserts new articles, reloading up to `max(articles.count, pageSize)` to preserve scroll position. `loadMoreArticles()` provides infinite scroll with deduplication and error-stop (`hasMore` set to `false` on error). Loading spinner only shown when no cached articles; error only shown when network fails and no cached articles (offline resilience). Pagination errors surface via `.alert` when articles are already loaded. Supports a `showUnreadOnly` toggle (per-feed filter) and a global `sortAscending` preference (persisted in UserDefaults under `articleSortAscending`, shared between `FeedViewModel` and `HomeViewModel`). `markAllAsRead()` bulk-marks all articles in the feed as read via the persistence layer.
 
 **Claude API streaming flow.** `KeychainService` (`KeychainServicing` protocol, wraps `Security` framework `kSecClassGenericPassword`) loads the Anthropic API key → `ClaudeAPIService` (`ClaudeAPIServicing` protocol) POSTs to the Messages API with `stream: true`, reads SSE lines via `URLSessionBytesProviding` (injectable, defaults to `URLSession.shared`), yields text deltas via `AsyncThrowingStream<String, Error>` → `DiscussionViewModel` appends user turn, creates empty assistant placeholder, then streams chunks into `messages[lastIndex].content`. Model identifier and max output tokens read from `UserDefaults` at call time (keys: `claude_model_identifier`, `claude_max_tokens`) with fallback defaults (`claude-haiku-4-5-20251001`, `4096`).
 
@@ -217,6 +217,9 @@ RSSAppApp (@main)
 | Cross-feed article queries in `FeedPersisting` | `allArticles()`, `allUnreadArticles()`, `totalUnreadCount()` are protocol methods so they work with both SwiftData and mock implementations |
 | Offset-based pagination (page size 50) | Simple `fetchOffset`/`fetchLimit` on `FetchDescriptor`; deduplication filter on append prevents duplicates from dataset shifts; `hasMore` flag set to `false` on error to prevent infinite retry loops; previous list preserved on reload failure |
 | Targeted unread list mutation | `removeFromUnreadList(_:)` removes a single article client-side instead of reloading the full list, preserving scroll position when marking articles read |
+| Global sort order in UserDefaults | Single `articleSortAscending` key shared between `FeedViewModel` and `HomeViewModel`; changing the preference triggers an immediate reload of the current article list |
+| Article list toolbar menu | `ellipsis.circle` menu on all article list views; sort order + mark all as read on all views; read/unread filter only on `ArticleListView` (per-feed) since `AllArticlesView` and `UnreadArticlesView` have fixed scope |
+| Confirmation dialog for mark all as read | Destructive bulk operation always requires user confirmation regardless of view |
 
 ## Test Coverage
 

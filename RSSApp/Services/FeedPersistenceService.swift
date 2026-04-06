@@ -23,27 +23,40 @@ protocol FeedPersisting: Sendable {
 
     /// Returns all articles for a feed, sorted by published date descending (newest first).
     func articles(for feed: PersistentFeed) throws -> [PersistentArticle]
-    /// Returns a page of articles for a feed, sorted by published date descending (newest first).
+    /// Returns a page of articles for a feed, sorted by published date.
     /// - Parameters:
     ///   - offset: Number of articles to skip from the beginning of the sorted result set.
     ///   - limit: Maximum number of articles to return.
-    func articles(for feed: PersistentFeed, offset: Int, limit: Int) throws -> [PersistentArticle]
+    ///   - ascending: When `true`, sorts oldest first; when `false` (default), sorts newest first.
+    func articles(for feed: PersistentFeed, offset: Int, limit: Int, ascending: Bool) throws -> [PersistentArticle]
+    /// Returns a page of unread articles for a feed, sorted by published date.
+    /// - Parameters:
+    ///   - offset: Number of articles to skip from the beginning of the sorted result set.
+    ///   - limit: Maximum number of articles to return.
+    ///   - ascending: When `true`, sorts oldest first; when `false` (default), sorts newest first.
+    func unreadArticles(for feed: PersistentFeed, offset: Int, limit: Int, ascending: Bool) throws -> [PersistentArticle]
     /// Returns all articles across all feeds, sorted by published date descending (newest first).
     func allArticles() throws -> [PersistentArticle]
-    /// Returns a page of all articles across all feeds, sorted by published date descending (newest first).
+    /// Returns a page of all articles across all feeds, sorted by published date.
     /// - Parameters:
     ///   - offset: Number of articles to skip from the beginning of the sorted result set.
     ///   - limit: Maximum number of articles to return.
-    func allArticles(offset: Int, limit: Int) throws -> [PersistentArticle]
+    ///   - ascending: When `true`, sorts oldest first; when `false` (default), sorts newest first.
+    func allArticles(offset: Int, limit: Int, ascending: Bool) throws -> [PersistentArticle]
     /// Returns all unread articles across all feeds, sorted by published date descending (newest first).
     func allUnreadArticles() throws -> [PersistentArticle]
-    /// Returns a page of unread articles across all feeds, sorted by published date descending (newest first).
+    /// Returns a page of unread articles across all feeds, sorted by published date.
     /// - Parameters:
     ///   - offset: Number of articles to skip from the beginning of the sorted result set.
     ///   - limit: Maximum number of articles to return.
-    func allUnreadArticles(offset: Int, limit: Int) throws -> [PersistentArticle]
+    ///   - ascending: When `true`, sorts oldest first; when `false` (default), sorts newest first.
+    func allUnreadArticles(offset: Int, limit: Int, ascending: Bool) throws -> [PersistentArticle]
     func upsertArticles(_ articles: [Article], for feed: PersistentFeed) throws
     func markArticleRead(_ article: PersistentArticle, isRead: Bool) throws
+    /// Marks all articles in a specific feed as read.
+    func markAllArticlesRead(for feed: PersistentFeed) throws
+    /// Marks all articles across all feeds as read.
+    func markAllArticlesRead() throws
     func unreadCount(for feed: PersistentFeed) throws -> Int
     /// Returns the total number of unread articles across all feeds.
     func totalUnreadCount() throws -> Int
@@ -161,16 +174,31 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
         return try modelContext.fetch(descriptor)
     }
 
-    func articles(for feed: PersistentFeed, offset: Int, limit: Int) throws -> [PersistentArticle] {
+    func articles(for feed: PersistentFeed, offset: Int, limit: Int, ascending: Bool = false) throws -> [PersistentArticle] {
         let feedID = feed.persistentModelID
+        let sortOrder: SortOrder = ascending ? .forward : .reverse
         var descriptor = FetchDescriptor<PersistentArticle>(
             predicate: #Predicate { $0.feed?.persistentModelID == feedID },
-            sortBy: [SortDescriptor(\.publishedDate, order: .reverse)]
+            sortBy: [SortDescriptor(\.publishedDate, order: sortOrder)]
         )
         descriptor.fetchOffset = offset
         descriptor.fetchLimit = limit
         let articles = try modelContext.fetch(descriptor)
-        Self.logger.debug("Fetched \(articles.count, privacy: .public) articles for feed (offset: \(offset, privacy: .public), limit: \(limit, privacy: .public))")
+        Self.logger.debug("Fetched \(articles.count, privacy: .public) articles for feed (offset: \(offset, privacy: .public), limit: \(limit, privacy: .public), ascending: \(ascending, privacy: .public))")
+        return articles
+    }
+
+    func unreadArticles(for feed: PersistentFeed, offset: Int, limit: Int, ascending: Bool = false) throws -> [PersistentArticle] {
+        let feedID = feed.persistentModelID
+        let sortOrder: SortOrder = ascending ? .forward : .reverse
+        var descriptor = FetchDescriptor<PersistentArticle>(
+            predicate: #Predicate { $0.feed?.persistentModelID == feedID && !$0.isRead },
+            sortBy: [SortDescriptor(\.publishedDate, order: sortOrder)]
+        )
+        descriptor.fetchOffset = offset
+        descriptor.fetchLimit = limit
+        let articles = try modelContext.fetch(descriptor)
+        Self.logger.debug("Fetched \(articles.count, privacy: .public) unread articles for feed (offset: \(offset, privacy: .public), limit: \(limit, privacy: .public), ascending: \(ascending, privacy: .public))")
         return articles
     }
 
@@ -183,14 +211,15 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
         return articles
     }
 
-    func allArticles(offset: Int, limit: Int) throws -> [PersistentArticle] {
+    func allArticles(offset: Int, limit: Int, ascending: Bool = false) throws -> [PersistentArticle] {
+        let sortOrder: SortOrder = ascending ? .forward : .reverse
         var descriptor = FetchDescriptor<PersistentArticle>(
-            sortBy: [SortDescriptor(\.publishedDate, order: .reverse)]
+            sortBy: [SortDescriptor(\.publishedDate, order: sortOrder)]
         )
         descriptor.fetchOffset = offset
         descriptor.fetchLimit = limit
         let articles = try modelContext.fetch(descriptor)
-        Self.logger.debug("Fetched \(articles.count, privacy: .public) total articles (offset: \(offset, privacy: .public), limit: \(limit, privacy: .public))")
+        Self.logger.debug("Fetched \(articles.count, privacy: .public) total articles (offset: \(offset, privacy: .public), limit: \(limit, privacy: .public), ascending: \(ascending, privacy: .public))")
         return articles
     }
 
@@ -204,15 +233,16 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
         return articles
     }
 
-    func allUnreadArticles(offset: Int, limit: Int) throws -> [PersistentArticle] {
+    func allUnreadArticles(offset: Int, limit: Int, ascending: Bool = false) throws -> [PersistentArticle] {
+        let sortOrder: SortOrder = ascending ? .forward : .reverse
         var descriptor = FetchDescriptor<PersistentArticle>(
             predicate: #Predicate { !$0.isRead },
-            sortBy: [SortDescriptor(\.publishedDate, order: .reverse)]
+            sortBy: [SortDescriptor(\.publishedDate, order: sortOrder)]
         )
         descriptor.fetchOffset = offset
         descriptor.fetchLimit = limit
         let articles = try modelContext.fetch(descriptor)
-        Self.logger.debug("Fetched \(articles.count, privacy: .public) unread articles (offset: \(offset, privacy: .public), limit: \(limit, privacy: .public))")
+        Self.logger.debug("Fetched \(articles.count, privacy: .public) unread articles (offset: \(offset, privacy: .public), limit: \(limit, privacy: .public), ascending: \(ascending, privacy: .public))")
         return articles
     }
 
@@ -249,6 +279,35 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
         article.readDate = isRead ? Date() : nil
         try modelContext.save()
         Self.logger.debug("Marked article '\(article.title, privacy: .public)' as \(isRead ? "read" : "unread", privacy: .public)")
+    }
+
+    func markAllArticlesRead(for feed: PersistentFeed) throws {
+        let feedID = feed.persistentModelID
+        let descriptor = FetchDescriptor<PersistentArticle>(
+            predicate: #Predicate { $0.feed?.persistentModelID == feedID && !$0.isRead }
+        )
+        let unreadArticles = try modelContext.fetch(descriptor)
+        let now = Date()
+        for article in unreadArticles {
+            article.isRead = true
+            article.readDate = now
+        }
+        try modelContext.save()
+        Self.logger.notice("Marked \(unreadArticles.count, privacy: .public) articles as read for feed '\(feed.title, privacy: .public)'")
+    }
+
+    func markAllArticlesRead() throws {
+        let descriptor = FetchDescriptor<PersistentArticle>(
+            predicate: #Predicate { !$0.isRead }
+        )
+        let unreadArticles = try modelContext.fetch(descriptor)
+        let now = Date()
+        for article in unreadArticles {
+            article.isRead = true
+            article.readDate = now
+        }
+        try modelContext.save()
+        Self.logger.notice("Marked \(unreadArticles.count, privacy: .public) articles as read across all feeds")
     }
 
     // MARK: - Thumbnail Tracking

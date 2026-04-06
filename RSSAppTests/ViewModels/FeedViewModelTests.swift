@@ -368,4 +368,161 @@ struct FeedViewModelTests {
 
         #expect(viewModel.errorMessage != nil)
     }
+
+    // MARK: - Sort Order
+
+    @Test("sortAscending defaults to false (newest first)")
+    @MainActor
+    func sortAscendingDefault() {
+        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
+        let feed = TestFixtures.makePersistentFeed()
+        let viewModel = FeedViewModel(feed: feed, feedFetching: MockFeedFetchingService(), persistence: MockFeedPersistenceService())
+
+        #expect(viewModel.sortAscending == false)
+    }
+
+    @Test("sortAscending toggle persists and reloads articles")
+    @MainActor
+    func sortAscendingToggleReloads() async {
+        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
+        let feed = TestFixtures.makePersistentFeed(feedURL: URL(string: "https://example.com/feed")!)
+        let mock = MockFeedFetchingService()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+
+        let article1 = TestFixtures.makePersistentArticle(
+            articleID: "a1",
+            publishedDate: Date(timeIntervalSince1970: 1_000_000)
+        )
+        article1.feed = feed
+        let article2 = TestFixtures.makePersistentArticle(
+            articleID: "a2",
+            publishedDate: Date(timeIntervalSince1970: 2_000_000)
+        )
+        article2.feed = feed
+        mockPersistence.articlesByFeedID[feed.id] = [article1, article2]
+
+        mock.feedToReturn = TestFixtures.makeFeed()
+
+        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence)
+        await viewModel.loadFeed()
+
+        // Default: newest first — article2 should be first
+        #expect(viewModel.articles.first?.articleID == "a2")
+
+        // Toggle to ascending (oldest first)
+        viewModel.sortAscending = true
+
+        #expect(viewModel.articles.first?.articleID == "a1")
+
+        // Clean up
+        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
+    }
+
+    // MARK: - Read Filter
+
+    @Test("showUnreadOnly filters articles when toggled")
+    @MainActor
+    func showUnreadOnlyFilters() async {
+        let feed = TestFixtures.makePersistentFeed(feedURL: URL(string: "https://example.com/feed")!)
+        let mock = MockFeedFetchingService()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+
+        let unread = TestFixtures.makePersistentArticle(articleID: "u1", isRead: false)
+        unread.feed = feed
+        let read = TestFixtures.makePersistentArticle(articleID: "r1", isRead: true)
+        read.feed = feed
+        mockPersistence.articlesByFeedID[feed.id] = [unread, read]
+
+        mock.feedToReturn = TestFixtures.makeFeed()
+
+        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
+        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence)
+        await viewModel.loadFeed()
+
+        #expect(viewModel.articles.count == 2)
+
+        viewModel.showUnreadOnly = true
+
+        #expect(viewModel.articles.count == 1)
+        #expect(viewModel.articles.first?.articleID == "u1")
+
+        // Toggle back to all
+        viewModel.showUnreadOnly = false
+
+        #expect(viewModel.articles.count == 2)
+
+        // Clean up
+        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
+    }
+
+    @Test("showUnreadOnly does not reload when set to same value")
+    @MainActor
+    func showUnreadOnlySameValueNoOp() async {
+        let feed = TestFixtures.makePersistentFeed(feedURL: URL(string: "https://example.com/feed")!)
+        let mock = MockFeedFetchingService()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+
+        let article = TestFixtures.makePersistentArticle(articleID: "a1", isRead: false)
+        article.feed = feed
+        mockPersistence.articlesByFeedID[feed.id] = [article]
+
+        mock.feedToReturn = TestFixtures.makeFeed()
+
+        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence)
+        await viewModel.loadFeed()
+        let articlesBefore = viewModel.articles
+
+        // Set to same value — should not trigger a reload
+        viewModel.showUnreadOnly = false
+
+        #expect(viewModel.articles.count == articlesBefore.count)
+    }
+
+    // MARK: - Mark All as Read
+
+    @Test("markAllAsRead marks all articles in feed as read")
+    @MainActor
+    func markAllAsReadMarksFeedArticles() async {
+        let feed = TestFixtures.makePersistentFeed(feedURL: URL(string: "https://example.com/feed")!)
+        let mock = MockFeedFetchingService()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+
+        let article1 = TestFixtures.makePersistentArticle(articleID: "a1", isRead: false)
+        article1.feed = feed
+        let article2 = TestFixtures.makePersistentArticle(articleID: "a2", isRead: false)
+        article2.feed = feed
+        mockPersistence.articlesByFeedID[feed.id] = [article1, article2]
+
+        mock.feedToReturn = TestFixtures.makeFeed()
+
+        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
+        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence)
+        await viewModel.loadFeed()
+
+        viewModel.markAllAsRead()
+
+        #expect(article1.isRead == true)
+        #expect(article2.isRead == true)
+        #expect(viewModel.errorMessage == nil)
+
+        // Clean up
+        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
+    }
+
+    @Test("markAllAsRead sets errorMessage on persistence failure")
+    @MainActor
+    func markAllAsReadError() {
+        let feed = TestFixtures.makePersistentFeed()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.errorToThrow = NSError(domain: "test", code: 1)
+
+        let viewModel = FeedViewModel(feed: feed, feedFetching: MockFeedFetchingService(), persistence: mockPersistence)
+        viewModel.markAllAsRead()
+
+        #expect(viewModel.errorMessage != nil)
+    }
 }

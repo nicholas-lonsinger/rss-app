@@ -5,6 +5,7 @@ struct AllArticlesView: View {
     let homeViewModel: HomeViewModel
 
     @State private var selectedArticle: PersistentArticle?
+    @State private var showMarkAllReadConfirmation = false
 
     private let thumbnailService: ArticleThumbnailCaching = ArticleThumbnailService()
 
@@ -51,6 +52,40 @@ struct AllArticlesView: View {
             }
         }
         .navigationTitle("All Articles")
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    Button {
+                        homeViewModel.sortAscending.toggle()
+                        homeViewModel.loadAllArticles()
+                    } label: {
+                        Label(
+                            homeViewModel.sortAscending ? "Newest First" : "Oldest First",
+                            systemImage: homeViewModel.sortAscending ? "arrow.down" : "arrow.up"
+                        )
+                    }
+
+                    Divider()
+
+                    Button(role: .destructive) {
+                        showMarkAllReadConfirmation = true
+                    } label: {
+                        Label("Mark All as Read", systemImage: "checkmark.circle")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+            }
+        }
+        .confirmationDialog(
+            "Mark all articles as read?",
+            isPresented: $showMarkAllReadConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Mark All as Read", role: .destructive) {
+                homeViewModel.markAllAsRead()
+            }
+        }
         .fullScreenCover(item: $selectedArticle) { article in
             ArticleReaderView(article: article, persistence: persistence)
         }
