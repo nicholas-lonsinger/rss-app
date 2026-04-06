@@ -6,6 +6,7 @@ struct UnreadArticlesView: View {
 
     @State private var selectedArticle: PersistentArticle?
     @State private var showMarkAllReadConfirmation = false
+    @State private var hasAppeared = false
 
     private let thumbnailService: ArticleThumbnailCaching = ArticleThumbnailService()
 
@@ -22,7 +23,6 @@ struct UnreadArticlesView: View {
                     Button {
                         if homeViewModel.markAsRead(article) {
                             selectedArticle = article
-                            homeViewModel.removeFromUnreadList(article)
                         }
                     } label: {
                         CrossFeedArticleRowView(
@@ -35,9 +35,6 @@ struct UnreadArticlesView: View {
                     .swipeActions(edge: .leading) {
                         Button {
                             homeViewModel.toggleReadStatus(article)
-                            if article.isRead {
-                                homeViewModel.removeFromUnreadList(article)
-                            }
                         } label: {
                             Label(
                                 article.isRead ? "Unread" : "Read",
@@ -104,6 +101,11 @@ struct UnreadArticlesView: View {
             homeViewModel.loadUnreadCount()
         }
         .task {
+            homeViewModel.loadUnreadArticles()
+            hasAppeared = true
+        }
+        .onAppear {
+            guard hasAppeared else { return }
             homeViewModel.loadUnreadArticles()
         }
         .onDisappear {

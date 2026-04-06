@@ -371,11 +371,17 @@ struct HomeViewModelTests {
         #expect(viewModel.hasMoreAllArticles == false)
     }
 
-    // MARK: - Remove From Unread List
+    // MARK: - Stable List Snapshot
 
-    @Test("removeFromUnreadList removes article by ID")
+    /// Creates two unread articles linked to a feed and returns the view model with the unread list loaded.
     @MainActor
-    func removeFromUnreadListRemovesArticle() {
+    private static func makeUnreadSnapshotFixture() -> (
+        viewModel: HomeViewModel,
+        mockPersistence: MockFeedPersistenceService,
+        article1: PersistentArticle,
+        article2: PersistentArticle,
+        feed: PersistentFeed
+    ) {
         let feed = TestFixtures.makePersistentFeed()
         let mockPersistence = MockFeedPersistenceService()
         mockPersistence.feeds = [feed]
@@ -387,12 +393,118 @@ struct HomeViewModelTests {
         mockPersistence.articlesByFeedID[feed.id] = [article1, article2]
 
         let viewModel = HomeViewModel(persistence: mockPersistence)
+        return (viewModel, mockPersistence, article1, article2, feed)
+    }
+
+    @Test("toggleReadStatus does not remove article from unread list")
+    @MainActor
+    func toggleReadStatusKeepsArticleInUnreadList() {
+        let (viewModel, _, article1, _, _) = Self.makeUnreadSnapshotFixture()
+        viewModel.loadUnreadArticles()
+
+        let idsBefore = viewModel.unreadArticlesList.map(\.articleID)
+        #expect(idsBefore.count == 2)
+
+        viewModel.toggleReadStatus(article1)
+        #expect(article1.isRead == true)
+        #expect(viewModel.unreadArticlesList.map(\.articleID) == idsBefore)
+    }
+
+    @Test("markAsRead does not remove article from unread list")
+    @MainActor
+    func markAsReadKeepsArticleInUnreadList() {
+        let (viewModel, _, article1, _, _) = Self.makeUnreadSnapshotFixture()
+        viewModel.loadUnreadArticles()
+
+        let idsBefore = viewModel.unreadArticlesList.map(\.articleID)
+        #expect(idsBefore.count == 2)
+
+        let result = viewModel.markAsRead(article1)
+        #expect(result == true)
+        #expect(article1.isRead == true)
+        #expect(viewModel.unreadArticlesList.map(\.articleID) == idsBefore)
+    }
+
+    @Test("toggleReadStatus does not remove article from all articles list")
+    @MainActor
+    func toggleReadStatusKeepsArticleInAllArticlesList() {
+        let feed = TestFixtures.makePersistentFeed()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+
+        let article1 = TestFixtures.makePersistentArticle(articleID: "a1", isRead: false)
+        article1.feed = feed
+        let article2 = TestFixtures.makePersistentArticle(articleID: "a2", isRead: true)
+        article2.feed = feed
+        mockPersistence.articlesByFeedID[feed.id] = [article1, article2]
+
+        let viewModel = HomeViewModel(persistence: mockPersistence)
+        viewModel.loadAllArticles()
+
+        let idsBefore = viewModel.allArticlesList.map(\.articleID)
+        #expect(idsBefore.count == 2)
+
+        viewModel.toggleReadStatus(article1)
+        #expect(article1.isRead == true)
+        #expect(viewModel.allArticlesList.map(\.articleID) == idsBefore)
+    }
+
+    @Test("loadAllArticles reload picks up new articles from persistence")
+    @MainActor
+    func loadAllArticlesReloadPicksUpNewData() {
+        let feed = TestFixtures.makePersistentFeed()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+
+        let article1 = TestFixtures.makePersistentArticle(articleID: "a1")
+        article1.feed = feed
+        mockPersistence.articlesByFeedID[feed.id] = [article1]
+
+        let viewModel = HomeViewModel(persistence: mockPersistence)
+        viewModel.loadAllArticles()
+        #expect(viewModel.allArticlesList.count == 1)
+
+        // Simulate a new article appearing in persistence (e.g., background fetch)
+        let article2 = TestFixtures.makePersistentArticle(articleID: "a2")
+        article2.feed = feed
+        mockPersistence.articlesByFeedID[feed.id] = [article1, article2]
+
+        viewModel.loadAllArticles()
+        #expect(viewModel.allArticlesList.count == 2)
+    }
+
+    @Test("loadUnreadArticles reload picks up new unread articles from persistence")
+    @MainActor
+    func loadUnreadArticlesReloadPicksUpNewData() {
+        let (viewModel, mockPersistence, article1, _, feed) = Self.makeUnreadSnapshotFixture()
         viewModel.loadUnreadArticles()
         #expect(viewModel.unreadArticlesList.count == 2)
 
-        viewModel.removeFromUnreadList(article1)
+        // Simulate a new unread article appearing in persistence
+        let article3 = TestFixtures.makePersistentArticle(articleID: "u3", isRead: false)
+        article3.feed = feed
+        mockPersistence.articlesByFeedID[feed.id] = [article1, mockPersistence.articlesByFeedID[feed.id]![1], article3]
+
+        viewModel.loadUnreadArticles()
+        #expect(viewModel.unreadArticlesList.count == 3)
+    }
+
+    @Test("loadUnreadArticles reload excludes articles marked read since last load")
+    @MainActor
+    func loadUnreadArticlesReloadExcludesReadArticles() {
+        let (viewModel, _, article1, _, _) = Self.makeUnreadSnapshotFixture()
+        viewModel.loadUnreadArticles()
+        #expect(viewModel.unreadArticlesList.count == 2)
+
+        // Mark article as read — snapshot stays stable
+        viewModel.toggleReadStatus(article1)
+        #expect(article1.isRead == true)
+        #expect(viewModel.unreadArticlesList.count == 2)
+
+        // Reload (simulating navigation return) — now-read article should be excluded
+        viewModel.loadUnreadArticles()
         #expect(viewModel.unreadArticlesList.count == 1)
-        #expect(viewModel.unreadArticlesList[0].articleID == "u2")
+        #expect(viewModel.unreadArticlesList.first?.articleID == "u2")
     }
 
     // MARK: - Read Status

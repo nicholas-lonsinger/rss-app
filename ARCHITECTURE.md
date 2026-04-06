@@ -216,7 +216,7 @@ RSSAppApp (@main)
 | `HomeGroup` enum for group types | Three fixed cases with `CaseIterable`; enum-based approach accommodates future user-created groups (folders, tags) by adding new cases |
 | Cross-feed article queries in `FeedPersisting` | `allArticles()`, `allUnreadArticles()`, `totalUnreadCount()` are protocol methods so they work with both SwiftData and mock implementations |
 | Offset-based pagination (page size 50) | Simple `fetchOffset`/`fetchLimit` on `FetchDescriptor`; deduplication filter on append prevents duplicates from dataset shifts; `hasMore` flag set to `false` on error to prevent infinite retry loops; previous list preserved on reload failure |
-| Targeted unread list mutation | `removeFromUnreadList(_:)` removes a single article client-side instead of reloading the full list, preserving scroll position when marking articles read |
+| Stable list snapshot | Article lists capture a snapshot on load and do not re-query when individual read states change; visual indicators update in-place via SwiftData `@Model` observation; lists re-query only on explicit triggers (pull-to-refresh, navigation return, sort/filter change, mark all as read) |
 | Global sort order in UserDefaults | Single `articleSortAscending` key shared between `FeedViewModel` and `HomeViewModel`; changing the preference triggers an immediate reload of the current article list |
 | Article list toolbar menu | `ellipsis.circle` menu on all article list views; sort order + mark all as read on all views; read/unread filter only on `ArticleListView` (per-feed) since `AllArticlesView` and `UnreadArticlesView` have fixed scope |
 | Confirmation dialog for mark all as read | Destructive bulk operation always requires user confirmation regardless of view |

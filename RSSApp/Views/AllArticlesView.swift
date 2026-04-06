@@ -6,6 +6,7 @@ struct AllArticlesView: View {
 
     @State private var selectedArticle: PersistentArticle?
     @State private var showMarkAllReadConfirmation = false
+    @State private var hasAppeared = false
 
     private let thumbnailService: ArticleThumbnailCaching = ArticleThumbnailService()
 
@@ -100,6 +101,11 @@ struct AllArticlesView: View {
             homeViewModel.loadUnreadCount()
         }
         .task {
+            homeViewModel.loadAllArticles()
+            hasAppeared = true
+        }
+        .onAppear {
+            guard hasAppeared else { return }
             homeViewModel.loadAllArticles()
         }
         .onDisappear {

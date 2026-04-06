@@ -6,6 +6,7 @@ struct ArticleListView: View {
     let thumbnailService: ArticleThumbnailCaching
     @State private var selectedArticle: PersistentArticle?
     @State private var showMarkAllReadConfirmation = false
+    @State private var hasAppeared = false
 
     var body: some View {
         Group {
@@ -99,7 +100,14 @@ struct ArticleListView: View {
         .fullScreenCover(item: $selectedArticle) { article in
             ArticleReaderView(article: article, persistence: persistence)
         }
-        .task { await viewModel.loadFeed() }
+        .task {
+            await viewModel.loadFeed()
+            hasAppeared = true
+        }
+        .onAppear {
+            guard hasAppeared else { return }
+            viewModel.reloadArticles()
+        }
         .alert("Error", isPresented: errorAlertBinding) {
             Button("OK") { viewModel.errorMessage = nil }
         } message: {

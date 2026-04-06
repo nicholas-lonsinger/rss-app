@@ -187,11 +187,6 @@ final class HomeViewModel {
         }
     }
 
-    /// Removes a specific article from the unread articles list (e.g., after marking it read).
-    func removeFromUnreadList(_ article: PersistentArticle) {
-        unreadArticlesList.removeAll { $0.articleID == article.articleID }
-    }
-
     func toggleReadStatus(_ article: PersistentArticle) {
         do {
             try persistence.markArticleRead(article, isRead: !article.isRead)
