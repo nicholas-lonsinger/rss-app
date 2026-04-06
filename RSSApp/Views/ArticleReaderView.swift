@@ -32,7 +32,16 @@ struct ArticleReaderView: View {
         guard articles.indices.contains(currentIndex) else {
             Self.logger.fault("currentIndex \(self.currentIndex, privacy: .public) out of bounds for \(self.articles.count, privacy: .public) articles")
             assertionFailure("currentIndex \(currentIndex) out of bounds for \(articles.count) articles")
-            return articles[max(0, articles.count - 1)]
+            guard !articles.isEmpty else {
+                Self.logger.fault("articles array is empty — returning sentinel article")
+                assertionFailure("article accessed with empty articles array")
+                return PersistentArticle(articleID: "", title: "")
+            }
+            // RATIONALE: During pagination, currentIndex may temporarily exceed the local
+            // articles snapshot (value-type copy) until SwiftUI re-renders with the updated
+            // array from the view model. Clamping both directions ensures safe access during
+            // this timing window rather than trapping on an out-of-bounds index.
+            return articles[max(0, min(currentIndex, articles.count - 1))]
         }
         return articles[currentIndex]
     }
@@ -53,110 +62,125 @@ struct ArticleReaderView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            articleContent
-                .id(article.articleID)
-                .navigationTitle(article.title)
-                .navigationBarTitleDisplayMode(.inline)
+        if articles.isEmpty {
+            NavigationStack {
+                ContentUnavailableView {
+                    Label("No Articles", systemImage: "doc.text")
+                } description: {
+                    Text("There are no articles to display.")
+                }
                 .toolbar {
                     ToolbarItem(placement: .topBarLeading) {
                         Button("Done") { dismiss() }
                     }
-                    ToolbarItemGroup(placement: .topBarTrailing) {
-                        Button {
-                            toggleSaved()
-                        } label: {
-                            Image(systemName: article.isSaved ? "bookmark.fill" : "bookmark")
+                }
+            }
+        } else {
+            NavigationStack {
+                articleContent
+                    .id(article.articleID)
+                    .navigationTitle(article.title)
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarLeading) {
+                            Button("Done") { dismiss() }
                         }
-                        .accessibilityLabel(article.isSaved ? "Unsave article" : "Save article")
-
-                        if isExtracting {
-                            ProgressView()
-                                .accessibilityLabel("Extracting article content")
-                        } else {
+                        ToolbarItemGroup(placement: .topBarTrailing) {
                             Button {
-                                if hasAPIKey {
-                                    Self.logger.debug("AI button tapped — API key present, showing summary")
-                                    showSummary = true
-                                } else {
-                                    Self.logger.debug("AI button tapped — no API key, showing API key settings")
-                                    showAPIKeySettings = true
-                                }
+                                toggleSaved()
                             } label: {
-                                Image(systemName: "sparkles")
+                                Image(systemName: article.isSaved ? "bookmark.fill" : "bookmark")
                             }
-                            .accessibilityLabel("Summarize with AI")
-                        }
-                    }
-                    ToolbarItemGroup(placement: .bottomBar) {
-                        Button {
-                            navigateToPrevious()
-                        } label: {
-                            Image(systemName: "chevron.backward")
-                        }
-                        .disabled(!canGoBack)
-                        .accessibilityLabel("Previous article")
+                            .accessibilityLabel(article.isSaved ? "Unsave article" : "Save article")
 
-                        Spacer()
-
-                        Button {
-                            navigateToNext()
-                        } label: {
-                            Image(systemName: "chevron.forward")
-                        }
-                        .disabled(!canGoForward)
-                        .accessibilityLabel("Next article")
-                    }
-                }
-                .onAppear {
-                    do {
-                        hasAPIKey = try keychainService.hasAPIKey()
-                    } catch {
-                        hasAPIKey = false
-                        Self.logger.error("Keychain read failed in onAppear: \(error, privacy: .public)")
-                    }
-                }
-                .onChange(of: currentIndex) {
-                    // Deferred mark-as-read for the pagination path: after loadMore appends
-                    // new articles to the view model, SwiftUI re-renders this view with the
-                    // updated array, and this handler ensures the newly visible article is
-                    // marked as read. For normal navigation, markCurrentArticleAsRead() is
-                    // also called directly in onArticleChanged(); the isRead guard prevents
-                    // double-work.
-                    markCurrentArticleAsRead()
-                }
-                .sheet(isPresented: $showAPIKeySettings, onDismiss: {
-                    do {
-                        hasAPIKey = try keychainService.hasAPIKey()
-                    } catch {
-                        hasAPIKey = false
-                        Self.logger.error("Keychain read failed on settings dismiss: \(error, privacy: .public)")
-                    }
-                }) {
-                    NavigationStack {
-                        APIKeySettingsView()
-                            .toolbar {
-                                ToolbarItem(placement: .topBarTrailing) {
-                                    Button("Done") { showAPIKeySettings = false }
+                            if isExtracting {
+                                ProgressView()
+                                    .accessibilityLabel("Extracting article content")
+                            } else {
+                                Button {
+                                    if hasAPIKey {
+                                        Self.logger.debug("AI button tapped — API key present, showing summary")
+                                        showSummary = true
+                                    } else {
+                                        Self.logger.debug("AI button tapped — no API key, showing API key settings")
+                                        showAPIKeySettings = true
+                                    }
+                                } label: {
+                                    Image(systemName: "sparkles")
                                 }
+                                .accessibilityLabel("Summarize with AI")
                             }
+                        }
+                        ToolbarItemGroup(placement: .bottomBar) {
+                            Button {
+                                navigateToPrevious()
+                            } label: {
+                                Image(systemName: "chevron.backward")
+                            }
+                            .disabled(!canGoBack)
+                            .accessibilityLabel("Previous article")
+
+                            Spacer()
+
+                            Button {
+                                navigateToNext()
+                            } label: {
+                                Image(systemName: "chevron.forward")
+                            }
+                            .disabled(!canGoForward)
+                            .accessibilityLabel("Next article")
+                        }
                     }
-                }
-                // RATIONALE: ArticleSummaryView has no navigation path to API key settings,
-                // so no hasAPIKey cache refresh is needed on dismiss.
-                .sheet(isPresented: $showSummary) {
-                    ArticleSummaryView(
-                        article: article.toArticle(),
-                        preExtractedContent: extractionState.content,
-                        persistentArticle: article,
-                        persistence: persistence
-                    )
-                }
-                .alert("Error", isPresented: errorAlertBinding) {
-                    Button("OK") { errorMessage = nil }
-                } message: {
-                    Text(errorMessage ?? "")
-                }
+                    .onAppear {
+                        do {
+                            hasAPIKey = try keychainService.hasAPIKey()
+                        } catch {
+                            hasAPIKey = false
+                            Self.logger.error("Keychain read failed in onAppear: \(error, privacy: .public)")
+                        }
+                    }
+                    .onChange(of: currentIndex) {
+                        // Deferred mark-as-read for the pagination path: after loadMore appends
+                        // new articles to the view model, SwiftUI re-renders this view with the
+                        // updated array, and this handler ensures the newly visible article is
+                        // marked as read. For normal navigation, markCurrentArticleAsRead() is
+                        // also called directly in onArticleChanged(); the isRead guard prevents
+                        // double-work.
+                        markCurrentArticleAsRead()
+                    }
+                    .sheet(isPresented: $showAPIKeySettings, onDismiss: {
+                        do {
+                            hasAPIKey = try keychainService.hasAPIKey()
+                        } catch {
+                            hasAPIKey = false
+                            Self.logger.error("Keychain read failed on settings dismiss: \(error, privacy: .public)")
+                        }
+                    }) {
+                        NavigationStack {
+                            APIKeySettingsView()
+                                .toolbar {
+                                    ToolbarItem(placement: .topBarTrailing) {
+                                        Button("Done") { showAPIKeySettings = false }
+                                    }
+                                }
+                        }
+                    }
+                    // RATIONALE: ArticleSummaryView has no navigation path to API key settings,
+                    // so no hasAPIKey cache refresh is needed on dismiss.
+                    .sheet(isPresented: $showSummary) {
+                        ArticleSummaryView(
+                            article: article.toArticle(),
+                            preExtractedContent: extractionState.content,
+                            persistentArticle: article,
+                            persistence: persistence
+                        )
+                    }
+                    .alert("Error", isPresented: errorAlertBinding) {
+                        Button("OK") { errorMessage = nil }
+                    } message: {
+                        Text(errorMessage ?? "")
+                    }
+            }
         }
     }
 
