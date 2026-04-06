@@ -128,9 +128,10 @@ final class HomeViewModel {
     }
 
     /// Loads the next page of all articles and appends to the existing list.
-    func loadMoreAllArticles() {
+    @discardableResult
+    func loadMoreAllArticles() -> LoadMoreResult {
         let ascending = sortAscending
-        loadMorePage(
+        return loadMorePage(
             into: &allArticlesList,
             hasMore: &hasMoreAllArticles,
             fetch: { offset, limit in try self.persistence.allArticles(offset: offset, limit: limit, ascending: ascending) },
@@ -138,12 +139,14 @@ final class HomeViewModel {
         )
     }
 
-    /// Loads the next page of all articles and returns whether new articles were loaded.
-    /// Used by the article reader to trigger pagination when the user navigates past the last loaded article.
-    func loadMoreAllArticlesAndReport() -> Bool {
-        let countBefore = allArticlesList.count
-        loadMoreAllArticles()
-        return allArticlesList.count > countBefore
+    /// Loads the next page of all articles and returns the outcome, clearing `errorMessage` on failure
+    /// so only the caller (article reader) displays the error — not the list view's alert.
+    func loadMoreAllArticlesAndReport() -> LoadMoreResult {
+        let result = loadMoreAllArticles()
+        if case .failed = result {
+            errorMessage = nil
+        }
+        return result
     }
 
     // MARK: - Unread Articles (paginated)
@@ -161,9 +164,10 @@ final class HomeViewModel {
     }
 
     /// Loads the next page of unread articles and appends to the existing list.
-    func loadMoreUnreadArticles() {
+    @discardableResult
+    func loadMoreUnreadArticles() -> LoadMoreResult {
         let ascending = sortAscending
-        loadMorePage(
+        return loadMorePage(
             into: &unreadArticlesList,
             hasMore: &hasMoreUnreadArticles,
             fetch: { offset, limit in try self.persistence.allUnreadArticles(offset: offset, limit: limit, ascending: ascending) },
@@ -171,12 +175,14 @@ final class HomeViewModel {
         )
     }
 
-    /// Loads the next page of unread articles and returns whether new articles were loaded.
-    /// Used by the article reader to trigger pagination when the user navigates past the last loaded article.
-    func loadMoreUnreadArticlesAndReport() -> Bool {
-        let countBefore = unreadArticlesList.count
-        loadMoreUnreadArticles()
-        return unreadArticlesList.count > countBefore
+    /// Loads the next page of unread articles and returns the outcome, clearing `errorMessage` on failure
+    /// so only the caller (article reader) displays the error — not the list view's alert.
+    func loadMoreUnreadArticlesAndReport() -> LoadMoreResult {
+        let result = loadMoreUnreadArticles()
+        if case .failed = result {
+            errorMessage = nil
+        }
+        return result
     }
 
     // MARK: - Saved Articles (paginated)
@@ -195,8 +201,9 @@ final class HomeViewModel {
 
     /// Loads the next page of saved articles and appends to the existing list.
     /// Saved articles are always sorted by `savedDate` descending (most recently saved first).
-    func loadMoreSavedArticles() {
-        loadMorePage(
+    @discardableResult
+    func loadMoreSavedArticles() -> LoadMoreResult {
+        return loadMorePage(
             into: &savedArticlesList,
             hasMore: &hasMoreSavedArticles,
             fetch: { offset, limit in try self.persistence.allSavedArticles(offset: offset, limit: limit) },
@@ -204,12 +211,14 @@ final class HomeViewModel {
         )
     }
 
-    /// Loads the next page of saved articles and returns whether new articles were loaded.
-    /// Used by the article reader to trigger pagination when the user navigates past the last loaded article.
-    func loadMoreSavedArticlesAndReport() -> Bool {
-        let countBefore = savedArticlesList.count
-        loadMoreSavedArticles()
-        return savedArticlesList.count > countBefore
+    /// Loads the next page of saved articles and returns the outcome, clearing `errorMessage` on failure
+    /// so only the caller (article reader) displays the error — not the list view's alert.
+    func loadMoreSavedArticlesAndReport() -> LoadMoreResult {
+        let result = loadMoreSavedArticles()
+        if case .failed = result {
+            errorMessage = nil
+        }
+        return result
     }
 
     // MARK: - Pagination Helpers
@@ -221,8 +230,8 @@ final class HomeViewModel {
         hasMore: inout Bool,
         fetch: (_ offset: Int, _ limit: Int) throws -> [PersistentArticle],
         label: String
-    ) {
-        guard hasMore else { return }
+    ) -> LoadMoreResult {
+        guard hasMore else { return .exhausted }
         do {
             let page = try fetch(list.count, Self.pageSize)
             let existingIDs = Set(list.map(\.articleID))
@@ -231,10 +240,13 @@ final class HomeViewModel {
             hasMore = page.count == Self.pageSize
             let totalCount = list.count
             Self.logger.debug("Loaded page of \(page.count, privacy: .public) \(label, privacy: .public) (\(newItems.count, privacy: .public) new, total: \(totalCount, privacy: .public))")
+            return newItems.isEmpty ? .exhausted : .loaded
         } catch {
             hasMore = false
-            errorMessage = "Unable to load \(label)."
+            let message = "Unable to load \(label)."
+            errorMessage = message
             Self.logger.error("Failed to load \(label) page: \(error, privacy: .public)")
+            return .failed(message)
         }
     }
 
