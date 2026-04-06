@@ -1510,7 +1510,7 @@ struct HomeViewModelTests {
         #expect(viewModel.unreadArticlesList.count == 1)
     }
 
-    @Test("loadMoreUnreadArticlesAndReport returns .failed on persistence error")
+    @Test("loadMoreUnreadArticlesAndReport returns .failed on persistence error and preserves hasMore for retry")
     @MainActor
     func loadMoreUnreadArticlesAndReportReturnsFailed() {
         let feed = TestFixtures.makePersistentFeed()
@@ -1602,7 +1602,7 @@ struct HomeViewModelTests {
         #expect(viewModel.savedArticlesList.count == 1)
     }
 
-    @Test("loadMoreSavedArticlesAndReport returns .failed on persistence error")
+    @Test("loadMoreSavedArticlesAndReport returns .failed on persistence error and preserves hasMore for retry")
     @MainActor
     func loadMoreSavedArticlesAndReportReturnsFailed() {
         let feed = TestFixtures.makePersistentFeed()
