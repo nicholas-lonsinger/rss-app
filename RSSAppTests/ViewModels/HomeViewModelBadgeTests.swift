@@ -2,8 +2,8 @@ import Testing
 import Foundation
 @testable import RSSApp
 
-@Suite("AppBadgeService Tests — HomeViewModel Integration")
-struct AppBadgeServiceTests {
+@Suite("HomeViewModel Badge Integration Tests")
+struct HomeViewModelBadgeTests {
 
     // MARK: - Badge updates on loadUnreadCount
 

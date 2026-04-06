@@ -46,6 +46,10 @@ struct AppBadgeView: View {
 
     @State private var selectedMode: AppBadgeMode
     let homeViewModel: HomeViewModel
+    // RATIONALE: Concrete AppBadgeService instead of `any AppBadgeUpdating` because
+    // the protocol's `badgeMode` setter requires mutable access through existentials,
+    // which is incompatible with SwiftUI's immutable view structs. Views don't need
+    // mock injection — the protocol abstraction is used in HomeViewModel for testing.
     private let badgeService: AppBadgeService
 
     init(
@@ -88,10 +92,8 @@ struct AppBadgeView: View {
     private func applyBadgeChange(mode: AppBadgeMode) async {
         if mode == .off {
             await badgeService.clearBadge()
-            Self.logger.notice("Badge cleared (mode set to Off)")
         } else {
             await homeViewModel.updateBadge()
-            Self.logger.notice("Badge updated (mode set to '\(mode.rawValue, privacy: .public)')")
         }
     }
 }

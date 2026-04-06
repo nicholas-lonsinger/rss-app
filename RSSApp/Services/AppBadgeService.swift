@@ -47,6 +47,12 @@ struct AppBadgeService: AppBadgeUpdating {
     }
 
     func updateBadge(unreadCount: Int) async {
+        if unreadCount < 0 {
+            Self.logger.warning("updateBadge called with negative count \(unreadCount, privacy: .public) — clamping to 0")
+            await clearBadge()
+            return
+        }
+
         let mode = badgeMode
         Self.logger.debug("updateBadge(unreadCount: \(unreadCount, privacy: .public)) with mode '\(mode.rawValue, privacy: .public)'")
 
@@ -67,15 +73,16 @@ struct AppBadgeService: AppBadgeUpdating {
     // MARK: - Private
 
     private func setBadgeCount(_ count: Int) async {
+        let clampedCount = max(0, count)
         guard await requestPermissionIfNeeded() else {
             Self.logger.warning("Badge permission not granted — skipping badge update")
             return
         }
         do {
-            try await notificationCenter.setBadgeCount(count)
-            Self.logger.debug("Badge count set to \(count, privacy: .public)")
+            try await notificationCenter.setBadgeCount(clampedCount)
+            Self.logger.debug("Badge count set to \(clampedCount, privacy: .public)")
         } catch {
-            Self.logger.error("Failed to set badge count to \(count, privacy: .public): \(error, privacy: .public)")
+            Self.logger.error("Failed to set badge count to \(clampedCount, privacy: .public): \(error, privacy: .public)")
         }
     }
 
@@ -86,7 +93,7 @@ struct AppBadgeService: AppBadgeUpdating {
         case .authorized, .provisional, .ephemeral:
             return true
         case .denied:
-            Self.logger.info("Notification authorization denied — badge cannot be updated")
+            Self.logger.warning("Notification authorization denied — badge cannot be updated")
             return false
         case .notDetermined:
             Self.logger.debug("Requesting badge-only notification authorization")
@@ -95,7 +102,7 @@ struct AppBadgeService: AppBadgeUpdating {
                 if granted {
                     Self.logger.notice("Badge-only notification authorization granted")
                 } else {
-                    Self.logger.info("Badge-only notification authorization denied by user")
+                    Self.logger.warning("Badge-only notification authorization denied by user")
                 }
                 return granted
             } catch {

@@ -43,7 +43,7 @@ struct HomeView: View {
                 case .savedArticles:
                     SavedArticlesView(persistence: persistence, homeViewModel: viewModel)
                 case .allFeeds:
-                    FeedListView(persistence: persistence, isEmbedded: true)
+                    FeedListView(persistence: persistence, isEmbedded: true, homeViewModel: viewModel)
                 }
             }
             .navigationDestination(for: SettingsDestination.self) { destination in
