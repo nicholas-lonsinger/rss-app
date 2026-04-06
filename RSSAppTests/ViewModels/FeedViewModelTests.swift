@@ -306,6 +306,108 @@ struct FeedViewModelTests {
         #expect(article.isRead == false)
     }
 
+    // MARK: - Stable List Snapshot
+
+    @Test("toggleReadStatus does not change article list")
+    @MainActor
+    func toggleReadStatusKeepsListStable() async {
+        let feed = TestFixtures.makePersistentFeed(feedURL: URL(string: "https://example.com/feed")!)
+        let mock = MockFeedFetchingService()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+
+        let article1 = TestFixtures.makePersistentArticle(articleID: "a1", isRead: false)
+        article1.feed = feed
+        let article2 = TestFixtures.makePersistentArticle(articleID: "a2", isRead: true)
+        article2.feed = feed
+        mockPersistence.articlesByFeedID[feed.id] = [article1, article2]
+
+        mock.feedToReturn = TestFixtures.makeFeed()
+
+        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
+        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence)
+        await viewModel.loadFeed()
+
+        let countBefore = viewModel.articles.count
+        let idsBefore = viewModel.articles.map(\.articleID)
+
+        // Toggle read status — list should remain stable
+        viewModel.toggleReadStatus(article1)
+
+        #expect(article1.isRead == true)
+        #expect(viewModel.articles.count == countBefore)
+        #expect(viewModel.articles.map(\.articleID) == idsBefore)
+
+        // Clean up
+        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
+    }
+
+    @Test("markAsRead does not change article list")
+    @MainActor
+    func markAsReadKeepsListStable() async {
+        let feed = TestFixtures.makePersistentFeed(feedURL: URL(string: "https://example.com/feed")!)
+        let mock = MockFeedFetchingService()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+
+        let article1 = TestFixtures.makePersistentArticle(articleID: "a1", isRead: false)
+        article1.feed = feed
+        let article2 = TestFixtures.makePersistentArticle(articleID: "a2", isRead: true)
+        article2.feed = feed
+        mockPersistence.articlesByFeedID[feed.id] = [article1, article2]
+
+        mock.feedToReturn = TestFixtures.makeFeed()
+
+        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
+        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence)
+        await viewModel.loadFeed()
+
+        let countBefore = viewModel.articles.count
+        let idsBefore = viewModel.articles.map(\.articleID)
+
+        // Mark as read — list should remain stable
+        viewModel.markAsRead(article1)
+
+        #expect(article1.isRead == true)
+        #expect(viewModel.articles.count == countBefore)
+        #expect(viewModel.articles.map(\.articleID) == idsBefore)
+
+        // Clean up
+        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
+    }
+
+    @Test("reloadArticles refreshes list from persistence")
+    @MainActor
+    func reloadArticlesRefreshesList() async {
+        let feed = TestFixtures.makePersistentFeed(feedURL: URL(string: "https://example.com/feed")!)
+        let mock = MockFeedFetchingService()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+
+        let article = TestFixtures.makePersistentArticle(articleID: "a1", isRead: false)
+        article.feed = feed
+        mockPersistence.articlesByFeedID[feed.id] = [article]
+
+        mock.feedToReturn = TestFixtures.makeFeed()
+
+        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
+        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence)
+        await viewModel.loadFeed()
+        #expect(viewModel.articles.count == 1)
+
+        // Add another article to persistence
+        let article2 = TestFixtures.makePersistentArticle(articleID: "a2", isRead: false)
+        article2.feed = feed
+        mockPersistence.articlesByFeedID[feed.id] = [article, article2]
+
+        // reloadArticles should pick up the new article
+        viewModel.reloadArticles()
+        #expect(viewModel.articles.count == 2)
+
+        // Clean up
+        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
+    }
+
     @Test("loadFeed clears error on successful retry")
     @MainActor
     func loadFeedClearsErrorOnRetry() async {

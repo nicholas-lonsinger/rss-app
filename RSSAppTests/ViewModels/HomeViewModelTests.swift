@@ -371,11 +371,11 @@ struct HomeViewModelTests {
         #expect(viewModel.hasMoreAllArticles == false)
     }
 
-    // MARK: - Remove From Unread List
+    // MARK: - Stable List Snapshot
 
-    @Test("removeFromUnreadList removes article by ID")
+    @Test("toggleReadStatus does not remove article from unread list")
     @MainActor
-    func removeFromUnreadListRemovesArticle() {
+    func toggleReadStatusKeepsArticleInUnreadList() {
         let feed = TestFixtures.makePersistentFeed()
         let mockPersistence = MockFeedPersistenceService()
         mockPersistence.feeds = [feed]
@@ -390,9 +390,57 @@ struct HomeViewModelTests {
         viewModel.loadUnreadArticles()
         #expect(viewModel.unreadArticlesList.count == 2)
 
-        viewModel.removeFromUnreadList(article1)
-        #expect(viewModel.unreadArticlesList.count == 1)
-        #expect(viewModel.unreadArticlesList[0].articleID == "u2")
+        // Mark article as read — list should remain stable (no removal)
+        viewModel.toggleReadStatus(article1)
+        #expect(article1.isRead == true)
+        #expect(viewModel.unreadArticlesList.count == 2)
+    }
+
+    @Test("markAsRead does not remove article from unread list")
+    @MainActor
+    func markAsReadKeepsArticleInUnreadList() {
+        let feed = TestFixtures.makePersistentFeed()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+
+        let article1 = TestFixtures.makePersistentArticle(articleID: "u1", isRead: false)
+        article1.feed = feed
+        let article2 = TestFixtures.makePersistentArticle(articleID: "u2", isRead: false)
+        article2.feed = feed
+        mockPersistence.articlesByFeedID[feed.id] = [article1, article2]
+
+        let viewModel = HomeViewModel(persistence: mockPersistence)
+        viewModel.loadUnreadArticles()
+        #expect(viewModel.unreadArticlesList.count == 2)
+
+        // Mark article as read — list should remain stable (no removal)
+        let result = viewModel.markAsRead(article1)
+        #expect(result == true)
+        #expect(article1.isRead == true)
+        #expect(viewModel.unreadArticlesList.count == 2)
+    }
+
+    @Test("toggleReadStatus does not remove article from all articles list")
+    @MainActor
+    func toggleReadStatusKeepsArticleInAllArticlesList() {
+        let feed = TestFixtures.makePersistentFeed()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+
+        let article1 = TestFixtures.makePersistentArticle(articleID: "a1", isRead: false)
+        article1.feed = feed
+        let article2 = TestFixtures.makePersistentArticle(articleID: "a2", isRead: true)
+        article2.feed = feed
+        mockPersistence.articlesByFeedID[feed.id] = [article1, article2]
+
+        let viewModel = HomeViewModel(persistence: mockPersistence)
+        viewModel.loadAllArticles()
+        #expect(viewModel.allArticlesList.count == 2)
+
+        // Toggle read status — list should remain stable
+        viewModel.toggleReadStatus(article1)
+        #expect(article1.isRead == true)
+        #expect(viewModel.allArticlesList.count == 2)
     }
 
     // MARK: - Read Status

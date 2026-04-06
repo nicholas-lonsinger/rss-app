@@ -153,10 +153,11 @@ final class FeedViewModel {
         }
     }
 
-    // MARK: - Private Helpers
+    // MARK: - Reload
 
     /// Reloads the article list from the beginning, preserving the current display depth.
-    private func reloadArticles() {
+    /// Called on explicit triggers: sort/filter change, mark all as read, navigation return.
+    func reloadArticles() {
         let reloadLimit = max(articles.count, Self.pageSize)
         do {
             articles = try fetchCurrentPage(offset: 0, limit: reloadLimit, ascending: sortAscending)
