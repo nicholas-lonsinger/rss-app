@@ -32,7 +32,12 @@ struct ArticleReaderView: View {
         guard articles.indices.contains(currentIndex) else {
             Self.logger.fault("currentIndex \(self.currentIndex, privacy: .public) out of bounds for \(self.articles.count, privacy: .public) articles")
             assertionFailure("currentIndex \(currentIndex) out of bounds for \(articles.count) articles")
-            return articles[max(0, articles.count - 1)]
+            guard !articles.isEmpty else {
+                Self.logger.fault("articles array is empty — returning sentinel article")
+                assertionFailure("article accessed with empty articles array")
+                return PersistentArticle(articleID: "", title: "")
+            }
+            return articles[min(currentIndex, articles.count - 1)]
         }
         return articles[currentIndex]
     }
