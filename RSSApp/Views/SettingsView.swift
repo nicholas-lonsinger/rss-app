@@ -16,12 +16,64 @@ struct SettingsView: View {
             }
 
             NavigationLink {
+                ArticleLimitView()
+            } label: {
+                Label("Article Limit", systemImage: "tray.full")
+            }
+
+            NavigationLink {
                 ImportExportView(persistence: persistence, viewModel: viewModel)
             } label: {
                 Label("Import / Export", systemImage: "arrow.up.arrow.down")
             }
         }
         .navigationTitle("Settings")
+    }
+}
+
+// MARK: - Article Limit Sub-screen
+
+struct ArticleLimitView: View {
+
+    @State private var selectedLimit: ArticleLimit
+
+    init() {
+        let stored = UserDefaults.standard.integer(
+            forKey: ArticleRetentionService.articleLimitDefaultsKey
+        )
+        _selectedLimit = State(
+            initialValue: ArticleLimit(rawValue: stored) ?? .defaultLimit
+        )
+    }
+
+    var body: some View {
+        List {
+            Section {
+                ForEach(ArticleLimit.allCases) { limit in
+                    Button {
+                        selectedLimit = limit
+                        UserDefaults.standard.set(
+                            limit.rawValue,
+                            forKey: ArticleRetentionService.articleLimitDefaultsKey
+                        )
+                    } label: {
+                        HStack {
+                            Text(limit.displayLabel)
+                                .foregroundStyle(.primary)
+                            Spacer()
+                            if limit == selectedLimit {
+                                Image(systemName: "checkmark")
+                                    .foregroundStyle(.blue)
+                                    .fontWeight(.semibold)
+                            }
+                        }
+                    }
+                }
+            } footer: {
+                Text("The maximum number of articles stored across all feeds. Oldest articles are removed during feed refresh when the limit is exceeded.")
+            }
+        }
+        .navigationTitle("Article Limit")
     }
 }
 

@@ -26,6 +26,7 @@ RSSApp/
 │   └── SubscribedFeed.swift            # Legacy feed subscription struct (Codable) — retained for UserDefaults migration and OPML export
 ├── Services/                           # Business logic and networking
 │   ├── ArticleExtractionService.swift  # WKWebView + domSerializer.js + native content extraction
+│   ├── ArticleRetentionService.swift   # ArticleRetaining protocol + ArticleLimit enum + retention enforcement (oldest-first cleanup with thumbnail deletion)
 │   ├── CandidateScorer.swift           # Readability-style DOM scoring to find article content node
 │   ├── ClaudeAPIService.swift          # Claude API client — streaming SSE via URLSessionBytesProviding (injectable, defaults to URLSession.shared)
 │   ├── ContentAssembler.swift          # Reconstructs clean HTML + plain text from winning DOM subtree
@@ -34,7 +35,7 @@ RSSApp/
 │   ├── FeedFetchingService.swift       # FeedFetching protocol + URLSession implementation
 │   ├── ArticleThumbnailService.swift   # ArticleThumbnailCaching protocol + thumbnail download, resize-to-120px, JPEG disk caching
 │   ├── FeedIconService.swift           # FeedIconResolving protocol + icon URL resolution (feed XML → site HTML → /favicon.ico) and file-system caching
-│   ├── FeedPersistenceService.swift    # FeedPersisting protocol + SwiftData implementation (feeds, articles, content cache, read/unread, bulk mark all read, sort order)
+│   ├── FeedPersistenceService.swift    # FeedPersisting protocol + SwiftData implementation (feeds, articles, content cache, read/unread, bulk mark all read, sort order, article count + bulk delete for retention cleanup)
 │   ├── FeedStorageService.swift        # FeedStoring protocol + UserDefaults persistence — retained for migration only
 │   ├── FeedURLValidator.swift          # Shared URL normalization + validation (trim, scheme prepend, HTTP/HTTPS + host check)
 │   ├── UserDefaultsMigrationService.swift # One-time migration from UserDefaults SubscribedFeed list to SwiftData PersistentFeed
@@ -92,6 +93,7 @@ RSSAppTests/
 │   └── WebViewTestHelpers.swift        # WKWebView-based serialization helpers for integration tests
 ├── Mocks/
 │   ├── MockArticleExtractionService.swift  # ArticleExtracting mock with injectable content/errors
+│   ├── MockArticleRetentionService.swift   # ArticleRetaining mock with call count tracking
 │   ├── MockArticleThumbnailService.swift   # ArticleThumbnailCaching mock with injectable cache results
 │   ├── MockClaudeAPIService.swift          # ClaudeAPIServicing mock with injectable chunks/errors
 │   ├── MockContentExtractor.swift          # ContentExtracting mock with injectable results
@@ -109,6 +111,7 @@ RSSAppTests/
 │   ├── HomeGroupTests.swift            # HomeGroup enum cases, IDs, properties, Hashable conformance
 │   └── SubscribedFeedTests.swift       # updatingMetadata preserves identity, does not mutate
 ├── Services/
+│   ├── ArticleRetentionServiceTests.swift # ArticleLimit enum validation, retention enforcement, thumbnail cleanup, cross-feed global cleanup, error propagation
 │   ├── ArticleThumbnailServiceTests.swift # Thumbnail cache miss, delete safety, filename hashing
 │   ├── CandidateScorerTests.swift      # Content node identification, scoring, pruning
 │   ├── ClaudeAPIServiceSendMessageTests.swift # sendMessage integration — consecutive decode failure counter, stream completion, SSE routing
@@ -118,7 +121,7 @@ RSSAppTests/
 │   ├── DOMSerializerTests.swift        # WKWebView integration — JS serialization fidelity
 │   ├── ExtractionPipelineTests.swift   # Full pipeline: HTML → WKWebView serialize → Swift extract
 │   ├── FeedIconServiceTests.swift      # Icon resolution, caching, HTMLUtilities icon extraction
-│   ├── FeedPersistenceServiceTests.swift # SwiftData CRUD, upsert, read/unread, cross-feed queries, content cache, cascade delete, thumbnail tracking, sort order, mark all as read, unread per-feed queries
+│   ├── FeedPersistenceServiceTests.swift # SwiftData CRUD, upsert, read/unread, cross-feed queries, content cache, cascade delete, thumbnail tracking, sort order, mark all as read, unread per-feed queries, article count + bulk delete for retention cleanup
 │   ├── FeedStorageServiceTests.swift   # Save/load roundtrip, add/remove, empty state (legacy UserDefaults)
 │   ├── HTMLUtilitiesTests.swift        # Tag stripping, entity decoding, image extraction, og:image extraction
 │   ├── UserDefaultsMigrationTests.swift # Migration from UserDefaults to SwiftData, idempotency, ID preservation
@@ -138,7 +141,7 @@ RSSAppTests/
 │   └── HomeViewModelTests.swift            # Unread count, cross-feed article queries, read/unread status, sort order, mark all as read
 ```
 
-**Total: 63 source files + 1 resource, 48 test source files + 1 fixture.**
+**Total: 64 source files + 1 resource, 50 test source files + 1 fixture.**
 
 ## Key Components
 
@@ -159,6 +162,8 @@ The directory tree annotations describe each file's purpose. This section covers
 **Feed icon resolution chain.** `FeedIconService` (`FeedIconResolving` protocol) resolves via priority chain: feed XML image URL → site homepage HTML meta tags (apple-touch-icon, `link rel="icon"`) → `/favicon.ico` fallback. Downloads the resolved image, normalizes to PNG (resizing if larger than 128px), and caches to `{cachesDirectory}/feed-icons/{feedID}.png`. `FeedIconView` loads cached PNG from disk with globe placeholder fallback. Resolution triggered by `FeedListViewModel` during refresh and `AddFeedViewModel` during feed add.
 
 **Article thumbnail resolution and prefetch.** `ArticleThumbnailService` (`ArticleThumbnailCaching` protocol) resolves via: direct thumbnail URL from the feed → `og:image` meta tag from the article's web page (via `HTMLUtilities.extractOGImageURL`). Resizes to 120×120px (aspect-fill + center-crop), caches as JPEG to `{cachesDirectory}/article-thumbnails/{SHA256(articleID)}.jpg`. `ThumbnailPrefetchService` (`ThumbnailPrefetching` protocol) eagerly downloads thumbnails during feed refresh: queries `PersistentArticle` records where `isThumbnailCached == false && thumbnailRetryCount < maxRetryCount`, downloads up to 4 thumbnails concurrently, retries transient failures within a cycle with exponential backoff, and increments `thumbnailRetryCount` on failure so broken URLs stop retrying after the cap (3 attempts). Kicked off by `FeedListViewModel.refreshAllFeeds()` as a background `Task(priority: .utility)` after feed save. `ArticleThumbnailView` reads from disk cache first; on-demand resolution is retained as fallback for articles predating the prefetch feature or whose prefetch is still in progress.
+
+**Article retention cleanup.** `ArticleRetentionService` (`ArticleRetaining` protocol) enforces a configurable article limit. The `ArticleLimit` enum defines seven options (1,000 to 25,000, default 10,000), persisted in UserDefaults under `articleRetentionLimit`. `enforceArticleLimit(persistence:thumbnailService:)` counts all articles, fetches the oldest exceeding the limit sorted by `publishedDate` ascending, deletes their cached thumbnail JPEG files via `ArticleThumbnailCaching.deleteCachedThumbnail(for:)`, then bulk-deletes the `PersistentArticle` records (cascade-deleting `PersistentArticleContent`). Triggered by `FeedListViewModel.refreshAllFeeds()` after refresh results are committed and before thumbnail prefetch. The Settings page exposes an `ArticleLimitView` sub-screen for user configuration.
 
 ## Data Flow
 
@@ -220,12 +225,16 @@ RSSAppApp (@main)
 | Global sort order in UserDefaults | Single `articleSortAscending` key shared between `FeedViewModel` and `HomeViewModel`; changing the preference triggers an immediate reload of the current article list |
 | Article list toolbar menu | `ellipsis.circle` menu on all article list views; sort order + mark all as read on all views; read/unread filter only on `ArticleListView` (per-feed) since `AllArticlesView` and `UnreadArticlesView` have fixed scope |
 | Confirmation dialog for mark all as read | Destructive bulk operation always requires user confirmation regardless of view |
+| Article retention limit in UserDefaults | Consistent with existing preferences (`articleSortAscending`, Claude API config); `ArticleLimit` enum constrains valid options; invalid stored values fall back to default (10,000) |
+| Global oldest-first cleanup across feeds | Deleting by global `publishedDate` regardless of feed keeps the most recent content; per-feed cleanup would unevenly penalize high-volume feeds |
+| Cleanup after refresh, before prefetch | Runs after new articles are committed (so the count reflects the latest state) but before thumbnail prefetch (so we don't download thumbnails for articles about to be deleted) |
+| Thumbnail file deletion during article cleanup | SwiftData cascade delete removes `PersistentArticleContent` automatically, but disk-cached JPEG thumbnails are not auto-deleted; explicit `deleteCachedThumbnail(for:)` calls before record deletion prevent orphaned files |
 
 ## Test Coverage
 
-**48 test files: 31 test suites, 12 mock implementations, 4 shared helpers, 1 HTML fixture.**
+**50 test files: 32 test suites, 13 mock implementations, 4 shared helpers, 1 HTML fixture.**
 
-**Patterns:** Swift Testing (`@Suite`, `@Test`, `#expect`). Protocol-based dependency injection with 12 mocks (`MockFeedPersistenceService`, `MockFeedFetchingService`, `MockFeedIconService`, `MockArticleThumbnailService`, `MockThumbnailPrefetchService`, `MockOPMLService`, `MockClaudeAPIService`, `MockKeychainService`, `MockArticleExtractionService`, `MockContentExtractor`, `MockFeedStorageService`, `MockURLSessionBytesProvider`). In-memory `ModelContainer` via `SwiftDataTestHelpers` for SwiftData integration tests. `WKWebView` integration tests via `WebViewTestHelpers` for DOM serialization and extraction pipeline. `MockURLSessionBytesProvider` with `URLProtocol` interception for `ClaudeAPIService.sendMessage` integration tests. Shared `TestFixtures` factory methods for `Article`, `RSSFeed`, `PersistentFeed`, `PersistentArticle`, and sample RSS XML.
+**Patterns:** Swift Testing (`@Suite`, `@Test`, `#expect`). Protocol-based dependency injection with 13 mocks (`MockFeedPersistenceService`, `MockFeedFetchingService`, `MockFeedIconService`, `MockArticleThumbnailService`, `MockThumbnailPrefetchService`, `MockOPMLService`, `MockClaudeAPIService`, `MockKeychainService`, `MockArticleExtractionService`, `MockContentExtractor`, `MockFeedStorageService`, `MockURLSessionBytesProvider`, `MockArticleRetentionService`). In-memory `ModelContainer` via `SwiftDataTestHelpers` for SwiftData integration tests. `WKWebView` integration tests via `WebViewTestHelpers` for DOM serialization and extraction pipeline. `MockURLSessionBytesProvider` with `URLProtocol` interception for `ClaudeAPIService.sendMessage` integration tests. Shared `TestFixtures` factory methods for `Article`, `RSSFeed`, `PersistentFeed`, `PersistentArticle`, and sample RSS XML.
 
 **Well-covered:** All models, services, and view models have test suites with mock injection — including happy paths, error paths, edge cases, and state transitions.
 

@@ -1449,4 +1449,75 @@ struct FeedListViewModelTests {
 
         #expect(mockPrefetcher.prefetchCallCount == 1)
     }
+
+    // MARK: - Article Retention Cleanup
+
+    @Test("refreshAllFeeds invokes article retention enforcement after refresh")
+    @MainActor
+    func refreshAllFeedsInvokesRetentionCleanup() async {
+        let url = URL(string: "https://example.com/feed")!
+        let feed = TestFixtures.makePersistentFeed(title: "Feed", feedURL: url)
+
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+        let mockFetching = MockFeedFetchingService()
+        mockFetching.feedsByURL = [url: TestFixtures.makeFeed(title: "Updated")]
+        let mockRetention = MockArticleRetentionService()
+        let mockPrefetcher = MockThumbnailPrefetchService()
+
+        let viewModel = FeedListViewModel(
+            persistence: mockPersistence,
+            feedFetching: mockFetching,
+            feedIconService: MockFeedIconService(),
+            thumbnailPrefetcher: mockPrefetcher,
+            articleRetention: mockRetention
+        )
+        viewModel.loadFeeds()
+
+        await withCheckedContinuation { continuation in
+            mockPrefetcher.prefetchContinuation = continuation
+            Task {
+                await viewModel.refreshAllFeeds()
+            }
+        }
+
+        #expect(mockRetention.enforceCallCount == 1)
+    }
+
+    @Test("refreshAllFeeds continues normally when retention enforcement fails")
+    @MainActor
+    func refreshAllFeedsContinuesOnRetentionError() async {
+        let url = URL(string: "https://example.com/feed")!
+        let feed = TestFixtures.makePersistentFeed(title: "Feed", feedURL: url)
+
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+        let mockFetching = MockFeedFetchingService()
+        mockFetching.feedsByURL = [url: TestFixtures.makeFeed(title: "Updated")]
+        let mockRetention = MockArticleRetentionService()
+        mockRetention.enforceError = NSError(domain: "test", code: 1)
+        let mockPrefetcher = MockThumbnailPrefetchService()
+
+        let viewModel = FeedListViewModel(
+            persistence: mockPersistence,
+            feedFetching: mockFetching,
+            feedIconService: MockFeedIconService(),
+            thumbnailPrefetcher: mockPrefetcher,
+            articleRetention: mockRetention
+        )
+        viewModel.loadFeeds()
+
+        await withCheckedContinuation { continuation in
+            mockPrefetcher.prefetchContinuation = continuation
+            Task {
+                await viewModel.refreshAllFeeds()
+            }
+        }
+
+        // Retention failed but refresh still completed successfully
+        #expect(mockRetention.enforceCallCount == 1)
+        #expect(mockPrefetcher.prefetchCallCount == 1)
+        // The retention error should not override the refresh success state
+        #expect(viewModel.isRefreshing == false)
+    }
 }

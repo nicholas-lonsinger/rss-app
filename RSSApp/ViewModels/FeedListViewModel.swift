@@ -20,6 +20,8 @@ final class FeedListViewModel {
     private let feedFetching: FeedFetching
     let feedIconService: FeedIconResolving
     private let thumbnailPrefetcher: ThumbnailPrefetching
+    private let articleRetention: ArticleRetaining
+    private let thumbnailService: ArticleThumbnailCaching
     private var thumbnailPrefetchTask: Task<Void, Never>?
 
     init(
@@ -29,13 +31,17 @@ final class FeedListViewModel {
         feedIconService: FeedIconResolving = FeedIconService(),
         // RATIONALE: Default cannot reference the `persistence` parameter in a default-value
         // expression, so nil-coalescing is used to construct the default inside the body.
-        thumbnailPrefetcher: ThumbnailPrefetching? = nil
+        thumbnailPrefetcher: ThumbnailPrefetching? = nil,
+        articleRetention: ArticleRetaining = ArticleRetentionService(),
+        thumbnailService: ArticleThumbnailCaching = ArticleThumbnailService()
     ) {
         self.persistence = persistence
         self.opmlService = opmlService
         self.feedFetching = feedFetching
         self.feedIconService = feedIconService
         self.thumbnailPrefetcher = thumbnailPrefetcher ?? ThumbnailPrefetchService(persistence: persistence)
+        self.articleRetention = articleRetention
+        self.thumbnailService = thumbnailService
     }
 
     func loadFeeds() {
@@ -388,6 +394,17 @@ final class FeedListViewModel {
             errorMessage = "Unable to save updated feeds."
         } else if failureCount > 0 {
             errorMessage = "\(failureCount) of \(feedsToRefresh.count) feed(s) could not be updated."
+        }
+
+        // Enforce article retention limit after refresh — delete oldest articles
+        // that exceed the configured limit, including their disk-cached thumbnails.
+        do {
+            try articleRetention.enforceArticleLimit(
+                persistence: persistence,
+                thumbnailService: thumbnailService
+            )
+        } catch {
+            Self.logger.error("Article retention cleanup failed: \(error, privacy: .public)")
         }
 
         // Cancel any in-flight prefetch from a previous refresh cycle before starting a new one

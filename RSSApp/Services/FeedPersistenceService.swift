@@ -77,6 +77,21 @@ protocol FeedPersisting: Sendable {
     /// Increments the thumbnail retry count for an article after a failed download attempt.
     func incrementThumbnailRetryCount(_ article: PersistentArticle) throws
 
+    // MARK: Article cleanup
+
+    /// Returns the total number of articles across all feeds.
+    func totalArticleCount() throws -> Int
+
+    /// Returns the article IDs of the oldest articles exceeding the given limit,
+    /// sorted by `publishedDate` ascending (oldest first).
+    /// - Parameter limit: The maximum number of articles to retain.
+    /// - Returns: Article IDs that should be deleted, along with their `isThumbnailCached` flag.
+    func oldestArticleIDsExceedingLimit(_ limit: Int) throws -> [(articleID: String, isThumbnailCached: Bool)]
+
+    /// Deletes articles by their article IDs.
+    /// - Parameter articleIDs: The set of article IDs to delete.
+    func deleteArticles(withIDs articleIDs: Set<String>) throws
+
     // MARK: Persistence
 
     func save() throws
@@ -381,5 +396,40 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
         }
         try modelContext.save()
         Self.logger.debug("Cached content for '\(article.title, privacy: .public)'")
+    }
+
+    // MARK: - Article Cleanup
+
+    func totalArticleCount() throws -> Int {
+        let descriptor = FetchDescriptor<PersistentArticle>()
+        return try modelContext.fetchCount(descriptor)
+    }
+
+    func oldestArticleIDsExceedingLimit(_ limit: Int) throws -> [(articleID: String, isThumbnailCached: Bool)] {
+        let totalCount = try totalArticleCount()
+        guard totalCount > limit else { return [] }
+
+        let excess = totalCount - limit
+        var descriptor = FetchDescriptor<PersistentArticle>(
+            sortBy: [SortDescriptor(\.publishedDate, order: .forward)]
+        )
+        descriptor.fetchLimit = excess
+        let articles = try modelContext.fetch(descriptor)
+        Self.logger.debug("Found \(articles.count, privacy: .public) articles exceeding limit of \(limit, privacy: .public)")
+        return articles.map { (articleID: $0.articleID, isThumbnailCached: $0.isThumbnailCached) }
+    }
+
+    func deleteArticles(withIDs articleIDs: Set<String>) throws {
+        guard !articleIDs.isEmpty else { return }
+        let idsArray = Array(articleIDs)
+        let descriptor = FetchDescriptor<PersistentArticle>(
+            predicate: #Predicate { idsArray.contains($0.articleID) }
+        )
+        let articles = try modelContext.fetch(descriptor)
+        for article in articles {
+            modelContext.delete(article)
+        }
+        try modelContext.save()
+        Self.logger.notice("Deleted \(articles.count, privacy: .public) articles during cleanup")
     }
 }
