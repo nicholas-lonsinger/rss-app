@@ -84,11 +84,11 @@ struct SavedArticlesView: View {
                 homeViewModel.markAllAsRead()
             }
         }
-        .fullScreenCover(item: selectedArticleIndexBinding) { _ in
+        .fullScreenCover(item: $selectedArticleIndex.identifiableIndex) { _ in
             ArticleReaderView(
                 persistence: persistence,
                 articles: homeViewModel.savedArticlesList,
-                currentIndex: selectedArticleIndexNonOptionalBinding,
+                currentIndex: $selectedArticleIndex.nonOptionalIndex,
                 loadMore: homeViewModel.hasMoreSavedArticles ? { homeViewModel.loadMoreSavedArticlesAndReport() } : nil
             )
         }
@@ -121,29 +121,6 @@ struct SavedArticlesView: View {
         Binding(
             get: { homeViewModel.errorMessage != nil },
             set: { if !$0 { homeViewModel.clearError() } }
-        )
-    }
-
-    /// Wraps `selectedArticleIndex` as an `Identifiable` binding for `fullScreenCover(item:)`.
-    private var selectedArticleIndexBinding: Binding<IdentifiableIndex?> {
-        Binding(
-            get: { selectedArticleIndex.map { IdentifiableIndex(value: $0) } },
-            set: { selectedArticleIndex = $0?.value }
-        )
-    }
-
-    /// Provides a non-optional binding to the current index for the reader view.
-    /// Defaults to 0 when `selectedArticleIndex` is nil (should never happen while the cover is presented).
-    private var selectedArticleIndexNonOptionalBinding: Binding<Int> {
-        Binding(
-            get: {
-                guard let index = selectedArticleIndex else {
-                    assertionFailure("selectedArticleIndexNonOptionalBinding read while selectedArticleIndex is nil")
-                    return 0
-                }
-                return index
-            },
-            set: { selectedArticleIndex = $0 }
         )
     }
 }
