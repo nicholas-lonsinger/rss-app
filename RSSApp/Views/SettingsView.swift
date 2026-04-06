@@ -16,12 +16,58 @@ struct SettingsView: View {
             }
 
             NavigationLink {
+                ArticleLimitView()
+            } label: {
+                Label("Article Limit", systemImage: "tray.full")
+            }
+
+            NavigationLink {
                 ImportExportView(persistence: persistence, viewModel: viewModel)
             } label: {
                 Label("Import / Export", systemImage: "arrow.up.arrow.down")
             }
         }
         .navigationTitle("Settings")
+    }
+}
+
+// MARK: - Article Limit Sub-screen
+
+struct ArticleLimitView: View {
+
+    @State private var selectedLimit: ArticleLimit
+    private let retentionService: ArticleRetentionService
+
+    init(retentionService: ArticleRetentionService = ArticleRetentionService()) {
+        self.retentionService = retentionService
+        _selectedLimit = State(initialValue: retentionService.articleLimit)
+    }
+
+    var body: some View {
+        List {
+            Section {
+                ForEach(ArticleLimit.allCases) { limit in
+                    Button {
+                        selectedLimit = limit
+                        retentionService.articleLimit = limit
+                    } label: {
+                        HStack {
+                            Text(limit.displayLabel)
+                                .foregroundStyle(.primary)
+                            Spacer()
+                            if limit == selectedLimit {
+                                Image(systemName: "checkmark")
+                                    .foregroundStyle(Color.accentColor)
+                                    .fontWeight(.semibold)
+                            }
+                        }
+                    }
+                }
+            } footer: {
+                Text("The maximum number of articles stored across all feeds. Oldest articles are removed during feed refresh when the limit is exceeded.")
+            }
+        }
+        .navigationTitle("Article Limit")
     }
 }
 

@@ -230,6 +230,36 @@ final class MockFeedPersistenceService: FeedPersisting {
         article.thumbnailRetryCount += 1
     }
 
+    // MARK: - Article Cleanup
+
+    var deleteArticlesCallCount = 0
+    var lastDeletedArticleIDs: Set<String> = []
+
+    func totalArticleCount() throws -> Int {
+        if let error = errorToThrow { throw error }
+        return articlesByFeedID.values.flatMap { $0 }.count
+    }
+
+    func oldestArticleIDsExceedingLimit(_ limit: Int) throws -> [(articleID: String, isThumbnailCached: Bool)] {
+        if let error = errorToThrow { throw error }
+        let all = articlesByFeedID.values
+            .flatMap { $0 }
+            .sorted { ($0.publishedDate ?? .distantPast) < ($1.publishedDate ?? .distantPast) }
+        let totalCount = all.count
+        guard totalCount > limit else { return [] }
+        let excess = totalCount - limit
+        return Array(all.prefix(excess)).map { (articleID: $0.articleID, isThumbnailCached: $0.isThumbnailCached) }
+    }
+
+    func deleteArticles(withIDs articleIDs: Set<String>) throws {
+        if let error = errorToThrow { throw error }
+        deleteArticlesCallCount += 1
+        lastDeletedArticleIDs = articleIDs
+        for feedID in articlesByFeedID.keys {
+            articlesByFeedID[feedID]?.removeAll { articleIDs.contains($0.articleID) }
+        }
+    }
+
     // MARK: - Persistence
 
     func save() throws {

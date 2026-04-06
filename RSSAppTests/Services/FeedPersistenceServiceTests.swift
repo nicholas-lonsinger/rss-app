@@ -823,4 +823,161 @@ struct FeedPersistenceServiceTests {
         try service.markAllArticlesRead(for: feed)
         #expect(try service.unreadCount(for: feed) == 0)
     }
+
+    // MARK: - Article Cleanup
+
+    @Test("totalArticleCount returns zero initially")
+    @MainActor
+    func totalArticleCountEmpty() throws {
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        #expect(try service.totalArticleCount() == 0)
+    }
+
+    @Test("totalArticleCount returns correct count across feeds")
+    @MainActor
+    func totalArticleCountAcrossFeeds() throws {
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed1 = TestFixtures.makePersistentFeed(title: "Feed 1")
+        let feed2 = TestFixtures.makePersistentFeed(title: "Feed 2")
+        try service.addFeed(feed1)
+        try service.addFeed(feed2)
+
+        try service.upsertArticles([
+            TestFixtures.makeArticle(id: "f1-a1"),
+            TestFixtures.makeArticle(id: "f1-a2"),
+        ], for: feed1)
+        try service.upsertArticles([
+            TestFixtures.makeArticle(id: "f2-a1"),
+        ], for: feed2)
+        try service.save()
+
+        #expect(try service.totalArticleCount() == 3)
+    }
+
+    @Test("oldestArticleIDsExceedingLimit returns empty when within limit")
+    @MainActor
+    func oldestArticleIDsWithinLimit() throws {
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+
+        try service.upsertArticles([
+            TestFixtures.makeArticle(id: "a1", publishedDate: Date(timeIntervalSince1970: 1000)),
+            TestFixtures.makeArticle(id: "a2", publishedDate: Date(timeIntervalSince1970: 2000)),
+        ], for: feed)
+        try service.save()
+
+        let result = try service.oldestArticleIDsExceedingLimit(10)
+        #expect(result.isEmpty)
+    }
+
+    @Test("oldestArticleIDsExceedingLimit returns oldest articles exceeding limit")
+    @MainActor
+    func oldestArticleIDsExceedingLimit() throws {
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+
+        try service.upsertArticles([
+            TestFixtures.makeArticle(id: "oldest", publishedDate: Date(timeIntervalSince1970: 1000)),
+            TestFixtures.makeArticle(id: "middle", publishedDate: Date(timeIntervalSince1970: 2000)),
+            TestFixtures.makeArticle(id: "newest", publishedDate: Date(timeIntervalSince1970: 3000)),
+        ], for: feed)
+        try service.save()
+
+        let result = try service.oldestArticleIDsExceedingLimit(1)
+        #expect(result.count == 2)
+        let ids = Set(result.map(\.articleID))
+        #expect(ids.contains("oldest"))
+        #expect(ids.contains("middle"))
+    }
+
+    @Test("oldestArticleIDsExceedingLimit includes isThumbnailCached flag")
+    @MainActor
+    func oldestArticleIDsIncludesThumbnailFlag() throws {
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+
+        try service.upsertArticles([
+            TestFixtures.makeArticle(id: "cached-old", publishedDate: Date(timeIntervalSince1970: 1000)),
+            TestFixtures.makeArticle(id: "uncached-old", publishedDate: Date(timeIntervalSince1970: 2000)),
+            TestFixtures.makeArticle(id: "newest", publishedDate: Date(timeIntervalSince1970: 3000)),
+        ], for: feed)
+
+        let articles = try service.articles(for: feed)
+        let cachedArticle = articles.first { $0.articleID == "cached-old" }!
+        try service.markThumbnailCached(cachedArticle)
+        try service.save()
+
+        let result = try service.oldestArticleIDsExceedingLimit(1)
+        let cachedResult = result.first { $0.articleID == "cached-old" }
+        let uncachedResult = result.first { $0.articleID == "uncached-old" }
+        #expect(cachedResult?.isThumbnailCached == true)
+        #expect(uncachedResult?.isThumbnailCached == false)
+    }
+
+    @Test("deleteArticles removes specified articles")
+    @MainActor
+    func deleteArticlesByID() throws {
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+
+        try service.upsertArticles([
+            TestFixtures.makeArticle(id: "keep"),
+            TestFixtures.makeArticle(id: "delete-1"),
+            TestFixtures.makeArticle(id: "delete-2"),
+        ], for: feed)
+        try service.save()
+
+        try service.deleteArticles(withIDs: ["delete-1", "delete-2"])
+
+        let remaining = try service.articles(for: feed)
+        #expect(remaining.count == 1)
+        #expect(remaining[0].articleID == "keep")
+    }
+
+    @Test("deleteArticles cascade-deletes associated content")
+    @MainActor
+    func deleteArticlesCascadesContent() throws {
+        let (service, container) = try makeService()
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+
+        try service.upsertArticles([
+            TestFixtures.makeArticle(id: "with-content"),
+        ], for: feed)
+        let articles = try service.articles(for: feed)
+        try service.cacheContent(TestFixtures.makeArticleContent(), for: articles[0])
+
+        try service.deleteArticles(withIDs: ["with-content"])
+
+        let contentDescriptor = FetchDescriptor<PersistentArticleContent>()
+        #expect(try container.mainContext.fetchCount(contentDescriptor) == 0)
+    }
+
+    @Test("deleteArticles with empty set is no-op")
+    @MainActor
+    func deleteArticlesEmptySet() throws {
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+
+        try service.upsertArticles([
+            TestFixtures.makeArticle(id: "a1"),
+        ], for: feed)
+        try service.save()
+
+        try service.deleteArticles(withIDs: [])
+
+        #expect(try service.totalArticleCount() == 1)
+    }
 }
