@@ -153,6 +153,15 @@ final class FeedViewModel {
         }
     }
 
+    func toggleSaved(_ article: PersistentArticle) {
+        do {
+            try persistence.toggleArticleSaved(article)
+        } catch {
+            errorMessage = "Unable to update saved status."
+            Self.logger.error("Failed to toggle saved status: \(error, privacy: .public)")
+        }
+    }
+
     // MARK: - Reload
 
     /// Reloads the article list from the beginning, preserving the current display depth.

@@ -579,6 +579,8 @@ enum TestFixtures {
         author: String? = nil,
         categories: [String] = [],
         isRead: Bool = false,
+        isSaved: Bool = false,
+        savedDate: Date? = nil,
         isThumbnailCached: Bool = false,
         thumbnailRetryCount: Int = 0
     ) -> PersistentArticle {
@@ -593,6 +595,8 @@ enum TestFixtures {
             author: author,
             categories: categories,
             isRead: isRead,
+            isSaved: isSaved,
+            savedDate: savedDate,
             isThumbnailCached: isThumbnailCached,
             thumbnailRetryCount: thumbnailRetryCount
         )

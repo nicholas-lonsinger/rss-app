@@ -43,6 +43,17 @@ struct UnreadArticlesView: View {
                         }
                         .tint(article.isRead ? .blue : .gray)
                     }
+                    .swipeActions(edge: .trailing) {
+                        Button {
+                            homeViewModel.toggleSaved(article)
+                        } label: {
+                            Label(
+                                article.isSaved ? "Unsave" : "Save",
+                                systemImage: article.isSaved ? "bookmark.slash" : "bookmark"
+                            )
+                        }
+                        .tint(.orange)
+                    }
                     .onAppear {
                         if article.articleID == homeViewModel.unreadArticlesList.last?.articleID {
                             homeViewModel.loadMoreUnreadArticles()

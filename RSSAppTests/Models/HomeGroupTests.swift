@@ -4,19 +4,20 @@ import Testing
 @Suite("HomeGroup Tests")
 struct HomeGroupTests {
 
-    @Test("allCases contains three groups in order")
+    @Test("allCases contains four groups in order")
     func allCases() {
         let cases = HomeGroup.allCases
-        #expect(cases.count == 3)
+        #expect(cases.count == 4)
         #expect(cases[0] == .allArticles)
         #expect(cases[1] == .unreadArticles)
-        #expect(cases[2] == .allFeeds)
+        #expect(cases[2] == .savedArticles)
+        #expect(cases[3] == .allFeeds)
     }
 
     @Test("each group has a unique id")
     func uniqueIDs() {
         let ids = Set(HomeGroup.allCases.map(\.id))
-        #expect(ids.count == 3)
+        #expect(ids.count == 4)
     }
 
     @Test("titles are non-empty")
@@ -49,6 +50,14 @@ struct HomeGroupTests {
         #expect(group.id == "unread-articles")
     }
 
+    @Test("savedArticles properties")
+    func savedArticlesProperties() {
+        let group = HomeGroup.savedArticles
+        #expect(group.title == "Saved Articles")
+        #expect(group.systemImage == "bookmark.fill")
+        #expect(group.id == "saved-articles")
+    }
+
     @Test("allFeeds properties")
     func allFeedsProperties() {
         let group = HomeGroup.allFeeds
@@ -62,7 +71,8 @@ struct HomeGroupTests {
         var set = Set<HomeGroup>()
         set.insert(.allArticles)
         set.insert(.unreadArticles)
+        set.insert(.savedArticles)
         set.insert(.allFeeds)
-        #expect(set.count == 3)
+        #expect(set.count == 4)
     }
 }

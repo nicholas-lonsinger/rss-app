@@ -23,13 +23,14 @@ struct HomeView: View {
         NavigationStack {
             List(HomeGroup.allCases) { group in
                 NavigationLink(value: group) {
-                    HomeRowView(group: group, unreadCount: unreadCount(for: group))
+                    HomeRowView(group: group, badgeCount: badgeCount(for: group))
                 }
             }
             .listStyle(.plain)
             .refreshable {
                 await viewModel.refreshAllFeeds()
                 viewModel.loadUnreadCount()
+                viewModel.loadSavedCount()
             }
             .navigationTitle("Home")
             .navigationDestination(for: HomeGroup.self) { group in
@@ -38,6 +39,8 @@ struct HomeView: View {
                     AllArticlesView(persistence: persistence, homeViewModel: viewModel)
                 case .unreadArticles:
                     UnreadArticlesView(persistence: persistence, homeViewModel: viewModel)
+                case .savedArticles:
+                    SavedArticlesView(persistence: persistence, homeViewModel: viewModel)
                 case .allFeeds:
                     FeedListView(persistence: persistence, isEmbedded: true)
                 }
@@ -61,6 +64,7 @@ struct HomeView: View {
             }
             .task {
                 viewModel.loadUnreadCount()
+                viewModel.loadSavedCount()
                 feedListViewModel.loadFeeds()
             }
             .alert("Error", isPresented: errorAlertBinding) {
@@ -80,10 +84,12 @@ struct HomeView: View {
         )
     }
 
-    private func unreadCount(for group: HomeGroup) -> Int? {
+    private func badgeCount(for group: HomeGroup) -> Int? {
         switch group {
         case .unreadArticles:
             return viewModel.unreadCount
+        case .savedArticles:
+            return viewModel.savedCount
         case .allArticles, .allFeeds:
             return nil
         }
@@ -95,7 +101,7 @@ struct HomeView: View {
 private struct HomeRowView: View {
 
     let group: HomeGroup
-    let unreadCount: Int?
+    let badgeCount: Int?
 
     var body: some View {
         HStack {
@@ -104,7 +110,7 @@ private struct HomeRowView: View {
 
             Spacer()
 
-            if let count = unreadCount, count > 0 {
+            if let count = badgeCount, count > 0 {
                 Text("\(count)")
                     .font(.caption2.weight(.semibold))
                     .padding(.horizontal, 6)

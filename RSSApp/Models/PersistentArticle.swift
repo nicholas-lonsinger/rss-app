@@ -24,6 +24,11 @@ final class PersistentArticle {
     var isRead: Bool
     var readDate: Date?
 
+    // MARK: - Saved status
+
+    var isSaved: Bool
+    var savedDate: Date?
+
     // MARK: - Thumbnail caching
 
     // RATIONALE: Thumbnail state is stored directly on PersistentArticle rather than in a
@@ -56,6 +61,8 @@ final class PersistentArticle {
         categories: [String] = [],
         isRead: Bool = false,
         readDate: Date? = nil,
+        isSaved: Bool = false,
+        savedDate: Date? = nil,
         isThumbnailCached: Bool = false,
         thumbnailRetryCount: Int = 0,
         fetchedDate: Date = Date()
@@ -71,6 +78,8 @@ final class PersistentArticle {
         self.categories = categories
         self.isRead = isRead
         self.readDate = readDate
+        self.isSaved = isSaved
+        self.savedDate = savedDate
         self.isThumbnailCached = isThumbnailCached
         self.thumbnailRetryCount = thumbnailRetryCount
         self.fetchedDate = fetchedDate

@@ -736,4 +736,64 @@ struct FeedViewModelTests {
         // Clean up
         UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
     }
+
+    // MARK: - Toggle Saved
+
+    @Test("toggleSaved saves an unsaved article")
+    @MainActor
+    func toggleSavedSaves() async {
+        let feed = TestFixtures.makePersistentFeed()
+        let mock = MockFeedFetchingService()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+
+        let article = TestFixtures.makePersistentArticle(articleID: "a1", isSaved: false)
+        article.feed = feed
+        mockPersistence.articlesByFeedID[feed.id] = [article]
+
+        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence)
+        viewModel.toggleSaved(article)
+
+        #expect(article.isSaved)
+        #expect(article.savedDate != nil)
+        #expect(viewModel.errorMessage == nil)
+    }
+
+    @Test("toggleSaved unsaves a saved article")
+    @MainActor
+    func toggleSavedUnsaves() async {
+        let feed = TestFixtures.makePersistentFeed()
+        let mock = MockFeedFetchingService()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+
+        let article = TestFixtures.makePersistentArticle(
+            articleID: "a1",
+            isSaved: true,
+            savedDate: Date()
+        )
+        article.feed = feed
+        mockPersistence.articlesByFeedID[feed.id] = [article]
+
+        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence)
+        viewModel.toggleSaved(article)
+
+        #expect(!article.isSaved)
+        #expect(article.savedDate == nil)
+    }
+
+    @Test("toggleSaved sets errorMessage on failure")
+    @MainActor
+    func toggleSavedError() async {
+        let feed = TestFixtures.makePersistentFeed()
+        let mock = MockFeedFetchingService()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.errorToThrow = NSError(domain: "test", code: 1)
+
+        let article = TestFixtures.makePersistentArticle(articleID: "a1")
+        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence)
+        viewModel.toggleSaved(article)
+
+        #expect(viewModel.errorMessage != nil)
+    }
 }

@@ -1,6 +1,6 @@
 import SwiftUI
 
-struct AllArticlesView: View {
+struct SavedArticlesView: View {
     let persistence: FeedPersisting
     let homeViewModel: HomeViewModel
 
@@ -12,14 +12,14 @@ struct AllArticlesView: View {
 
     var body: some View {
         Group {
-            if homeViewModel.allArticlesList.isEmpty {
+            if homeViewModel.savedArticlesList.isEmpty {
                 ContentUnavailableView {
-                    Label("No Articles", systemImage: "doc.text")
+                    Label("No Saved Articles", systemImage: "bookmark")
                 } description: {
-                    Text("Articles from your feeds will appear here.")
+                    Text("Saved articles will appear here.")
                 }
             } else {
-                List(homeViewModel.allArticlesList, id: \.articleID) { article in
+                List(homeViewModel.savedArticlesList, id: \.articleID) { article in
                     Button {
                         if homeViewModel.markAsRead(article) {
                             selectedArticle = article
@@ -46,39 +46,25 @@ struct AllArticlesView: View {
                     .swipeActions(edge: .trailing) {
                         Button {
                             homeViewModel.toggleSaved(article)
+                            homeViewModel.loadSavedArticles()
                         } label: {
-                            Label(
-                                article.isSaved ? "Unsave" : "Save",
-                                systemImage: article.isSaved ? "bookmark.slash" : "bookmark"
-                            )
+                            Label("Unsave", systemImage: "bookmark.slash")
                         }
                         .tint(.orange)
                     }
                     .onAppear {
-                        if article.articleID == homeViewModel.allArticlesList.last?.articleID {
-                            homeViewModel.loadMoreAllArticles()
+                        if article.articleID == homeViewModel.savedArticlesList.last?.articleID {
+                            homeViewModel.loadMoreSavedArticles()
                         }
                     }
                 }
                 .listStyle(.plain)
             }
         }
-        .navigationTitle("All Articles")
+        .navigationTitle("Saved Articles")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
-                    Button {
-                        homeViewModel.sortAscending.toggle()
-                        homeViewModel.loadAllArticles()
-                    } label: {
-                        Label(
-                            homeViewModel.sortAscending ? "Newest First" : "Oldest First",
-                            systemImage: homeViewModel.sortAscending ? "arrow.down" : "arrow.up"
-                        )
-                    }
-
-                    Divider()
-
                     Button(role: .destructive) {
                         showMarkAllReadConfirmation = true
                     } label: {
@@ -108,19 +94,19 @@ struct AllArticlesView: View {
         }
         .refreshable {
             await homeViewModel.refreshAllFeeds()
-            homeViewModel.loadAllArticles()
-            homeViewModel.loadUnreadCount()
+            homeViewModel.loadSavedArticles()
+            homeViewModel.loadSavedCount()
         }
         .task {
-            homeViewModel.loadAllArticles()
+            homeViewModel.loadSavedArticles()
             hasAppeared = true
         }
         .onAppear {
             guard hasAppeared else { return }
-            homeViewModel.loadAllArticles()
+            homeViewModel.loadSavedArticles()
         }
         .onDisappear {
-            homeViewModel.loadUnreadCount()
+            homeViewModel.loadSavedCount()
         }
     }
 

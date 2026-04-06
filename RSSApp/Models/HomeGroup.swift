@@ -2,19 +2,21 @@ import Foundation
 
 /// Represents a top-level group on the Home screen.
 ///
-/// The three fixed cases cover the initial launch groups. If user-created groups
+/// The four fixed cases cover the current launch groups. If user-created groups
 /// (e.g., folders, tags) are needed in the future, the design would likely move to
 /// a protocol or struct-based approach, since `CaseIterable` conformance cannot be
 /// synthesized for enums with associated values.
 enum HomeGroup: Hashable, Identifiable, CaseIterable {
     case allArticles
     case unreadArticles
+    case savedArticles
     case allFeeds
 
     var id: String {
         switch self {
         case .allArticles: return "all-articles"
         case .unreadArticles: return "unread-articles"
+        case .savedArticles: return "saved-articles"
         case .allFeeds: return "all-feeds"
         }
     }
@@ -23,6 +25,7 @@ enum HomeGroup: Hashable, Identifiable, CaseIterable {
         switch self {
         case .allArticles: return "All Articles"
         case .unreadArticles: return "Unread Articles"
+        case .savedArticles: return "Saved Articles"
         case .allFeeds: return "All Feeds"
         }
     }
@@ -31,6 +34,7 @@ enum HomeGroup: Hashable, Identifiable, CaseIterable {
         switch self {
         case .allArticles: return "doc.text"
         case .unreadArticles: return "envelope.badge"
+        case .savedArticles: return "bookmark.fill"
         case .allFeeds: return "list.bullet"
         }
     }

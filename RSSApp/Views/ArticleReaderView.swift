@@ -11,6 +11,7 @@ struct ArticleReaderView: View {
     @State private var showAPIKeySettings = false
     @State private var extractionState = ReaderExtractionState()
     @State private var hasAPIKey = false
+    @State private var errorMessage: String?
     @Environment(\.dismiss) private var dismiss
 
     private let keychainService = KeychainService()
@@ -30,6 +31,13 @@ struct ArticleReaderView: View {
                         Button("Done") { dismiss() }
                     }
                     ToolbarItemGroup(placement: .topBarTrailing) {
+                        Button {
+                            toggleSaved()
+                        } label: {
+                            Image(systemName: article.isSaved ? "bookmark.fill" : "bookmark")
+                        }
+                        .accessibilityLabel(article.isSaved ? "Unsave article" : "Save article")
+
                         if isExtracting {
                             ProgressView()
                                 .accessibilityLabel("Extracting article content")
@@ -84,6 +92,37 @@ struct ArticleReaderView: View {
                         persistence: persistence
                     )
                 }
+                .alert("Error", isPresented: errorAlertBinding) {
+                    Button("OK") { errorMessage = nil }
+                } message: {
+                    Text(errorMessage ?? "")
+                }
+        }
+    }
+
+    // MARK: - Helpers
+
+    private var errorAlertBinding: Binding<Bool> {
+        Binding(
+            get: { errorMessage != nil },
+            set: { if !$0 { errorMessage = nil } }
+        )
+    }
+
+    // MARK: - Actions
+
+    private func toggleSaved() {
+        guard let persistence else {
+            Self.logger.fault("Cannot toggle saved — no persistence service")
+            assertionFailure("toggleSaved called but persistence is nil")
+            return
+        }
+        do {
+            try persistence.toggleArticleSaved(article)
+            Self.logger.notice("Toggled saved state for '\(article.title, privacy: .public)'")
+        } catch {
+            errorMessage = "Unable to update saved status."
+            Self.logger.error("Failed to toggle saved state: \(error, privacy: .public)")
         }
     }
 

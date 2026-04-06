@@ -61,6 +61,15 @@ protocol FeedPersisting: Sendable {
     /// Returns the total number of unread articles across all feeds.
     func totalUnreadCount() throws -> Int
 
+    // MARK: Saved article operations
+
+    /// Toggles the saved state of an article. Sets `isSaved` and updates `savedDate`.
+    func toggleArticleSaved(_ article: PersistentArticle) throws
+    /// Returns a page of saved articles across all feeds, sorted by saved date descending (most recently saved first).
+    func allSavedArticles(offset: Int, limit: Int) throws -> [PersistentArticle]
+    /// Returns the total number of saved articles across all feeds.
+    func savedCount() throws -> Int
+
     // MARK: Content cache
 
     func cachedContent(for article: PersistentArticle) throws -> PersistentArticleContent?
@@ -82,8 +91,9 @@ protocol FeedPersisting: Sendable {
     /// Returns the total number of articles across all feeds.
     func totalArticleCount() throws -> Int
 
-    /// Returns the article IDs of the oldest articles exceeding the given limit,
-    /// sorted by `publishedDate` ascending (oldest first).
+    /// Returns the article IDs of the oldest unsaved articles exceeding the given limit,
+    /// sorted by `publishedDate` ascending (oldest first). Saved articles are exempt from
+    /// retention cleanup and are excluded from the returned results.
     /// - Parameter limit: The maximum number of articles to retain.
     /// - Returns: Article IDs that should be deleted, along with their `isThumbnailCached` flag.
     func oldestArticleIDsExceedingLimit(_ limit: Int) throws -> [(articleID: String, isThumbnailCached: Bool)]
@@ -262,8 +272,8 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
     }
 
     // RATIONALE: Insert-only by design — existing articles are never updated because preserving
-    // user-generated state (read status, cached content) is more important than reflecting
-    // minor metadata edits (title rewording) from the feed source.
+    // user-generated state (read status, saved status, cached content) is more important than
+    // reflecting minor metadata edits (title rewording) from the feed source.
     func upsertArticles(_ articles: [Article], for feed: PersistentFeed) throws {
         // Query only the articleIDs we need to check, avoiding loading full article objects
         let feedID = feed.persistentModelID
@@ -331,6 +341,35 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
         }
         try modelContext.save()
         Self.logger.notice("Marked \(unreadArticles.count, privacy: .public) articles as read across all feeds")
+    }
+
+    // MARK: - Saved Article Operations
+
+    func toggleArticleSaved(_ article: PersistentArticle) throws {
+        let newSaved = !article.isSaved
+        article.isSaved = newSaved
+        article.savedDate = newSaved ? Date() : nil
+        try modelContext.save()
+        Self.logger.notice("Toggled saved state for '\(article.title, privacy: .public)' to \(newSaved ? "saved" : "unsaved", privacy: .public)")
+    }
+
+    func allSavedArticles(offset: Int, limit: Int) throws -> [PersistentArticle] {
+        var descriptor = FetchDescriptor<PersistentArticle>(
+            predicate: #Predicate { $0.isSaved },
+            sortBy: [SortDescriptor(\.savedDate, order: .reverse)]
+        )
+        descriptor.fetchOffset = offset
+        descriptor.fetchLimit = limit
+        let articles = try modelContext.fetch(descriptor)
+        Self.logger.debug("Fetched \(articles.count, privacy: .public) saved articles (offset: \(offset, privacy: .public), limit: \(limit, privacy: .public))")
+        return articles
+    }
+
+    func savedCount() throws -> Int {
+        let descriptor = FetchDescriptor<PersistentArticle>(
+            predicate: #Predicate { $0.isSaved }
+        )
+        return try modelContext.fetchCount(descriptor)
     }
 
     // MARK: - Thumbnail Tracking
@@ -410,7 +449,9 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
         guard totalCount > limit else { return [] }
 
         let excess = totalCount - limit
+        // Exclude saved articles from retention cleanup — they are exempt from the limit
         var descriptor = FetchDescriptor<PersistentArticle>(
+            predicate: #Predicate { !$0.isSaved },
             sortBy: [
                 SortDescriptor(\.publishedDate, order: .forward),
                 SortDescriptor(\.articleID, order: .forward)
@@ -418,7 +459,7 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
         )
         descriptor.fetchLimit = excess
         let articles = try modelContext.fetch(descriptor)
-        Self.logger.debug("Found \(articles.count, privacy: .public) articles exceeding limit of \(limit, privacy: .public)")
+        Self.logger.debug("Found \(articles.count, privacy: .public) unsaved articles exceeding limit of \(limit, privacy: .public)")
         return articles.map { (articleID: $0.articleID, isThumbnailCached: $0.isThumbnailCached) }
     }
 

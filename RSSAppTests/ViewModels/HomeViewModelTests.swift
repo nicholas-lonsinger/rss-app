@@ -1014,4 +1014,263 @@ struct HomeViewModelTests {
         // Clean up
         UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
     }
+
+    // MARK: - Saved Count
+
+    @Test("loadSavedCount returns total saved count")
+    @MainActor
+    func loadSavedCountSuccess() {
+        let feed = TestFixtures.makePersistentFeed()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+        let saved = TestFixtures.makePersistentArticle(articleID: "s1", isSaved: true, savedDate: Date())
+        saved.feed = feed
+        let unsaved = TestFixtures.makePersistentArticle(articleID: "s2", isSaved: false)
+        unsaved.feed = feed
+        mockPersistence.articlesByFeedID[feed.id] = [saved, unsaved]
+
+        let viewModel = HomeViewModel(persistence: mockPersistence)
+        viewModel.loadSavedCount()
+
+        #expect(viewModel.savedCount == 1)
+        #expect(viewModel.errorMessage == nil)
+    }
+
+    @Test("loadSavedCount sets errorMessage on failure")
+    @MainActor
+    func loadSavedCountError() {
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.errorToThrow = NSError(domain: "test", code: 1)
+
+        let viewModel = HomeViewModel(persistence: mockPersistence)
+        viewModel.loadSavedCount()
+
+        #expect(viewModel.errorMessage != nil)
+    }
+
+    @Test("loadSavedCount returns zero when no saved articles")
+    @MainActor
+    func loadSavedCountEmpty() {
+        let mockPersistence = MockFeedPersistenceService()
+
+        let viewModel = HomeViewModel(persistence: mockPersistence)
+        viewModel.loadSavedCount()
+
+        #expect(viewModel.savedCount == 0)
+        #expect(viewModel.errorMessage == nil)
+    }
+
+    // MARK: - Paginated Saved Articles
+
+    @Test("loadSavedArticles loads saved articles into list")
+    @MainActor
+    func loadSavedArticlesFirstPage() {
+        let feed = TestFixtures.makePersistentFeed()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+
+        let saved1 = TestFixtures.makePersistentArticle(
+            articleID: "s1",
+            isSaved: true,
+            savedDate: Date(timeIntervalSince1970: 1_000)
+        )
+        saved1.feed = feed
+        let saved2 = TestFixtures.makePersistentArticle(
+            articleID: "s2",
+            isSaved: true,
+            savedDate: Date(timeIntervalSince1970: 2_000)
+        )
+        saved2.feed = feed
+        let unsaved = TestFixtures.makePersistentArticle(articleID: "u1", isSaved: false)
+        unsaved.feed = feed
+        mockPersistence.articlesByFeedID[feed.id] = [saved1, saved2, unsaved]
+
+        let viewModel = HomeViewModel(persistence: mockPersistence)
+        viewModel.loadSavedArticles()
+
+        #expect(viewModel.savedArticlesList.count == 2)
+        #expect(viewModel.hasMoreSavedArticles == false)
+        #expect(viewModel.errorMessage == nil)
+    }
+
+    @Test("loadSavedArticles returns empty list when no saved articles")
+    @MainActor
+    func loadSavedArticlesEmpty() {
+        let mockPersistence = MockFeedPersistenceService()
+
+        let viewModel = HomeViewModel(persistence: mockPersistence)
+        viewModel.loadSavedArticles()
+
+        #expect(viewModel.savedArticlesList.isEmpty)
+        #expect(viewModel.hasMoreSavedArticles == false)
+        #expect(viewModel.errorMessage == nil)
+    }
+
+    @Test("loadSavedArticles sets errorMessage on failure")
+    @MainActor
+    func loadSavedArticlesError() {
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.errorToThrow = NSError(domain: "test", code: 1)
+
+        let viewModel = HomeViewModel(persistence: mockPersistence)
+        viewModel.loadSavedArticles()
+
+        #expect(viewModel.savedArticlesList.isEmpty)
+        #expect(viewModel.errorMessage != nil)
+        #expect(viewModel.hasMoreSavedArticles == false)
+    }
+
+    @Test("loadMoreSavedArticles appends next page")
+    @MainActor
+    func loadMoreSavedArticlesAppendsPage() {
+        let feed = TestFixtures.makePersistentFeed()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+
+        let totalCount = HomeViewModel.pageSize + 3
+        let articles = (0..<totalCount).map { i in
+            let article = TestFixtures.makePersistentArticle(
+                articleID: "s\(i)",
+                publishedDate: Date(timeIntervalSince1970: Double(totalCount - i) * 1_000_000),
+                isSaved: true,
+                savedDate: Date(timeIntervalSince1970: Double(totalCount - i) * 1_000_000)
+            )
+            article.feed = feed
+            return article
+        }
+        mockPersistence.articlesByFeedID[feed.id] = articles
+
+        let viewModel = HomeViewModel(persistence: mockPersistence)
+        viewModel.loadSavedArticles()
+
+        #expect(viewModel.savedArticlesList.count == HomeViewModel.pageSize)
+        #expect(viewModel.hasMoreSavedArticles == true)
+
+        viewModel.loadMoreSavedArticles()
+
+        #expect(viewModel.savedArticlesList.count == totalCount)
+        #expect(viewModel.hasMoreSavedArticles == false)
+    }
+
+    @Test("loadMoreSavedArticles does nothing when no more pages")
+    @MainActor
+    func loadMoreSavedArticlesNoOp() {
+        let mockPersistence = MockFeedPersistenceService()
+
+        let viewModel = HomeViewModel(persistence: mockPersistence)
+        viewModel.loadSavedArticles()
+        #expect(viewModel.hasMoreSavedArticles == false)
+
+        viewModel.loadMoreSavedArticles()
+        #expect(viewModel.savedArticlesList.isEmpty)
+    }
+
+    @Test("loadSavedArticles resets list before loading")
+    @MainActor
+    func loadSavedArticlesResetsState() {
+        let feed = TestFixtures.makePersistentFeed()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+
+        let article = TestFixtures.makePersistentArticle(
+            articleID: "s1",
+            isSaved: true,
+            savedDate: Date()
+        )
+        article.feed = feed
+        mockPersistence.articlesByFeedID[feed.id] = [article]
+
+        let viewModel = HomeViewModel(persistence: mockPersistence)
+        viewModel.loadSavedArticles()
+        #expect(viewModel.savedArticlesList.count == 1)
+
+        // Load again should reset, not duplicate
+        viewModel.loadSavedArticles()
+        #expect(viewModel.savedArticlesList.count == 1)
+    }
+
+    // MARK: - Toggle Saved
+
+    @Test("loadSavedArticles preserves previous list on error")
+    @MainActor
+    func loadSavedArticlesPreservesOnError() {
+        let feed = TestFixtures.makePersistentFeed()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+
+        let article = TestFixtures.makePersistentArticle(
+            articleID: "s1",
+            isSaved: true,
+            savedDate: Date()
+        )
+        article.feed = feed
+        mockPersistence.articlesByFeedID[feed.id] = [article]
+
+        let viewModel = HomeViewModel(persistence: mockPersistence)
+        viewModel.loadSavedArticles()
+        #expect(viewModel.savedArticlesList.count == 1)
+
+        mockPersistence.errorToThrow = NSError(domain: "test", code: 1)
+        viewModel.loadSavedArticles()
+        #expect(viewModel.savedArticlesList.count == 1)
+        #expect(viewModel.errorMessage != nil)
+    }
+
+    @Test("toggleSaved saves an article and updates count")
+    @MainActor
+    func toggleSavedSavesArticle() {
+        let feed = TestFixtures.makePersistentFeed()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+        let article = TestFixtures.makePersistentArticle(articleID: "a1", isSaved: false)
+        article.feed = feed
+        mockPersistence.articlesByFeedID[feed.id] = [article]
+
+        let viewModel = HomeViewModel(persistence: mockPersistence)
+        viewModel.loadSavedCount()
+        #expect(viewModel.savedCount == 0)
+
+        viewModel.toggleSaved(article)
+
+        #expect(article.isSaved)
+        #expect(viewModel.savedCount == 1)
+        #expect(viewModel.errorMessage == nil)
+    }
+
+    @Test("toggleSaved unsaves a saved article and updates count")
+    @MainActor
+    func toggleSavedUnsavesArticle() {
+        let feed = TestFixtures.makePersistentFeed()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+        let article = TestFixtures.makePersistentArticle(
+            articleID: "a1",
+            isSaved: true,
+            savedDate: Date()
+        )
+        article.feed = feed
+        mockPersistence.articlesByFeedID[feed.id] = [article]
+
+        let viewModel = HomeViewModel(persistence: mockPersistence)
+        viewModel.loadSavedCount()
+        #expect(viewModel.savedCount == 1)
+
+        viewModel.toggleSaved(article)
+
+        #expect(!article.isSaved)
+        #expect(viewModel.savedCount == 0)
+    }
+
+    @Test("toggleSaved sets errorMessage on failure")
+    @MainActor
+    func toggleSavedError() {
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.errorToThrow = NSError(domain: "test", code: 1)
+
+        let article = TestFixtures.makePersistentArticle(articleID: "a1")
+        let viewModel = HomeViewModel(persistence: mockPersistence)
+        viewModel.toggleSaved(article)
+
+        #expect(viewModel.errorMessage != nil)
+    }
 }
