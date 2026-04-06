@@ -2,8 +2,17 @@ import SwiftUI
 import os
 
 struct ArticleReaderView: View {
-    let article: PersistentArticle
     let persistence: FeedPersisting?
+
+    /// The ordered list of articles from the originating list view.
+    let articles: [PersistentArticle]
+
+    /// Index of the currently displayed article within `articles`.
+    @Binding var currentIndex: Int
+
+    /// Closure to trigger loading more articles when the user navigates past the last loaded article.
+    /// Returns `true` if more articles were loaded, `false` if no more are available or an error occurred.
+    let loadMore: (() -> Bool)?
 
     private static let logger = Logger(category: "ArticleReaderView")
 
@@ -16,6 +25,28 @@ struct ArticleReaderView: View {
 
     private let keychainService = KeychainService()
 
+    /// The currently displayed article.
+    /// After `loadMore` in `navigateToNext()`, `currentIndex` may temporarily exceed the local
+    /// `articles` snapshot until SwiftUI re-renders with the updated array from the view model.
+    private var article: PersistentArticle {
+        guard articles.indices.contains(currentIndex) else {
+            Self.logger.fault("currentIndex \(self.currentIndex, privacy: .public) out of bounds for \(self.articles.count, privacy: .public) articles")
+            assertionFailure("currentIndex \(currentIndex) out of bounds for \(articles.count) articles")
+            return articles[max(0, articles.count - 1)]
+        }
+        return articles[currentIndex]
+    }
+
+    /// Whether the user can navigate to the previous article.
+    private var canGoBack: Bool {
+        currentIndex > 0
+    }
+
+    /// Whether the user can navigate to the next article or trigger pagination for more.
+    private var canGoForward: Bool {
+        currentIndex < articles.count - 1 || loadMore != nil
+    }
+
     /// Whether content extraction is still in progress (API key present but content not yet available).
     private var isExtracting: Bool {
         hasAPIKey && extractionState.content == nil && article.link != nil
@@ -24,6 +55,7 @@ struct ArticleReaderView: View {
     var body: some View {
         NavigationStack {
             articleContent
+                .id(article.articleID)
                 .navigationTitle(article.title)
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
@@ -56,6 +88,25 @@ struct ArticleReaderView: View {
                             .accessibilityLabel("Summarize with AI")
                         }
                     }
+                    ToolbarItemGroup(placement: .bottomBar) {
+                        Button {
+                            navigateToPrevious()
+                        } label: {
+                            Image(systemName: "chevron.backward")
+                        }
+                        .disabled(!canGoBack)
+                        .accessibilityLabel("Previous article")
+
+                        Spacer()
+
+                        Button {
+                            navigateToNext()
+                        } label: {
+                            Image(systemName: "chevron.forward")
+                        }
+                        .disabled(!canGoForward)
+                        .accessibilityLabel("Next article")
+                    }
                 }
                 .onAppear {
                     do {
@@ -64,6 +115,15 @@ struct ArticleReaderView: View {
                         hasAPIKey = false
                         Self.logger.error("Keychain read failed in onAppear: \(error, privacy: .public)")
                     }
+                }
+                .onChange(of: currentIndex) {
+                    // Deferred mark-as-read for the pagination path: after loadMore appends
+                    // new articles to the view model, SwiftUI re-renders this view with the
+                    // updated array, and this handler ensures the newly visible article is
+                    // marked as read. For normal navigation, markCurrentArticleAsRead() is
+                    // also called directly in onArticleChanged(); the isRead guard prevents
+                    // double-work.
+                    markCurrentArticleAsRead()
                 }
                 .sheet(isPresented: $showAPIKeySettings, onDismiss: {
                     do {
@@ -109,7 +169,66 @@ struct ArticleReaderView: View {
         )
     }
 
+    // MARK: - Navigation
+
+    private func navigateToPrevious() {
+        guard canGoBack else { return }
+        Self.logger.debug("Navigating to previous article (index \(self.currentIndex - 1, privacy: .public))")
+        currentIndex -= 1
+        onArticleChanged()
+    }
+
+    private func navigateToNext() {
+        let isAtLastLoaded = currentIndex == articles.count - 1
+
+        if isAtLastLoaded {
+            // Try to load more articles before advancing
+            if let loadMore, loadMore() {
+                Self.logger.info("Loaded more articles via pagination, advancing to next (index \(self.currentIndex + 1, privacy: .public))")
+                // RATIONALE: After loadMore appends to the view model's array, the local
+                // `articles` snapshot is stale (value-type copy). We update currentIndex via
+                // the binding so SwiftUI re-renders with the updated array, but skip
+                // onArticleChanged() because `articles[currentIndex + 1]` would be out of
+                // bounds in the current snapshot. The extraction state reset and mark-as-read
+                // are deferred to the onChange(of: currentIndex) handler which runs after
+                // the view re-renders with the fresh array.
+                extractionState = ReaderExtractionState()
+                showSummary = false
+                currentIndex += 1
+            } else {
+                Self.logger.info("No more articles available at end of list")
+            }
+        } else {
+            Self.logger.debug("Navigating to next article (index \(self.currentIndex + 1, privacy: .public))")
+            currentIndex += 1
+            onArticleChanged()
+        }
+    }
+
+    /// Resets extraction state, dismisses the summary sheet, and marks the new article as read after navigation.
+    private func onArticleChanged() {
+        extractionState = ReaderExtractionState()
+        showSummary = false
+        markCurrentArticleAsRead()
+    }
+
     // MARK: - Actions
+
+    private func markCurrentArticleAsRead() {
+        guard !article.isRead else { return }
+        guard let persistence else {
+            Self.logger.fault("Cannot mark article as read — no persistence service")
+            assertionFailure("markCurrentArticleAsRead called but persistence is nil")
+            return
+        }
+        do {
+            try persistence.markArticleRead(article, isRead: true)
+            Self.logger.notice("Marked article '\(article.title, privacy: .public)' as read via navigation")
+        } catch {
+            errorMessage = "Unable to save read status."
+            Self.logger.error("Failed to mark article as read: \(error, privacy: .public)")
+        }
+    }
 
     private func toggleSaved() {
         guard let persistence else {

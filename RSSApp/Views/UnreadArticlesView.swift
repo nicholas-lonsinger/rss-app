@@ -4,7 +4,7 @@ struct UnreadArticlesView: View {
     let persistence: FeedPersisting
     let homeViewModel: HomeViewModel
 
-    @State private var selectedArticle: PersistentArticle?
+    @State private var selectedArticleIndex: Int?
     @State private var showMarkAllReadConfirmation = false
     @State private var hasAppeared = false
 
@@ -19,10 +19,10 @@ struct UnreadArticlesView: View {
                     Text("You have no unread articles.")
                 }
             } else {
-                List(homeViewModel.unreadArticlesList, id: \.articleID) { article in
+                List(Array(homeViewModel.unreadArticlesList.enumerated()), id: \.element.articleID) { index, article in
                     Button {
                         if homeViewModel.markAsRead(article) {
-                            selectedArticle = article
+                            selectedArticleIndex = index
                         }
                     } label: {
                         CrossFeedArticleRowView(
@@ -98,8 +98,13 @@ struct UnreadArticlesView: View {
                 homeViewModel.markAllAsRead()
             }
         }
-        .fullScreenCover(item: $selectedArticle) { article in
-            ArticleReaderView(article: article, persistence: persistence)
+        .fullScreenCover(item: selectedArticleIndexBinding) { _ in
+            ArticleReaderView(
+                persistence: persistence,
+                articles: homeViewModel.unreadArticlesList,
+                currentIndex: selectedArticleIndexNonOptionalBinding,
+                loadMore: homeViewModel.hasMoreUnreadArticles ? { homeViewModel.loadMoreUnreadArticlesAndReport() } : nil
+            )
         }
         .alert("Error", isPresented: errorAlertBinding) {
             Button("OK") { homeViewModel.clearError() }
@@ -130,6 +135,29 @@ struct UnreadArticlesView: View {
         Binding(
             get: { homeViewModel.errorMessage != nil },
             set: { if !$0 { homeViewModel.clearError() } }
+        )
+    }
+
+    /// Wraps `selectedArticleIndex` as an `Identifiable` binding for `fullScreenCover(item:)`.
+    private var selectedArticleIndexBinding: Binding<IdentifiableIndex?> {
+        Binding(
+            get: { selectedArticleIndex.map { IdentifiableIndex(value: $0) } },
+            set: { selectedArticleIndex = $0?.value }
+        )
+    }
+
+    /// Provides a non-optional binding to the current index for the reader view.
+    /// Defaults to 0 when `selectedArticleIndex` is nil (should never happen while the cover is presented).
+    private var selectedArticleIndexNonOptionalBinding: Binding<Int> {
+        Binding(
+            get: {
+                guard let index = selectedArticleIndex else {
+                    assertionFailure("selectedArticleIndexNonOptionalBinding read while selectedArticleIndex is nil")
+                    return 0
+                }
+                return index
+            },
+            set: { selectedArticleIndex = $0 }
         )
     }
 }

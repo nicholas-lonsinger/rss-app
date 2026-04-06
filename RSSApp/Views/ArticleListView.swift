@@ -4,7 +4,7 @@ struct ArticleListView: View {
     let viewModel: FeedViewModel
     let persistence: FeedPersisting
     let thumbnailService: ArticleThumbnailCaching
-    @State private var selectedArticle: PersistentArticle?
+    @State private var selectedArticleIndex: Int?
     @State private var showMarkAllReadConfirmation = false
     @State private var hasAppeared = false
 
@@ -24,10 +24,10 @@ struct ArticleListView: View {
                     .buttonStyle(.bordered)
                 }
             } else {
-                List(viewModel.articles, id: \.articleID) { article in
+                List(Array(viewModel.articles.enumerated()), id: \.element.articleID) { index, article in
                     Button {
                         viewModel.markAsRead(article)
-                        selectedArticle = article
+                        selectedArticleIndex = index
                     } label: {
                         ArticleRowView(article: article, thumbnailService: thumbnailService)
                     }
@@ -108,8 +108,13 @@ struct ArticleListView: View {
                 viewModel.markAllAsRead()
             }
         }
-        .fullScreenCover(item: $selectedArticle) { article in
-            ArticleReaderView(article: article, persistence: persistence)
+        .fullScreenCover(item: selectedArticleIndexBinding) { _ in
+            ArticleReaderView(
+                persistence: persistence,
+                articles: viewModel.articles,
+                currentIndex: selectedArticleIndexNonOptionalBinding,
+                loadMore: viewModel.hasMoreArticles ? { viewModel.loadMoreAndReport() } : nil
+            )
         }
         .task {
             await viewModel.loadFeed()
@@ -132,6 +137,29 @@ struct ArticleListView: View {
         Binding(
             get: { viewModel.errorMessage != nil && !viewModel.articles.isEmpty },
             set: { if !$0 { viewModel.errorMessage = nil } }
+        )
+    }
+
+    /// Wraps `selectedArticleIndex` as an `Identifiable` binding for `fullScreenCover(item:)`.
+    private var selectedArticleIndexBinding: Binding<IdentifiableIndex?> {
+        Binding(
+            get: { selectedArticleIndex.map { IdentifiableIndex(value: $0) } },
+            set: { selectedArticleIndex = $0?.value }
+        )
+    }
+
+    /// Provides a non-optional binding to the current index for the reader view.
+    /// Defaults to 0 when `selectedArticleIndex` is nil (should never happen while the cover is presented).
+    private var selectedArticleIndexNonOptionalBinding: Binding<Int> {
+        Binding(
+            get: {
+                guard let index = selectedArticleIndex else {
+                    assertionFailure("selectedArticleIndexNonOptionalBinding read while selectedArticleIndex is nil")
+                    return 0
+                }
+                return index
+            },
+            set: { selectedArticleIndex = $0 }
         )
     }
 }
