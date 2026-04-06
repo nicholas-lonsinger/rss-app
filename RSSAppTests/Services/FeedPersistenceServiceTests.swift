@@ -1096,6 +1096,54 @@ struct FeedPersistenceServiceTests {
         #expect(try service.savedCount() == 2)
     }
 
+    @Test("savedCount decreases after unsaving an article")
+    @MainActor
+    func savedCountDecrementsAfterUnsave() throws {
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+        try service.upsertArticles([
+            TestFixtures.makeArticle(id: "a1"),
+            TestFixtures.makeArticle(id: "a2"),
+        ], for: feed)
+        try service.save()
+
+        let articles = try service.articles(for: feed)
+        try service.toggleArticleSaved(articles[0])
+        try service.toggleArticleSaved(articles[1])
+        #expect(try service.savedCount() == 2)
+
+        // Unsave one article
+        try service.toggleArticleSaved(articles[0])
+        #expect(try service.savedCount() == 1)
+    }
+
+    @Test("allSavedArticles returns empty after unsaving all articles")
+    @MainActor
+    func allSavedArticlesEmptyAfterUnsave() throws {
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+        try service.upsertArticles([
+            TestFixtures.makeArticle(id: "a1"),
+            TestFixtures.makeArticle(id: "a2"),
+        ], for: feed)
+        try service.save()
+
+        let articles = try service.articles(for: feed)
+        // Save both
+        try service.toggleArticleSaved(articles[0])
+        try service.toggleArticleSaved(articles[1])
+        #expect(try service.allSavedArticles(offset: 0, limit: 10).count == 2)
+
+        // Unsave both
+        try service.toggleArticleSaved(articles[0])
+        try service.toggleArticleSaved(articles[1])
+        #expect(try service.allSavedArticles(offset: 0, limit: 10).isEmpty)
+    }
+
     @Test("oldestArticleIDsExceedingLimit excludes saved articles")
     @MainActor
     func oldestArticleIDsExcludesSaved() throws {
@@ -1121,5 +1169,34 @@ struct FeedPersistenceServiceTests {
         let toDelete = try service.oldestArticleIDsExceedingLimit(2)
         #expect(toDelete.count == 1)
         #expect(toDelete[0].articleID == "mid")
+    }
+
+    @Test("oldestArticleIDsExceedingLimit caps at available unsaved articles when most are saved")
+    @MainActor
+    func oldestArticleIDsCapsAtAvailableUnsaved() throws {
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+        // Create 4 articles
+        try service.upsertArticles([
+            TestFixtures.makeArticle(id: "a1", publishedDate: Date(timeIntervalSince1970: 1_000)),
+            TestFixtures.makeArticle(id: "a2", publishedDate: Date(timeIntervalSince1970: 2_000)),
+            TestFixtures.makeArticle(id: "a3", publishedDate: Date(timeIntervalSince1970: 3_000)),
+            TestFixtures.makeArticle(id: "a4", publishedDate: Date(timeIntervalSince1970: 4_000)),
+        ], for: feed)
+        try service.save()
+
+        // Save 3 of the 4 articles — only 1 unsaved remains
+        let articles = try service.articles(for: feed)
+        for article in articles where article.articleID != "a2" {
+            try service.toggleArticleSaved(article)
+        }
+
+        // Limit of 2 means 2 excess (4 total - 2 limit), but only 1 unsaved article exists
+        // Should return only the 1 available unsaved article, not crash or return saved ones
+        let toDelete = try service.oldestArticleIDsExceedingLimit(2)
+        #expect(toDelete.count == 1)
+        #expect(toDelete[0].articleID == "a2")
     }
 }

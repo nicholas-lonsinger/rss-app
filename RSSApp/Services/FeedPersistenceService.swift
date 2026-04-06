@@ -91,8 +91,9 @@ protocol FeedPersisting: Sendable {
     /// Returns the total number of articles across all feeds.
     func totalArticleCount() throws -> Int
 
-    /// Returns the article IDs of the oldest articles exceeding the given limit,
-    /// sorted by `publishedDate` ascending (oldest first).
+    /// Returns the article IDs of the oldest unsaved articles exceeding the given limit,
+    /// sorted by `publishedDate` ascending (oldest first). Saved articles are exempt from
+    /// retention cleanup and are excluded from the returned results.
     /// - Parameter limit: The maximum number of articles to retain.
     /// - Returns: Article IDs that should be deleted, along with their `isThumbnailCached` flag.
     func oldestArticleIDsExceedingLimit(_ limit: Int) throws -> [(articleID: String, isThumbnailCached: Bool)]
@@ -271,8 +272,8 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
     }
 
     // RATIONALE: Insert-only by design — existing articles are never updated because preserving
-    // user-generated state (read status, cached content) is more important than reflecting
-    // minor metadata edits (title rewording) from the feed source.
+    // user-generated state (read status, saved status, cached content) is more important than
+    // reflecting minor metadata edits (title rewording) from the feed source.
     func upsertArticles(_ articles: [Article], for feed: PersistentFeed) throws {
         // Query only the articleIDs we need to check, avoiding loading full article objects
         let feedID = feed.persistentModelID
@@ -349,7 +350,7 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
         article.isSaved = newSaved
         article.savedDate = newSaved ? Date() : nil
         try modelContext.save()
-        Self.logger.debug("Toggled saved state for '\(article.title, privacy: .public)' to \(newSaved ? "saved" : "unsaved", privacy: .public)")
+        Self.logger.notice("Toggled saved state for '\(article.title, privacy: .public)' to \(newSaved ? "saved" : "unsaved", privacy: .public)")
     }
 
     func allSavedArticles(offset: Int, limit: Int) throws -> [PersistentArticle] {

@@ -1191,6 +1191,31 @@ struct HomeViewModelTests {
 
     // MARK: - Toggle Saved
 
+    @Test("loadSavedArticles preserves previous list on error")
+    @MainActor
+    func loadSavedArticlesPreservesOnError() {
+        let feed = TestFixtures.makePersistentFeed()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+
+        let article = TestFixtures.makePersistentArticle(
+            articleID: "s1",
+            isSaved: true,
+            savedDate: Date()
+        )
+        article.feed = feed
+        mockPersistence.articlesByFeedID[feed.id] = [article]
+
+        let viewModel = HomeViewModel(persistence: mockPersistence)
+        viewModel.loadSavedArticles()
+        #expect(viewModel.savedArticlesList.count == 1)
+
+        mockPersistence.errorToThrow = NSError(domain: "test", code: 1)
+        viewModel.loadSavedArticles()
+        #expect(viewModel.savedArticlesList.count == 1)
+        #expect(viewModel.errorMessage != nil)
+    }
+
     @Test("toggleSaved saves an article and updates count")
     @MainActor
     func toggleSavedSavesArticle() {
