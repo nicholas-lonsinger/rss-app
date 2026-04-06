@@ -71,12 +71,14 @@ struct ArticleThumbnailService: ArticleThumbnailCaching {
                   (200...299).contains(httpResponse.statusCode) else {
                 let code = (response as? HTTPURLResponse)?.statusCode ?? -1
                 Self.logger.warning("Thumbnail fetch returned HTTP \(code, privacy: .public) for \(remoteURL.absoluteString, privacy: .public)")
-                return (400...499).contains(code) ? .permanentFailure : .transientFailure
+                // 429 (rate limited) and 408 (request timeout) are transient despite being 4xx
+                let isPermanent = (400...499).contains(code) && code != 429 && code != 408
+                return isPermanent ? .permanentFailure : .transientFailure
             }
 
             // Reject SVG content type — catches extensionless SVG URLs (e.g. deploy buttons)
             let contentType = httpResponse.value(forHTTPHeaderField: "Content-Type") ?? ""
-            if contentType.contains("svg") {
+            if contentType.hasPrefix("image/svg") {
                 Self.logger.debug("Rejecting SVG content type (\(contentType, privacy: .public), \(data.count, privacy: .public) bytes) from \(remoteURL.absoluteString, privacy: .public)")
                 return .permanentFailure
             }
@@ -98,9 +100,13 @@ struct ArticleThumbnailService: ArticleThumbnailCaching {
 
             Self.logger.debug("Cached thumbnail for article \(articleID, privacy: .public) (\(jpegData.count, privacy: .public) bytes)")
             return .cached
-        } catch {
-            Self.logger.warning("Failed to cache thumbnail for \(remoteURL.absoluteString, privacy: .public): \(error, privacy: .public)")
+        } catch let urlError as URLError {
+            Self.logger.warning("Network error caching thumbnail for \(remoteURL.absoluteString, privacy: .public): \(urlError, privacy: .public)")
             return .transientFailure
+        } catch {
+            // Filesystem errors (permissions, disk full) are permanent within this session
+            Self.logger.warning("Failed to cache thumbnail for \(remoteURL.absoluteString, privacy: .public): \(error, privacy: .public)")
+            return .permanentFailure
         }
     }
 

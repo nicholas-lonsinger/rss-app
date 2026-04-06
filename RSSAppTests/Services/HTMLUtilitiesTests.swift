@@ -192,6 +192,15 @@ struct HTMLUtilitiesTests {
         #expect(HTMLUtilities.extractFirstImageURL(from: html) == nil)
     }
 
+    @Test("Does not filter legitimate URLs containing pixel or track as substrings")
+    func doesNotFilterLegitimateURLs() {
+        let html = """
+            <img src="https://example.com/images/pixel-art-gallery.jpg">
+            """
+        let url = HTMLUtilities.extractFirstImageURL(from: html)
+        #expect(url?.absoluteString == "https://example.com/images/pixel-art-gallery.jpg")
+    }
+
     // MARK: - extractOGImageURL
 
     @Test("Extracts og:image URL from meta tag")

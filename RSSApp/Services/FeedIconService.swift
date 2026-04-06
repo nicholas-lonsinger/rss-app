@@ -146,7 +146,7 @@ struct FeedIconService: FeedIconResolving {
         /// Icon URLs extracted from `<link>` tags, ordered by priority: apple-touch-icon first, then rel="icon".
         let linkIcons: [URL]
         /// The `og:image` URL from `<meta property="og:image">`, if present.
-        /// Expected to be absolute per the Open Graph protocol, so no base-URL resolution is applied.
+        /// Resolved against the page's base URL to handle protocol-relative and relative URLs.
         let ogImageURL: URL?
         /// The host of the final URL after redirects, if it differs from the
         /// requested host (indicates a platform-hosted blog like Medium/Substack).

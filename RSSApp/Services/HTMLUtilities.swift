@@ -84,19 +84,25 @@ enum HTMLUtilities {
         let pattern = ##/<img[^>]+src=["']([^"']+)["']/##
         for match in html.matches(of: pattern) {
             let src = String(match.1)
-            if isTrackingPixelURL(src) { continue }
+            if isTrackingPixelURL(src) {
+                logger.debug("Skipping suspected tracking pixel URL: \(src, privacy: .public)")
+                continue
+            }
             return URL(string: src)
         }
         return nil
     }
 
     /// Returns `true` for URLs that are known tracking pixels or analytics beacons
-    /// rather than actual content images.
+    /// rather than actual content images. Matches specific path patterns to avoid
+    /// false positives on legitimate URLs containing words like "pixel" or "track".
     private static func isTrackingPixelURL(_ urlString: String) -> Bool {
         // Medium read-tracking pixel
         if urlString.contains("/stat?event=") { return true }
-        // Common 1x1 tracking pixel patterns
-        if urlString.contains("/pixel") || urlString.contains("/track") { return true }
+        // Tracking pixel endpoints — require query string or file extension delimiter
+        // to avoid false positives on paths like "/pixel-art/" or "/racetrack/"
+        if urlString.contains("/pixel?") || urlString.contains("/pixel.") { return true }
+        if urlString.contains("/track?") || urlString.contains("/track.") { return true }
         return false
     }
 
