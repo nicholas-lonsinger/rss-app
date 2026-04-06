@@ -1,14 +1,18 @@
 import SwiftUI
+import UIKit
 import UniformTypeIdentifiers
 import os
 
 struct SettingsView: View {
+
+    private static let logger = Logger(category: "SettingsView")
 
     let persistence: FeedPersisting
     let viewModel: FeedListViewModel
     let homeViewModel: HomeViewModel
 
     @State private var badgeEnabled: Bool
+    @State private var showPermissionDeniedAlert = false
     // RATIONALE: Concrete AppBadgeService instead of `any AppBadgeUpdating` because
     // the protocol's `badgeEnabled` setter requires mutable access through existentials,
     // which is incompatible with SwiftUI's immutable view structs. Protocol abstraction
@@ -32,7 +36,15 @@ struct SettingsView: View {
                 badgeService.badgeEnabled = newValue
                 Task {
                     if newValue {
-                        await homeViewModel.updateBadge()
+                        let status = await badgeService.checkPermission()
+                        if status == .denied {
+                            Self.logger.notice("Badge toggle enabled but notification permission denied — reverting toggle and showing alert")
+                            badgeEnabled = false
+                            badgeService.badgeEnabled = false
+                            showPermissionDeniedAlert = true
+                        } else {
+                            await homeViewModel.updateBadge()
+                        }
                     } else {
                         await badgeService.clearBadge()
                     }
@@ -58,6 +70,16 @@ struct SettingsView: View {
             }
         }
         .navigationTitle("Settings")
+        .alert("Notifications Disabled", isPresented: $showPermissionDeniedAlert) {
+            Button("Open Settings") {
+                if let url = URL(string: UIApplication.openSettingsURLString) {
+                    UIApplication.shared.open(url)
+                }
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("Badge notifications require permission. Please enable notifications for this app in Settings.")
+        }
     }
 }
 

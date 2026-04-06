@@ -27,7 +27,7 @@ RSSApp/
 │   ├── RSSFeed.swift                   # Feed container with channel info, imageURL, and articles (transient parser output)
 │   └── SubscribedFeed.swift            # Legacy feed subscription struct (Codable) — retained for UserDefaults migration and OPML export
 ├── Services/                           # Business logic and networking
-│   ├── AppBadgeService.swift            # AppBadgeUpdating protocol + Bool-gated badge update (enabled shows unread count, disabled clears) via UNUserNotificationCenter with badge-only permission request; includes one-time migration from legacy 3-mode key
+│   ├── AppBadgeService.swift            # BadgePermissionStatus enum + AppBadgeUpdating protocol + Bool-gated badge update (enabled shows unread count, disabled clears) via UNUserNotificationCenter with badge-only permission request; checkPermission() for non-side-effect authorization status check; includes one-time migration from legacy 3-mode key
 │   ├── ArticleExtractionService.swift  # WKWebView + domSerializer.js + native content extraction
 │   ├── ArticleRetentionService.swift   # ArticleRetaining protocol + ArticleLimit enum + retention enforcement (oldest-first cleanup with thumbnail deletion)
 │   ├── CandidateScorer.swift           # Readability-style DOM scoring to find article content node
@@ -78,7 +78,7 @@ RSSApp/
 │   ├── HomeView.swift                  # Home screen — NavigationStack root with All Articles, Unread Articles, Saved Articles, All Feeds rows
 │   ├── FeedRowView.swift               # Single feed row — icon, title, description, unread count badge
 │   ├── SavedArticlesView.swift          # Paginated list of saved/bookmarked articles across all feeds, sorted by saved date
-│   ├── SettingsView.swift              # Top-level settings page with inline badge toggle and NavigationLink rows pushing API Key, Article Limit, and Import/Export sub-screens
+│   ├── SettingsView.swift              # Top-level settings page with inline badge toggle (reverts and shows permission-denied alert when notifications are disabled) and NavigationLink rows pushing API Key, Article Limit, and Import/Export sub-screens
 │   └── UnreadArticlesView.swift        # Filtered list of unread articles across all feeds
 └── Resources/
     ├── domSerializer.js                # Bundled DOM serializer — walks DOM tree, emits JSON for Swift extraction
@@ -96,7 +96,7 @@ RSSAppTests/
 │   ├── TestFixtures.swift              # Sample RSS XML, factory methods for Article/RSSFeed/PersistentFeed/PersistentArticle
 │   └── WebViewTestHelpers.swift        # WKWebView-based serialization helpers for integration tests
 ├── Mocks/
-│   ├── MockAppBadgeService.swift            # AppBadgeUpdating mock with call count tracking and injectable badge-enabled flag
+│   ├── MockAppBadgeService.swift            # AppBadgeUpdating mock with call count tracking, injectable badge-enabled flag, and injectable BadgePermissionStatus
 │   ├── MockArticleExtractionService.swift  # ArticleExtracting mock with injectable content/errors
 │   ├── MockArticleRetentionService.swift   # ArticleRetaining mock with call count tracking
 │   ├── MockArticleThumbnailService.swift   # ArticleThumbnailCaching mock with injectable cache results
@@ -112,6 +112,7 @@ RSSAppTests/
 │   └── MockURLSessionBytesProvider.swift   # URLSessionBytesProviding mock with URLProtocol-backed controlled SSE lines
 ├── Models/
 │   ├── ArticleTests.swift              # Article creation, identity, hashable
+│   ├── BadgePermissionStatusTests.swift # BadgePermissionStatus enum cases, Equatable conformance
 │   ├── DOMNodeTests.swift              # DOMNode accessors, text/element queries, tree traversal
 │   ├── HomeGroupTests.swift            # HomeGroup enum cases, IDs, properties, Hashable conformance
 │   ├── IdentifiableIndexTests.swift    # IdentifiableIndex value storage, id derivation, distinctness
@@ -150,7 +151,7 @@ RSSAppTests/
 │   └── HomeViewModelTests.swift            # Unread count, saved count, cross-feed article queries, read/unread status, saved status, sort order, mark all as read
 ```
 
-**Total: 69 source files + 1 resource, 54 test source files + 1 fixture.**
+**Total: 69 source files + 1 resource, 55 test source files + 1 fixture.**
 
 ## Key Components
 
@@ -245,12 +246,12 @@ RSSAppApp (@main)
 | Bottom toolbar for navigation buttons | Previous/next buttons placed in bottom toolbar — keeps the top bar clean (Done, bookmark, AI sparkles) and matches Safari's bottom toolbar pattern |
 | Pagination-on-demand at list boundary | When navigating past the last loaded article, the reader's `loadMore` closure triggers the list's pagination. The closure returns `LoadMoreResult` — `.loaded` advances, `.exhausted` stays put, `.failed(String)` surfaces an error alert. The closure is captured as nil at presentation time when the view model reports no more data (`hasMore*` flag), so the next button disables at the true end of the list. After `loadMore` succeeds, `onArticleChanged()` is deferred via `onChange(of: currentIndex)` because the local `articles` snapshot is stale until SwiftUI re-renders with the view model's updated array |
 | ReaderExtractionState reset on navigation | Each article navigation creates a fresh `ReaderExtractionState` and forces a web view reload via `.id(article.articleID)`, preventing stale extracted content from leaking between articles |
-| App icon badge via `UNUserNotificationCenter.setBadgeCount` | Requests badge-only notification permission (no alerts/sounds); on/off toggle persisted in UserDefaults (defaults to enabled); when enabled, shows total unread count; when disabled, clears badge; updated as fire-and-forget `Task` from `HomeViewModel.loadUnreadCount()` at natural sync points (refresh, mark-read, app foreground); includes one-time migration from legacy 3-mode key |
+| App icon badge via `UNUserNotificationCenter.setBadgeCount` | Requests badge-only notification permission (no alerts/sounds); on/off toggle persisted in UserDefaults (defaults to enabled); when enabled, shows total unread count; when disabled, clears badge; updated as fire-and-forget `Task` from `HomeViewModel.loadUnreadCount()` at natural sync points (refresh, mark-read, app foreground); `checkPermission()` enables UI to detect denied state without side effects; `SettingsView` reverts the toggle and shows a permission-denied alert directing to Settings.app when notifications are denied; includes one-time migration from legacy 3-mode key |
 | Concrete `AppBadgeService` in `SettingsView` | Existential `any AppBadgeUpdating` property setters require mutable access, incompatible with SwiftUI's immutable view structs; protocol abstraction is used in `HomeViewModel` for testing |
 
 ## Test Coverage
 
-**55 test files: 37 test suites, 14 mock implementations, 4 shared helpers, 1 HTML fixture.**
+**56 test files: 38 test suites, 14 mock implementations, 4 shared helpers, 1 HTML fixture.**
 
 **Patterns:** Swift Testing (`@Suite`, `@Test`, `#expect`). Protocol-based dependency injection with 14 mocks (`MockFeedPersistenceService`, `MockFeedFetchingService`, `MockFeedIconService`, `MockArticleThumbnailService`, `MockThumbnailPrefetchService`, `MockOPMLService`, `MockClaudeAPIService`, `MockKeychainService`, `MockArticleExtractionService`, `MockContentExtractor`, `MockFeedStorageService`, `MockURLSessionBytesProvider`, `MockArticleRetentionService`, `MockAppBadgeService`). In-memory `ModelContainer` via `SwiftDataTestHelpers` for SwiftData integration tests. `WKWebView` integration tests via `WebViewTestHelpers` for DOM serialization and extraction pipeline. `MockURLSessionBytesProvider` with `URLProtocol` interception for `ClaudeAPIService.sendMessage` integration tests. Shared `TestFixtures` factory methods for `Article`, `RSSFeed`, `PersistentFeed`, `PersistentArticle`, and sample RSS XML.
 
