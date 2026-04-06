@@ -262,7 +262,7 @@ struct HomeViewModelTests {
         #expect(viewModel.unreadArticlesList.isEmpty)
     }
 
-    @Test("loadUnreadArticles sets errorMessage on failure")
+    @Test("loadUnreadArticles sets errorMessage on failure and preserves hasMore for retry")
     @MainActor
     func loadUnreadArticlesPaginatedError() {
         let mockPersistence = MockFeedPersistenceService()
@@ -273,7 +273,8 @@ struct HomeViewModelTests {
 
         #expect(viewModel.unreadArticlesList.isEmpty)
         #expect(viewModel.errorMessage != nil)
-        #expect(viewModel.hasMoreUnreadArticles == false)
+        // hasMore preserved so the user can retry
+        #expect(viewModel.hasMoreUnreadArticles == true)
     }
 
     @Test("loadAllArticles resets list before loading")
@@ -359,16 +360,17 @@ struct HomeViewModelTests {
         #expect(viewModel.errorMessage != nil)
     }
 
-    @Test("loadAllArticles error sets hasMoreAllArticles to false")
+    @Test("loadAllArticles error preserves hasMoreAllArticles for retry")
     @MainActor
-    func loadAllArticlesErrorSetsHasMoreFalse() {
+    func loadAllArticlesErrorPreservesHasMore() {
         let mockPersistence = MockFeedPersistenceService()
         mockPersistence.errorToThrow = NSError(domain: "test", code: 1)
 
         let viewModel = HomeViewModel(persistence: mockPersistence)
         viewModel.loadAllArticles()
 
-        #expect(viewModel.hasMoreAllArticles == false)
+        // hasMore preserved so the user can retry
+        #expect(viewModel.hasMoreAllArticles == true)
     }
 
     // MARK: - Stable List Snapshot
@@ -1106,7 +1108,7 @@ struct HomeViewModelTests {
         #expect(viewModel.errorMessage == nil)
     }
 
-    @Test("loadSavedArticles sets errorMessage on failure")
+    @Test("loadSavedArticles sets errorMessage on failure and preserves hasMore for retry")
     @MainActor
     func loadSavedArticlesError() {
         let mockPersistence = MockFeedPersistenceService()
@@ -1117,7 +1119,8 @@ struct HomeViewModelTests {
 
         #expect(viewModel.savedArticlesList.isEmpty)
         #expect(viewModel.errorMessage != nil)
-        #expect(viewModel.hasMoreSavedArticles == false)
+        // hasMore preserved so the user can retry
+        #expect(viewModel.hasMoreSavedArticles == true)
     }
 
     @Test("loadMoreSavedArticles appends next page")
@@ -1418,7 +1421,7 @@ struct HomeViewModelTests {
         #expect(viewModel.allArticlesList.count == 1)
     }
 
-    @Test("loadMoreAllArticlesAndReport returns .failed on persistence error")
+    @Test("loadMoreAllArticlesAndReport returns .failed on persistence error and preserves hasMore for retry")
     @MainActor
     func loadMoreAllArticlesAndReportReturnsFailed() {
         let feed = TestFixtures.makePersistentFeed()
@@ -1447,7 +1450,8 @@ struct HomeViewModelTests {
         let result = viewModel.loadMoreAllArticlesAndReport()
 
         #expect(result == .failed("Unable to load all articles."))
-        #expect(viewModel.hasMoreAllArticles == false)
+        // hasMore preserved so the user can retry
+        #expect(viewModel.hasMoreAllArticles == true)
         // loadMoreAllArticlesAndReport clears errorMessage so only the article reader shows the error
         #expect(viewModel.errorMessage == nil)
     }
@@ -1534,7 +1538,8 @@ struct HomeViewModelTests {
         let result = viewModel.loadMoreUnreadArticlesAndReport()
 
         #expect(result == .failed("Unable to load unread articles."))
-        #expect(viewModel.hasMoreUnreadArticles == false)
+        // hasMore preserved so the user can retry
+        #expect(viewModel.hasMoreUnreadArticles == true)
         // loadMoreUnreadArticlesAndReport clears errorMessage so only the article reader shows the error
         #expect(viewModel.errorMessage == nil)
     }
@@ -1625,8 +1630,49 @@ struct HomeViewModelTests {
         let result = viewModel.loadMoreSavedArticlesAndReport()
 
         #expect(result == .failed("Unable to load saved articles."))
-        #expect(viewModel.hasMoreSavedArticles == false)
+        // hasMore preserved so the user can retry
+        #expect(viewModel.hasMoreSavedArticles == true)
         // loadMoreSavedArticlesAndReport clears errorMessage so only the article reader shows the error
         #expect(viewModel.errorMessage == nil)
+    }
+
+    // MARK: - Retry After Transient Error
+
+    @Test("loadMoreAllArticles succeeds on retry after transient error")
+    @MainActor
+    func loadMoreAllArticlesRetryAfterError() {
+        let feed = TestFixtures.makePersistentFeed()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+
+        let totalCount = HomeViewModel.pageSize + 5
+        let articles = (0..<totalCount).map { i in
+            let article = TestFixtures.makePersistentArticle(
+                articleID: "a\(i)",
+                publishedDate: Date(timeIntervalSince1970: Double(totalCount - i) * 1_000_000)
+            )
+            article.feed = feed
+            return article
+        }
+        mockPersistence.articlesByFeedID[feed.id] = articles
+
+        let viewModel = HomeViewModel(persistence: mockPersistence)
+        viewModel.loadAllArticles()
+
+        #expect(viewModel.hasMoreAllArticles == true)
+        let countBeforeError = viewModel.allArticlesList.count
+
+        // First attempt fails
+        mockPersistence.errorToThrow = NSError(domain: "test", code: 1)
+        let failedResult = viewModel.loadMoreAllArticles()
+        #expect(failedResult == .failed("Unable to load all articles."))
+        #expect(viewModel.hasMoreAllArticles == true)
+        #expect(viewModel.allArticlesList.count == countBeforeError)
+
+        // Clear error and retry succeeds
+        mockPersistence.errorToThrow = nil
+        let retryResult = viewModel.loadMoreAllArticles()
+        #expect(retryResult == .loaded)
+        #expect(viewModel.allArticlesList.count > countBeforeError)
     }
 }
