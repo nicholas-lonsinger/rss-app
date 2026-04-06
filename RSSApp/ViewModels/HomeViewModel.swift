@@ -24,6 +24,21 @@ final class HomeViewModel {
     private(set) var unreadArticlesList: [PersistentArticle] = []
     private(set) var hasMoreUnreadArticles = true
 
+    // RATIONALE: Unlike FeedViewModel.sortAscending which auto-reloads on set,
+    // HomeViewModel does not auto-reload because it serves two independent views
+    // (AllArticlesView and UnreadArticlesView) that each need to reload their own
+    // specific list. Callers toggle the property then call the appropriate reload
+    // method (loadAllArticles or loadUnreadArticles) for their view.
+    /// Current sort order — reads from the global UserDefaults preference.
+    var sortAscending: Bool {
+        get { UserDefaults.standard.bool(forKey: FeedViewModel.sortAscendingKey) }
+        set {
+            guard UserDefaults.standard.bool(forKey: FeedViewModel.sortAscendingKey) != newValue else { return }
+            UserDefaults.standard.set(newValue, forKey: FeedViewModel.sortAscendingKey)
+            Self.logger.debug("sortAscending changed to \(newValue, privacy: .public)")
+        }
+    }
+
     private let persistence: FeedPersisting
 
     /// Async closure that performs the actual network feed refresh.
@@ -97,10 +112,11 @@ final class HomeViewModel {
 
     /// Loads the next page of all articles and appends to the existing list.
     func loadMoreAllArticles() {
+        let ascending = sortAscending
         loadMorePage(
             into: &allArticlesList,
             hasMore: &hasMoreAllArticles,
-            fetch: { offset, limit in try self.persistence.allArticles(offset: offset, limit: limit) },
+            fetch: { offset, limit in try self.persistence.allArticles(offset: offset, limit: limit, ascending: ascending) },
             label: "all articles"
         )
     }
@@ -121,10 +137,11 @@ final class HomeViewModel {
 
     /// Loads the next page of unread articles and appends to the existing list.
     func loadMoreUnreadArticles() {
+        let ascending = sortAscending
         loadMorePage(
             into: &unreadArticlesList,
             hasMore: &hasMoreUnreadArticles,
-            fetch: { offset, limit in try self.persistence.allUnreadArticles(offset: offset, limit: limit) },
+            fetch: { offset, limit in try self.persistence.allUnreadArticles(offset: offset, limit: limit, ascending: ascending) },
             label: "unread articles"
         )
     }
@@ -182,6 +199,21 @@ final class HomeViewModel {
         } catch {
             errorMessage = "Unable to update read status."
             Self.logger.error("Failed to toggle read status: \(error, privacy: .public)")
+        }
+    }
+
+    /// Marks all articles across all feeds as read.
+    func markAllAsRead() {
+        do {
+            try persistence.markAllArticlesRead()
+            loadUnreadCount()
+            loadAllArticles()
+            unreadArticlesList = []
+            hasMoreUnreadArticles = false
+            Self.logger.notice("Marked all articles as read across all feeds")
+        } catch {
+            errorMessage = "Unable to mark all articles as read."
+            Self.logger.error("Failed to mark all articles as read: \(error, privacy: .public)")
         }
     }
 }

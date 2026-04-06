@@ -89,10 +89,24 @@ final class MockFeedPersistenceService: FeedPersisting {
         return articlesByFeedID[feed.id] ?? []
     }
 
-    func articles(for feed: PersistentFeed, offset: Int, limit: Int) throws -> [PersistentArticle] {
+    func articles(for feed: PersistentFeed, offset: Int, limit: Int, ascending: Bool = false) throws -> [PersistentArticle] {
         if let error = errorToThrow { throw error }
         let all = (articlesByFeedID[feed.id] ?? [])
-            .sorted { ($0.publishedDate ?? .distantPast) > ($1.publishedDate ?? .distantPast) }
+            .sorted { ascending
+                ? ($0.publishedDate ?? .distantPast) < ($1.publishedDate ?? .distantPast)
+                : ($0.publishedDate ?? .distantPast) > ($1.publishedDate ?? .distantPast)
+            }
+        return Array(all.dropFirst(offset).prefix(limit))
+    }
+
+    func unreadArticles(for feed: PersistentFeed, offset: Int, limit: Int, ascending: Bool = false) throws -> [PersistentArticle] {
+        if let error = errorToThrow { throw error }
+        let all = (articlesByFeedID[feed.id] ?? [])
+            .filter { !$0.isRead }
+            .sorted { ascending
+                ? ($0.publishedDate ?? .distantPast) < ($1.publishedDate ?? .distantPast)
+                : ($0.publishedDate ?? .distantPast) > ($1.publishedDate ?? .distantPast)
+            }
         return Array(all.dropFirst(offset).prefix(limit))
     }
 
@@ -103,11 +117,14 @@ final class MockFeedPersistenceService: FeedPersisting {
             .sorted { ($0.publishedDate ?? .distantPast) > ($1.publishedDate ?? .distantPast) }
     }
 
-    func allArticles(offset: Int, limit: Int) throws -> [PersistentArticle] {
+    func allArticles(offset: Int, limit: Int, ascending: Bool = false) throws -> [PersistentArticle] {
         if let error = errorToThrow { throw error }
         let all = articlesByFeedID.values
             .flatMap { $0 }
-            .sorted { ($0.publishedDate ?? .distantPast) > ($1.publishedDate ?? .distantPast) }
+            .sorted { ascending
+                ? ($0.publishedDate ?? .distantPast) < ($1.publishedDate ?? .distantPast)
+                : ($0.publishedDate ?? .distantPast) > ($1.publishedDate ?? .distantPast)
+            }
         return Array(all.dropFirst(offset).prefix(limit))
     }
 
@@ -119,12 +136,15 @@ final class MockFeedPersistenceService: FeedPersisting {
             .sorted { ($0.publishedDate ?? .distantPast) > ($1.publishedDate ?? .distantPast) }
     }
 
-    func allUnreadArticles(offset: Int, limit: Int) throws -> [PersistentArticle] {
+    func allUnreadArticles(offset: Int, limit: Int, ascending: Bool = false) throws -> [PersistentArticle] {
         if let error = errorToThrow { throw error }
         let all = articlesByFeedID.values
             .flatMap { $0 }
             .filter { !$0.isRead }
-            .sorted { ($0.publishedDate ?? .distantPast) > ($1.publishedDate ?? .distantPast) }
+            .sorted { ascending
+                ? ($0.publishedDate ?? .distantPast) < ($1.publishedDate ?? .distantPast)
+                : ($0.publishedDate ?? .distantPast) > ($1.publishedDate ?? .distantPast)
+            }
         return Array(all.dropFirst(offset).prefix(limit))
     }
 
@@ -144,6 +164,26 @@ final class MockFeedPersistenceService: FeedPersisting {
         if let error = errorToThrow { throw error }
         article.isRead = isRead
         article.readDate = isRead ? Date() : nil
+    }
+
+    func markAllArticlesRead(for feed: PersistentFeed) throws {
+        if let error = errorToThrow { throw error }
+        let now = Date()
+        for article in (articlesByFeedID[feed.id] ?? []) where !article.isRead {
+            article.isRead = true
+            article.readDate = now
+        }
+    }
+
+    func markAllArticlesRead() throws {
+        if let error = errorToThrow { throw error }
+        let now = Date()
+        for articles in articlesByFeedID.values {
+            for article in articles where !article.isRead {
+                article.isRead = true
+                article.readDate = now
+            }
+        }
     }
 
     func unreadCount(for feed: PersistentFeed) throws -> Int {

@@ -5,6 +5,7 @@ struct ArticleListView: View {
     let persistence: FeedPersisting
     let thumbnailService: ArticleThumbnailCaching
     @State private var selectedArticle: PersistentArticle?
+    @State private var showMarkAllReadConfirmation = false
 
     var body: some View {
         Group {
@@ -53,6 +54,48 @@ struct ArticleListView: View {
             }
         }
         .navigationTitle(viewModel.feedTitle)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    Button {
+                        viewModel.sortAscending.toggle()
+                    } label: {
+                        Label(
+                            viewModel.sortAscending ? "Newest First" : "Oldest First",
+                            systemImage: viewModel.sortAscending ? "arrow.down" : "arrow.up"
+                        )
+                    }
+
+                    Button {
+                        viewModel.showUnreadOnly.toggle()
+                    } label: {
+                        Label(
+                            viewModel.showUnreadOnly ? "Show All Articles" : "Show Unread Only",
+                            systemImage: viewModel.showUnreadOnly ? "envelope.open" : "envelope.badge"
+                        )
+                    }
+
+                    Divider()
+
+                    Button(role: .destructive) {
+                        showMarkAllReadConfirmation = true
+                    } label: {
+                        Label("Mark All as Read", systemImage: "checkmark.circle")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+            }
+        }
+        .confirmationDialog(
+            "Mark all articles as read?",
+            isPresented: $showMarkAllReadConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Mark All as Read", role: .destructive) {
+                viewModel.markAllAsRead()
+            }
+        }
         .fullScreenCover(item: $selectedArticle) { article in
             ArticleReaderView(article: article, persistence: persistence)
         }

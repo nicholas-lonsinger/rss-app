@@ -635,4 +635,192 @@ struct FeedPersistenceServiceTests {
 
         #expect(articles[0].thumbnailRetryCount == 2)
     }
+
+    // MARK: - Sort Order
+
+    @Test("articles(for:offset:limit:ascending:true) returns oldest first")
+    @MainActor
+    func articlesForFeedAscending() throws {
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+
+        for i in 0..<3 {
+            try service.upsertArticles([
+                TestFixtures.makeArticle(
+                    id: "a\(i)",
+                    publishedDate: Date(timeIntervalSince1970: Double(i) * 1_000_000)
+                ),
+            ], for: feed)
+        }
+        try service.save()
+
+        let ascending = try service.articles(for: feed, offset: 0, limit: 10, ascending: true)
+        #expect(ascending[0].articleID == "a0")
+        #expect(ascending[2].articleID == "a2")
+
+        let descending = try service.articles(for: feed, offset: 0, limit: 10, ascending: false)
+        #expect(descending[0].articleID == "a2")
+        #expect(descending[2].articleID == "a0")
+    }
+
+    @Test("allArticles(offset:limit:ascending:true) returns oldest first")
+    @MainActor
+    func allArticlesAscending() throws {
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+
+        for i in 0..<3 {
+            try service.upsertArticles([
+                TestFixtures.makeArticle(
+                    id: "a\(i)",
+                    publishedDate: Date(timeIntervalSince1970: Double(i) * 1_000_000)
+                ),
+            ], for: feed)
+        }
+        try service.save()
+
+        let ascending = try service.allArticles(offset: 0, limit: 10, ascending: true)
+        #expect(ascending[0].articleID == "a0")
+        #expect(ascending[2].articleID == "a2")
+    }
+
+    @Test("allUnreadArticles(offset:limit:ascending:true) returns oldest first")
+    @MainActor
+    func allUnreadArticlesAscending() throws {
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+
+        for i in 0..<3 {
+            try service.upsertArticles([
+                TestFixtures.makeArticle(
+                    id: "a\(i)",
+                    publishedDate: Date(timeIntervalSince1970: Double(i) * 1_000_000)
+                ),
+            ], for: feed)
+        }
+        try service.save()
+
+        let ascending = try service.allUnreadArticles(offset: 0, limit: 10, ascending: true)
+        #expect(ascending[0].articleID == "a0")
+        #expect(ascending[2].articleID == "a2")
+    }
+
+    // MARK: - Unread Articles For Feed
+
+    @Test("unreadArticles(for:offset:limit:ascending:) returns only unread articles for feed")
+    @MainActor
+    func unreadArticlesForFeed() throws {
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+
+        for i in 0..<3 {
+            try service.upsertArticles([
+                TestFixtures.makeArticle(
+                    id: "a\(i)",
+                    publishedDate: Date(timeIntervalSince1970: Double(i) * 1_000_000)
+                ),
+            ], for: feed)
+        }
+        try service.save()
+
+        // Mark one as read
+        let allArticles = try service.articles(for: feed)
+        let middle = allArticles.first { $0.articleID == "a1" }!
+        try service.markArticleRead(middle, isRead: true)
+
+        let unread = try service.unreadArticles(for: feed, offset: 0, limit: 10, ascending: true)
+        #expect(unread.count == 2)
+        #expect(unread[0].articleID == "a0")
+        #expect(unread[1].articleID == "a2")
+    }
+
+    // MARK: - Mark All Articles Read
+
+    @Test("markAllArticlesRead(for:) marks all articles in feed as read")
+    @MainActor
+    func markAllArticlesReadForFeed() throws {
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed1 = TestFixtures.makePersistentFeed(title: "Feed 1")
+        let feed2 = TestFixtures.makePersistentFeed(title: "Feed 2")
+        try service.addFeed(feed1)
+        try service.addFeed(feed2)
+
+        try service.upsertArticles([
+            TestFixtures.makeArticle(id: "f1-a1"),
+            TestFixtures.makeArticle(id: "f1-a2"),
+        ], for: feed1)
+        try service.upsertArticles([
+            TestFixtures.makeArticle(id: "f2-a1"),
+        ], for: feed2)
+        try service.save()
+
+        try service.markAllArticlesRead(for: feed1)
+
+        let feed1Articles = try service.articles(for: feed1)
+        let feed1AllRead = feed1Articles.allSatisfy(\.isRead)
+        let feed1AllHaveReadDate = feed1Articles.allSatisfy { $0.readDate != nil }
+        #expect(feed1AllRead)
+        #expect(feed1AllHaveReadDate)
+
+        // Feed 2 articles should be unaffected
+        let feed2Articles = try service.articles(for: feed2)
+        let feed2AllUnread = feed2Articles.allSatisfy { !$0.isRead }
+        #expect(feed2AllUnread)
+    }
+
+    @Test("markAllArticlesRead() marks all articles across all feeds as read")
+    @MainActor
+    func markAllArticlesReadGlobal() throws {
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed1 = TestFixtures.makePersistentFeed(title: "Feed 1")
+        let feed2 = TestFixtures.makePersistentFeed(title: "Feed 2")
+        try service.addFeed(feed1)
+        try service.addFeed(feed2)
+
+        try service.upsertArticles([
+            TestFixtures.makeArticle(id: "f1-a1"),
+        ], for: feed1)
+        try service.upsertArticles([
+            TestFixtures.makeArticle(id: "f2-a1"),
+        ], for: feed2)
+        try service.save()
+
+        try service.markAllArticlesRead()
+
+        let all = try service.allArticles()
+        let allRead = all.allSatisfy(\.isRead)
+        let allHaveReadDate = all.allSatisfy { $0.readDate != nil }
+        #expect(allRead)
+        #expect(allHaveReadDate)
+        #expect(try service.totalUnreadCount() == 0)
+    }
+
+    @Test("markAllArticlesRead(for:) is no-op when all articles already read")
+    @MainActor
+    func markAllArticlesReadForFeedNoOp() throws {
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+
+        try service.upsertArticles([TestFixtures.makeArticle(id: "a1")], for: feed)
+        try service.save()
+
+        let articles = try service.articles(for: feed)
+        try service.markArticleRead(articles[0], isRead: true)
+
+        // Should not throw
+        try service.markAllArticlesRead(for: feed)
+        #expect(try service.unreadCount(for: feed) == 0)
+    }
 }

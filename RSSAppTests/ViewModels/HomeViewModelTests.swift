@@ -693,4 +693,213 @@ struct HomeViewModelTests {
 
         #expect(viewModel.errorMessage == nil)
     }
+
+    // MARK: - Sort Order
+
+    @Test("sortAscending reads from UserDefaults via shared key")
+    @MainActor
+    func sortAscendingReadsSharedKey() {
+        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
+        let mockPersistence = MockFeedPersistenceService()
+        let viewModel = HomeViewModel(persistence: mockPersistence)
+
+        #expect(viewModel.sortAscending == false)
+
+        viewModel.sortAscending = true
+        #expect(viewModel.sortAscending == true)
+        #expect(UserDefaults.standard.bool(forKey: FeedViewModel.sortAscendingKey) == true)
+
+        // Clean up
+        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
+    }
+
+    @Test("loadAllArticles respects ascending sort order")
+    @MainActor
+    func loadAllArticlesAscending() {
+        UserDefaults.standard.set(true, forKey: FeedViewModel.sortAscendingKey)
+        let feed = TestFixtures.makePersistentFeed()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+
+        let article1 = TestFixtures.makePersistentArticle(
+            articleID: "a1",
+            publishedDate: Date(timeIntervalSince1970: 1_000_000)
+        )
+        article1.feed = feed
+        let article2 = TestFixtures.makePersistentArticle(
+            articleID: "a2",
+            publishedDate: Date(timeIntervalSince1970: 2_000_000)
+        )
+        article2.feed = feed
+        mockPersistence.articlesByFeedID[feed.id] = [article1, article2]
+
+        let viewModel = HomeViewModel(persistence: mockPersistence)
+        viewModel.loadAllArticles()
+
+        // Ascending: oldest first
+        #expect(viewModel.allArticlesList.first?.articleID == "a1")
+        #expect(viewModel.allArticlesList.last?.articleID == "a2")
+
+        // Clean up
+        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
+    }
+
+    @Test("loadUnreadArticles respects ascending sort order")
+    @MainActor
+    func loadUnreadArticlesAscending() {
+        UserDefaults.standard.set(true, forKey: FeedViewModel.sortAscendingKey)
+        let feed = TestFixtures.makePersistentFeed()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+
+        let article1 = TestFixtures.makePersistentArticle(
+            articleID: "u1",
+            publishedDate: Date(timeIntervalSince1970: 1_000_000),
+            isRead: false
+        )
+        article1.feed = feed
+        let article2 = TestFixtures.makePersistentArticle(
+            articleID: "u2",
+            publishedDate: Date(timeIntervalSince1970: 2_000_000),
+            isRead: false
+        )
+        article2.feed = feed
+        mockPersistence.articlesByFeedID[feed.id] = [article1, article2]
+
+        let viewModel = HomeViewModel(persistence: mockPersistence)
+        viewModel.loadUnreadArticles()
+
+        // Ascending: oldest first
+        #expect(viewModel.unreadArticlesList.first?.articleID == "u1")
+        #expect(viewModel.unreadArticlesList.last?.articleID == "u2")
+
+        // Clean up
+        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
+    }
+
+    // MARK: - Mark All as Read
+
+    @Test("markAllAsRead marks all articles as read and updates unread count")
+    @MainActor
+    func markAllAsReadUpdatesState() {
+        let feed = TestFixtures.makePersistentFeed()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+
+        let article1 = TestFixtures.makePersistentArticle(articleID: "a1", isRead: false)
+        article1.feed = feed
+        let article2 = TestFixtures.makePersistentArticle(articleID: "a2", isRead: false)
+        article2.feed = feed
+        mockPersistence.articlesByFeedID[feed.id] = [article1, article2]
+
+        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
+        let viewModel = HomeViewModel(persistence: mockPersistence)
+        viewModel.loadUnreadCount()
+        #expect(viewModel.unreadCount == 2)
+
+        viewModel.loadUnreadArticles()
+        #expect(viewModel.unreadArticlesList.count == 2)
+
+        viewModel.markAllAsRead()
+
+        #expect(article1.isRead == true)
+        #expect(article2.isRead == true)
+        #expect(viewModel.unreadCount == 0)
+        #expect(viewModel.unreadArticlesList.isEmpty)
+        #expect(viewModel.errorMessage == nil)
+
+        // Clean up
+        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
+    }
+
+    @Test("markAllAsRead sets errorMessage on persistence failure")
+    @MainActor
+    func markAllAsReadError() {
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.errorToThrow = NSError(domain: "test", code: 1)
+
+        let viewModel = HomeViewModel(persistence: mockPersistence)
+        viewModel.markAllAsRead()
+
+        #expect(viewModel.errorMessage != nil)
+    }
+
+    @Test("markAllAsRead clears unread articles list")
+    @MainActor
+    func markAllAsReadClearsUnreadList() {
+        let feed = TestFixtures.makePersistentFeed()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+
+        let article = TestFixtures.makePersistentArticle(articleID: "u1", isRead: false)
+        article.feed = feed
+        mockPersistence.articlesByFeedID[feed.id] = [article]
+
+        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
+        let viewModel = HomeViewModel(persistence: mockPersistence)
+        viewModel.loadUnreadArticles()
+        #expect(viewModel.unreadArticlesList.count == 1)
+
+        viewModel.markAllAsRead()
+
+        #expect(viewModel.unreadArticlesList.isEmpty)
+        #expect(viewModel.hasMoreUnreadArticles == false)
+
+        // Clean up
+        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
+    }
+
+    @Test("markAllAsRead reloads allArticlesList with updated read state")
+    @MainActor
+    func markAllAsReadReloadsAllArticlesList() {
+        let feed = TestFixtures.makePersistentFeed()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+
+        let article1 = TestFixtures.makePersistentArticle(articleID: "a1", isRead: false)
+        article1.feed = feed
+        let article2 = TestFixtures.makePersistentArticle(articleID: "a2", isRead: false)
+        article2.feed = feed
+        mockPersistence.articlesByFeedID[feed.id] = [article1, article2]
+
+        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
+        let viewModel = HomeViewModel(persistence: mockPersistence)
+        viewModel.loadAllArticles()
+        #expect(viewModel.allArticlesList.count == 2)
+
+        viewModel.markAllAsRead()
+
+        // allArticlesList should be reloaded (still 2 articles, but now all read)
+        #expect(viewModel.allArticlesList.count == 2)
+        let allRead = viewModel.allArticlesList.allSatisfy(\.isRead)
+        #expect(allRead)
+
+        // Clean up
+        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
+    }
+
+    @Test("sortAscending setter is no-op when set to same value")
+    @MainActor
+    func sortAscendingSameValueNoOp() {
+        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
+        let mockPersistence = MockFeedPersistenceService()
+        let viewModel = HomeViewModel(persistence: mockPersistence)
+
+        #expect(viewModel.sortAscending == false)
+
+        // Set to same value (false) — should not write to UserDefaults
+        viewModel.sortAscending = false
+        // Verify it's still false (no change)
+        #expect(viewModel.sortAscending == false)
+
+        // Now set to true, then set to true again
+        viewModel.sortAscending = true
+        #expect(viewModel.sortAscending == true)
+
+        viewModel.sortAscending = true
+        #expect(viewModel.sortAscending == true)
+
+        // Clean up
+        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
+    }
 }
