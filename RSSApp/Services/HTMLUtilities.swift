@@ -78,12 +78,26 @@ enum HTMLUtilities {
             .replacingOccurrences(of: ">", with: "&gt;")
     }
 
-    /// Extracts the first `<img src="...">` URL from HTML content.
+    /// Extracts the first `<img src="...">` URL from HTML content,
+    /// skipping known tracking pixels and analytics beacons.
     static func extractFirstImageURL(from html: String) -> URL? {
-        guard let match = html.firstMatch(of: ##/<img[^>]+src=["']([^"']+)["']/##) else {
-            return nil
+        let pattern = ##/<img[^>]+src=["']([^"']+)["']/##
+        for match in html.matches(of: pattern) {
+            let src = String(match.1)
+            if isTrackingPixelURL(src) { continue }
+            return URL(string: src)
         }
-        return URL(string: String(match.1))
+        return nil
+    }
+
+    /// Returns `true` for URLs that are known tracking pixels or analytics beacons
+    /// rather than actual content images.
+    private static func isTrackingPixelURL(_ urlString: String) -> Bool {
+        // Medium read-tracking pixel
+        if urlString.contains("/stat?event=") { return true }
+        // Common 1x1 tracking pixel patterns
+        if urlString.contains("/pixel") || urlString.contains("/track") { return true }
+        return false
     }
 
     /// Extracts the `og:image` URL from an HTML page's `<meta>` tags.

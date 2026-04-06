@@ -56,6 +56,12 @@ struct ArticleThumbnailService: ArticleThumbnailCaching {
             return .permanentFailure
         }
 
+        // Reject SVG URLs before downloading — UIImage can't render SVGs
+        if remoteURL.pathExtension.lowercased() == "svg" {
+            Self.logger.debug("Rejecting SVG URL before download: \(remoteURL.absoluteString, privacy: .public)")
+            return .permanentFailure
+        }
+
         do {
             var request = URLRequest(url: remoteURL, timeoutInterval: Self.fetchTimeout)
             request.setBrowserUserAgent()
@@ -68,8 +74,14 @@ struct ArticleThumbnailService: ArticleThumbnailCaching {
                 return (400...499).contains(code) ? .permanentFailure : .transientFailure
             }
 
+            // Reject SVG content type — catches extensionless SVG URLs (e.g. deploy buttons)
+            let contentType = httpResponse.value(forHTTPHeaderField: "Content-Type") ?? ""
+            if contentType.contains("svg") {
+                Self.logger.debug("Rejecting SVG content type (\(contentType, privacy: .public), \(data.count, privacy: .public) bytes) from \(remoteURL.absoluteString, privacy: .public)")
+                return .permanentFailure
+            }
+
             guard let image = UIImage(data: data) else {
-                let contentType = httpResponse.value(forHTTPHeaderField: "Content-Type") ?? "unknown"
                 Self.logger.warning("Downloaded data is not a valid image (\(contentType, privacy: .public), \(data.count, privacy: .public) bytes) from \(remoteURL.absoluteString, privacy: .public)")
                 return .permanentFailure
             }

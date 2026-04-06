@@ -173,6 +173,25 @@ struct HTMLUtilitiesTests {
         #expect(HTMLUtilities.extractFirstImageURL(from: "") == nil)
     }
 
+    @Test("Skips Medium tracking pixel and returns next real image")
+    func skipsMediumTrackingPixel() {
+        let html = """
+            <img src="https://medium.com/_/stat?event=post.clientViewed&referrerSource=full_rss&postId=abc123">
+            <img src="https://cdn-images.example.com/photo.jpg">
+            """
+        let url = HTMLUtilities.extractFirstImageURL(from: html)
+        #expect(url?.absoluteString == "https://cdn-images.example.com/photo.jpg")
+    }
+
+    @Test("Returns nil when only tracking pixel images present")
+    func returnsNilForOnlyTrackingPixels() {
+        let html = """
+            <img src="https://example.com/pixel?track=1">
+            <img src="https://analytics.example.com/stat?event=view">
+            """
+        #expect(HTMLUtilities.extractFirstImageURL(from: html) == nil)
+    }
+
     // MARK: - extractOGImageURL
 
     @Test("Extracts og:image URL from meta tag")
