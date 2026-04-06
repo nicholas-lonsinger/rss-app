@@ -274,6 +274,97 @@ struct ArticleRetentionServiceTests {
         }
     }
 
+    @Test("enforceArticleLimit does not delete thumbnails when deleteArticles fails")
+    @MainActor
+    func enforceNoThumbnailDeletionOnDBFailure() throws {
+        let persistence = MockFeedPersistenceService()
+        let thumbnailService = MockArticleThumbnailService()
+
+        let feed = TestFixtures.makePersistentFeed()
+        persistence.feeds = [feed]
+
+        let baseDate = Date(timeIntervalSince1970: 1_000_000)
+        // 1002 articles: 2 oldest will be deleted, both with cached thumbnails
+        var articles: [PersistentArticle] = [
+            TestFixtures.makePersistentArticle(
+                articleID: "old-1",
+                publishedDate: baseDate,
+                isThumbnailCached: true
+            ),
+            TestFixtures.makePersistentArticle(
+                articleID: "old-2",
+                publishedDate: baseDate.addingTimeInterval(60),
+                isThumbnailCached: true
+            ),
+        ]
+        for i in 0..<1000 {
+            articles.append(TestFixtures.makePersistentArticle(
+                articleID: "new-\(i)",
+                publishedDate: baseDate.addingTimeInterval(Double(i + 2) * 60)
+            ))
+        }
+        persistence.articlesByFeedID[feed.id] = articles
+
+        // Simulate batch deletion failure (e.g., partial batch success in production)
+        persistence.deleteArticlesError = NSError(domain: "test", code: 42)
+
+        let service = ArticleRetentionService()
+        service.articleLimit = .oneThousand
+        defer { service.articleLimit = .defaultLimit }
+
+        #expect(throws: (any Error).self) {
+            try service.enforceArticleLimit(
+                persistence: persistence,
+                thumbnailService: thumbnailService
+            )
+        }
+
+        // Thumbnails must NOT be deleted when DB deletion fails — articles may still
+        // exist in the database and need their thumbnail files intact
+        #expect(thumbnailService.deleteCallCount == 0)
+        #expect(thumbnailService.deletedArticleIDs.isEmpty)
+    }
+
+    @Test("enforceArticleLimit deletes thumbnails only after successful DB deletion")
+    @MainActor
+    func enforceThumbnailDeletionAfterDBSuccess() throws {
+        let persistence = MockFeedPersistenceService()
+        let thumbnailService = MockArticleThumbnailService()
+
+        let feed = TestFixtures.makePersistentFeed()
+        persistence.feeds = [feed]
+
+        let baseDate = Date(timeIntervalSince1970: 1_000_000)
+        var articles: [PersistentArticle] = [
+            TestFixtures.makePersistentArticle(
+                articleID: "old-cached",
+                publishedDate: baseDate,
+                isThumbnailCached: true
+            ),
+        ]
+        for i in 0..<1000 {
+            articles.append(TestFixtures.makePersistentArticle(
+                articleID: "new-\(i)",
+                publishedDate: baseDate.addingTimeInterval(Double(i + 1) * 60)
+            ))
+        }
+        persistence.articlesByFeedID[feed.id] = articles
+
+        let service = ArticleRetentionService()
+        service.articleLimit = .oneThousand
+        defer { service.articleLimit = .defaultLimit }
+
+        try service.enforceArticleLimit(
+            persistence: persistence,
+            thumbnailService: thumbnailService
+        )
+
+        // DB deletion succeeded, so thumbnails should be cleaned up
+        #expect(persistence.deleteArticlesCallCount == 1)
+        #expect(thumbnailService.deleteCallCount == 1)
+        #expect(thumbnailService.deletedArticleIDs == ["old-cached"])
+    }
+
     @Test("enforceArticleLimit uses default limit when UserDefaults has no value")
     @MainActor
     func enforceDefaultLimit() throws {

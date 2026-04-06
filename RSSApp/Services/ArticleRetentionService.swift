@@ -95,13 +95,25 @@ struct ArticleRetentionService: ArticleRetaining {
             return
         }
 
-        // Delete thumbnail files for articles that have cached thumbnails
-        for article in articlesToDelete where article.isThumbnailCached {
-            thumbnailService.deleteCachedThumbnail(for: article.articleID)
-        }
+        // Collect thumbnail info before deletion so we can clean up files afterward
+        let cachedThumbnailIDs = articlesToDelete
+            .filter(\.isThumbnailCached)
+            .map(\.articleID)
 
+        // Delete database records first. With batched deletion, a failure in a later
+        // batch leaves earlier batches committed. Deleting DB records before thumbnails
+        // ensures articles still in the DB always have their thumbnail files intact.
+        // On partial failure, orphaned thumbnail files from successfully-deleted articles
+        // are harmless disk waste — they remain on disk until the OS purges the Caches
+        // directory under storage pressure. There is no orphan-scanning mechanism;
+        // only articles still in the DB have their thumbnails cleaned up.
         let articleIDs = Set(articlesToDelete.map(\.articleID))
         try persistence.deleteArticles(withIDs: articleIDs)
+
+        // Full success: delete all thumbnail files for deleted articles
+        for articleID in cachedThumbnailIDs {
+            thumbnailService.deleteCachedThumbnail(for: articleID)
+        }
 
         Self.logger.notice("Cleanup complete: deleted \(articlesToDelete.count, privacy: .public) articles")
     }

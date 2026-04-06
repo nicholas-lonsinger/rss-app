@@ -256,6 +256,7 @@ final class MockFeedPersistenceService: FeedPersisting {
     // MARK: - Article Cleanup
 
     var deleteArticlesCallCount = 0
+    var deleteArticlesError: (any Error)?
     var lastDeletedArticleIDs: Set<String> = []
 
     func totalArticleCount() throws -> Int {
@@ -277,7 +278,7 @@ final class MockFeedPersistenceService: FeedPersisting {
     }
 
     func deleteArticles(withIDs articleIDs: Set<String>) throws {
-        if let error = errorToThrow { throw error }
+        if let error = deleteArticlesError ?? errorToThrow { throw error }
         deleteArticlesCallCount += 1
         lastDeletedArticleIDs = articleIDs
         for feedID in articlesByFeedID.keys {
