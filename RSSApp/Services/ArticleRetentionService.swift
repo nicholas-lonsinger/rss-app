@@ -12,12 +12,23 @@ enum ArticleLimit: Int, CaseIterable, Identifiable {
     case fifteenThousand = 15_000
     case twentyFiveThousand = 25_000
 
+    private static let logger = Logger(category: "ArticleLimit")
+
     var id: Int { rawValue }
 
-    var displayLabel: String {
+    private static let numberFormatter: NumberFormatter = {
         let formatter = NumberFormatter()
         formatter.numberStyle = .decimal
-        return formatter.string(from: NSNumber(value: rawValue)) ?? "\(rawValue)"
+        return formatter
+    }()
+
+    var displayLabel: String {
+        guard let formatted = Self.numberFormatter.string(from: NSNumber(value: rawValue)) else {
+            Self.logger.fault("NumberFormatter failed for rawValue '\(rawValue, privacy: .public)'")
+            assertionFailure("NumberFormatter failed for rawValue: \(rawValue)")
+            return "\(rawValue)"
+        }
+        return formatted
     }
 
     static let defaultLimit: ArticleLimit = .tenThousand
@@ -48,14 +59,17 @@ struct ArticleRetentionService: ArticleRetaining {
 
     private static let logger = Logger(category: "ArticleRetentionService")
 
-    static let articleLimitDefaultsKey = "articleRetentionLimit"
+    private static let articleLimitDefaultsKey = "articleRetentionLimit"
 
     var articleLimit: ArticleLimit {
         get {
             let stored = UserDefaults.standard.integer(forKey: Self.articleLimitDefaultsKey)
             return ArticleLimit(rawValue: stored) ?? .defaultLimit
         }
-        set {
+        // RATIONALE: nonmutating because the backing store is UserDefaults, not a stored
+        // property on self. This allows views to call the setter without requiring a mutable
+        // binding to the service.
+        nonmutating set {
             UserDefaults.standard.set(newValue.rawValue, forKey: Self.articleLimitDefaultsKey)
             Self.logger.notice("Article limit changed to \(newValue.rawValue, privacy: .public)")
         }
@@ -76,7 +90,10 @@ struct ArticleRetentionService: ArticleRetaining {
         Self.logger.notice("Article count \(totalCount, privacy: .public) exceeds limit \(limit, privacy: .public), starting cleanup")
 
         let articlesToDelete = try persistence.oldestArticleIDsExceedingLimit(limit)
-        guard !articlesToDelete.isEmpty else { return }
+        guard !articlesToDelete.isEmpty else {
+            Self.logger.warning("Count \(totalCount, privacy: .public) exceeds limit \(limit, privacy: .public) but no articles returned for deletion — possible count/fetch inconsistency")
+            return
+        }
 
         // Delete thumbnail files for articles that have cached thumbnails
         for article in articlesToDelete where article.isThumbnailCached {

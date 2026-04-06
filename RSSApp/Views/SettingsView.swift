@@ -36,14 +36,11 @@ struct SettingsView: View {
 struct ArticleLimitView: View {
 
     @State private var selectedLimit: ArticleLimit
+    private let retentionService: ArticleRetentionService
 
-    init() {
-        let stored = UserDefaults.standard.integer(
-            forKey: ArticleRetentionService.articleLimitDefaultsKey
-        )
-        _selectedLimit = State(
-            initialValue: ArticleLimit(rawValue: stored) ?? .defaultLimit
-        )
+    init(retentionService: ArticleRetentionService = ArticleRetentionService()) {
+        self.retentionService = retentionService
+        _selectedLimit = State(initialValue: retentionService.articleLimit)
     }
 
     var body: some View {
@@ -52,10 +49,7 @@ struct ArticleLimitView: View {
                 ForEach(ArticleLimit.allCases) { limit in
                     Button {
                         selectedLimit = limit
-                        UserDefaults.standard.set(
-                            limit.rawValue,
-                            forKey: ArticleRetentionService.articleLimitDefaultsKey
-                        )
+                        retentionService.articleLimit = limit
                     } label: {
                         HStack {
                             Text(limit.displayLabel)
@@ -63,7 +57,7 @@ struct ArticleLimitView: View {
                             Spacer()
                             if limit == selectedLimit {
                                 Image(systemName: "checkmark")
-                                    .foregroundStyle(.blue)
+                                    .foregroundStyle(Color.accentColor)
                                     .fontWeight(.semibold)
                             }
                         }

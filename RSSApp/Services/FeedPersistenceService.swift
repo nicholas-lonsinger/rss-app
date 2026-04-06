@@ -426,6 +426,9 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
             predicate: #Predicate { idsArray.contains($0.articleID) }
         )
         let articles = try modelContext.fetch(descriptor)
+        if articles.count != articleIDs.count {
+            Self.logger.warning("Requested deletion of \(articleIDs.count, privacy: .public) articles but found \(articles.count, privacy: .public)")
+        }
         for article in articles {
             modelContext.delete(article)
         }

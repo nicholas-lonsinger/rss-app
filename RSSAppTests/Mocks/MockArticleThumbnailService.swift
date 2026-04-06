@@ -12,6 +12,7 @@ final class MockArticleThumbnailService: ArticleThumbnailCaching, @unchecked Sen
     var resolveCallCount = 0
     var deleteCallCount = 0
     var cachedArticleIDs: [String] = []
+    var deletedArticleIDs: [String] = []
 
     func cacheThumbnail(from remoteURL: URL, articleID: String) async -> Bool {
         cacheCallCount += 1
@@ -31,5 +32,6 @@ final class MockArticleThumbnailService: ArticleThumbnailCaching, @unchecked Sen
 
     func deleteCachedThumbnail(for articleID: String) {
         deleteCallCount += 1
+        deletedArticleIDs.append(articleID)
     }
 }

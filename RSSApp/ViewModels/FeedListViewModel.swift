@@ -405,6 +405,10 @@ final class FeedListViewModel {
             )
         } catch {
             Self.logger.error("Article retention cleanup failed: \(error, privacy: .public)")
+            // Only set if no higher-priority error (save failure, fetch failure) is already displayed.
+            if errorMessage == nil {
+                errorMessage = "Article cleanup could not complete."
+            }
         }
 
         // Cancel any in-flight prefetch from a previous refresh cycle before starting a new one

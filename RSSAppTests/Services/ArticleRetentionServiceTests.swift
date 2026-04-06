@@ -5,6 +5,11 @@ import Foundation
 @Suite("ArticleRetentionService Tests")
 struct ArticleRetentionServiceTests {
 
+    /// The UserDefaults key used by ArticleRetentionService, duplicated here for
+    /// tests that deliberately write invalid values to verify fallback behavior.
+    /// The production key is intentionally private to prevent direct UserDefaults access.
+    private static let articleLimitDefaultsKey = "articleRetentionLimit"
+
     // MARK: - ArticleLimit enum
 
     @Test("ArticleLimit has correct raw values")
@@ -71,8 +76,40 @@ struct ArticleRetentionServiceTests {
             TestFixtures.makePersistentArticle(articleID: "a2"),
         ]
 
-        var service = ArticleRetentionService()
+        let service = ArticleRetentionService()
         service.articleLimit = .tenThousand
+        defer { service.articleLimit = .defaultLimit }
+
+        try service.enforceArticleLimit(
+            persistence: persistence,
+            thumbnailService: thumbnailService
+        )
+
+        #expect(persistence.deleteArticlesCallCount == 0)
+        #expect(thumbnailService.deleteCallCount == 0)
+    }
+
+    @Test("enforceArticleLimit does nothing when count exactly equals limit")
+    @MainActor
+    func enforceExactlyAtLimit() throws {
+        let persistence = MockFeedPersistenceService()
+        let thumbnailService = MockArticleThumbnailService()
+
+        let feed = TestFixtures.makePersistentFeed()
+        persistence.feeds = [feed]
+
+        let baseDate = Date(timeIntervalSince1970: 1_000_000)
+        // Create exactly 1000 articles with a limit of 1000
+        persistence.articlesByFeedID[feed.id] = (0..<1000).map { i in
+            TestFixtures.makePersistentArticle(
+                articleID: "article-\(i)",
+                publishedDate: baseDate.addingTimeInterval(Double(i) * 60)
+            )
+        }
+
+        let service = ArticleRetentionService()
+        service.articleLimit = .oneThousand
+        defer { service.articleLimit = .defaultLimit }
 
         try service.enforceArticleLimit(
             persistence: persistence,
@@ -102,10 +139,9 @@ struct ArticleRetentionServiceTests {
         }
 
         // Set smallest valid limit
-        UserDefaults.standard.set(ArticleLimit.oneThousand.rawValue, forKey: ArticleRetentionService.articleLimitDefaultsKey)
-        defer { UserDefaults.standard.removeObject(forKey: ArticleRetentionService.articleLimitDefaultsKey) }
-
         let service = ArticleRetentionService()
+        service.articleLimit = .oneThousand
+        defer { service.articleLimit = .defaultLimit }
 
         try service.enforceArticleLimit(
             persistence: persistence,
@@ -150,10 +186,9 @@ struct ArticleRetentionServiceTests {
         }
         persistence.articlesByFeedID[feed.id] = articles
 
-        UserDefaults.standard.set(ArticleLimit.oneThousand.rawValue, forKey: ArticleRetentionService.articleLimitDefaultsKey)
-        defer { UserDefaults.standard.removeObject(forKey: ArticleRetentionService.articleLimitDefaultsKey) }
-
         let service = ArticleRetentionService()
+        service.articleLimit = .oneThousand
+        defer { service.articleLimit = .defaultLimit }
 
         try service.enforceArticleLimit(
             persistence: persistence,
@@ -162,6 +197,7 @@ struct ArticleRetentionServiceTests {
 
         // Only 1 of the 2 deleted articles has a cached thumbnail
         #expect(thumbnailService.deleteCallCount == 1)
+        #expect(thumbnailService.deletedArticleIDs == ["old-cached"])
         #expect(persistence.deleteArticlesCallCount == 1)
         #expect(persistence.lastDeletedArticleIDs.count == 2)
         #expect(persistence.lastDeletedArticleIDs.contains("old-cached"))
@@ -206,10 +242,9 @@ struct ArticleRetentionServiceTests {
         persistence.articlesByFeedID[feed2.id] = feed2Articles
 
         // Total: 1002 articles. Limit of 1000 => delete 2 oldest (f1-old and f2-mid)
-        UserDefaults.standard.set(ArticleLimit.oneThousand.rawValue, forKey: ArticleRetentionService.articleLimitDefaultsKey)
-        defer { UserDefaults.standard.removeObject(forKey: ArticleRetentionService.articleLimitDefaultsKey) }
-
         let service = ArticleRetentionService()
+        service.articleLimit = .oneThousand
+        defer { service.articleLimit = .defaultLimit }
 
         try service.enforceArticleLimit(
             persistence: persistence,
@@ -242,7 +277,7 @@ struct ArticleRetentionServiceTests {
     @Test("enforceArticleLimit uses default limit when UserDefaults has no value")
     @MainActor
     func enforceDefaultLimit() throws {
-        UserDefaults.standard.removeObject(forKey: ArticleRetentionService.articleLimitDefaultsKey)
+        UserDefaults.standard.removeObject(forKey: Self.articleLimitDefaultsKey)
 
         let service = ArticleRetentionService()
         #expect(service.articleLimit == .defaultLimit)
@@ -252,8 +287,8 @@ struct ArticleRetentionServiceTests {
     @Test("enforceArticleLimit uses default limit when UserDefaults has invalid value")
     @MainActor
     func enforceInvalidUserDefaultsValue() throws {
-        UserDefaults.standard.set(999, forKey: ArticleRetentionService.articleLimitDefaultsKey)
-        defer { UserDefaults.standard.removeObject(forKey: ArticleRetentionService.articleLimitDefaultsKey) }
+        UserDefaults.standard.set(999, forKey: Self.articleLimitDefaultsKey)
+        defer { UserDefaults.standard.removeObject(forKey: Self.articleLimitDefaultsKey) }
 
         let service = ArticleRetentionService()
         #expect(service.articleLimit == .defaultLimit)
