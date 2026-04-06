@@ -122,12 +122,19 @@ final class FeedViewModel {
         }
     }
 
-    /// Loads the next page and returns whether new articles were loaded.
+    /// Loads the next page and returns the outcome.
     /// Used by the article reader to trigger pagination when the user navigates past the last loaded article.
-    func loadMoreAndReport() -> Bool {
+    func loadMoreAndReport() -> LoadMoreResult {
         let countBefore = articles.count
+        let errorBefore = errorMessage
         loadMoreArticles()
-        return articles.count > countBefore
+        if articles.count > countBefore {
+            return .loaded
+        } else if errorMessage != nil && errorMessage != errorBefore {
+            return .failed(errorMessage ?? "Unable to load more articles.")
+        } else {
+            return .exhausted
+        }
     }
 
     func markAsRead(_ article: PersistentArticle) {

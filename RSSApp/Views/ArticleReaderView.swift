@@ -11,8 +11,8 @@ struct ArticleReaderView: View {
     @Binding var currentIndex: Int
 
     /// Closure to trigger loading more articles when the user navigates past the last loaded article.
-    /// Returns `true` if more articles were loaded, `false` if no more are available or an error occurred.
-    let loadMore: (() -> Bool)?
+    /// Returns a `LoadMoreResult` indicating whether articles were loaded, the data source is exhausted, or an error occurred.
+    let loadMore: (() -> LoadMoreResult)?
 
     private static let logger = Logger(category: "ArticleReaderView")
 
@@ -183,7 +183,12 @@ struct ArticleReaderView: View {
 
         if isAtLastLoaded {
             // Try to load more articles before advancing
-            if let loadMore, loadMore() {
+            guard let loadMore else {
+                Self.logger.info("No more articles available at end of list (no loadMore closure)")
+                return
+            }
+            switch loadMore() {
+            case .loaded:
                 Self.logger.info("Loaded more articles via pagination, advancing to next (index \(self.currentIndex + 1, privacy: .public))")
                 // RATIONALE: After loadMore appends to the view model's array, the local
                 // `articles` snapshot is stale (value-type copy). We update currentIndex via
@@ -195,8 +200,11 @@ struct ArticleReaderView: View {
                 extractionState = ReaderExtractionState()
                 showSummary = false
                 currentIndex += 1
-            } else {
+            case .exhausted:
                 Self.logger.info("No more articles available at end of list")
+            case .failed(let message):
+                Self.logger.error("Failed to load more articles: \(message, privacy: .public)")
+                errorMessage = message
             }
         } else {
             Self.logger.debug("Navigating to next article (index \(self.currentIndex + 1, privacy: .public))")

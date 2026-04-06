@@ -1364,9 +1364,9 @@ struct HomeViewModelTests {
 
     // MARK: - Load More And Report
 
-    @Test("loadMoreAllArticlesAndReport returns true when new articles are loaded")
+    @Test("loadMoreAllArticlesAndReport returns .loaded when new articles are loaded")
     @MainActor
-    func loadMoreAllArticlesAndReportReturnsTrue() {
+    func loadMoreAllArticlesAndReportReturnsLoaded() {
         let feed = TestFixtures.makePersistentFeed()
         let mockPersistence = MockFeedPersistenceService()
         mockPersistence.feeds = [feed]
@@ -1391,13 +1391,13 @@ struct HomeViewModelTests {
 
         let result = viewModel.loadMoreAllArticlesAndReport()
 
-        #expect(result == true)
+        #expect(result == .loaded)
         #expect(viewModel.allArticlesList.count == totalCount)
     }
 
-    @Test("loadMoreAllArticlesAndReport returns false when no more articles exist")
+    @Test("loadMoreAllArticlesAndReport returns .exhausted when no more articles exist")
     @MainActor
-    func loadMoreAllArticlesAndReportReturnsFalse() {
+    func loadMoreAllArticlesAndReportReturnsExhausted() {
         let feed = TestFixtures.makePersistentFeed()
         let mockPersistence = MockFeedPersistenceService()
         mockPersistence.feeds = [feed]
@@ -1414,13 +1414,45 @@ struct HomeViewModelTests {
 
         let result = viewModel.loadMoreAllArticlesAndReport()
 
-        #expect(result == false)
+        #expect(result == .exhausted)
         #expect(viewModel.allArticlesList.count == 1)
     }
 
-    @Test("loadMoreUnreadArticlesAndReport returns true when new articles are loaded")
+    @Test("loadMoreAllArticlesAndReport returns .failed on persistence error")
     @MainActor
-    func loadMoreUnreadArticlesAndReportReturnsTrue() {
+    func loadMoreAllArticlesAndReportReturnsFailed() {
+        let feed = TestFixtures.makePersistentFeed()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+
+        // Create enough articles for pagination
+        let totalCount = HomeViewModel.pageSize + 5
+        let articles = (0..<totalCount).map { i in
+            let article = TestFixtures.makePersistentArticle(
+                articleID: "a\(i)",
+                publishedDate: Date(timeIntervalSince1970: Double(totalCount - i) * 1_000_000)
+            )
+            article.feed = feed
+            return article
+        }
+        mockPersistence.articlesByFeedID[feed.id] = articles
+
+        let viewModel = HomeViewModel(persistence: mockPersistence)
+        viewModel.loadAllArticles()
+
+        #expect(viewModel.hasMoreAllArticles == true)
+
+        // Inject error for the next page load
+        mockPersistence.errorToThrow = NSError(domain: "test", code: 1)
+        let result = viewModel.loadMoreAllArticlesAndReport()
+
+        #expect(result == .failed("Unable to load all articles."))
+        #expect(viewModel.errorMessage != nil)
+    }
+
+    @Test("loadMoreUnreadArticlesAndReport returns .loaded when new articles are loaded")
+    @MainActor
+    func loadMoreUnreadArticlesAndReportReturnsLoaded() {
         let feed = TestFixtures.makePersistentFeed()
         let mockPersistence = MockFeedPersistenceService()
         mockPersistence.feeds = [feed]
@@ -1445,13 +1477,13 @@ struct HomeViewModelTests {
 
         let result = viewModel.loadMoreUnreadArticlesAndReport()
 
-        #expect(result == true)
+        #expect(result == .loaded)
         #expect(viewModel.unreadArticlesList.count == totalCount)
     }
 
-    @Test("loadMoreUnreadArticlesAndReport returns false when no more articles exist")
+    @Test("loadMoreUnreadArticlesAndReport returns .exhausted when no more articles exist")
     @MainActor
-    func loadMoreUnreadArticlesAndReportReturnsFalse() {
+    func loadMoreUnreadArticlesAndReportReturnsExhausted() {
         let feed = TestFixtures.makePersistentFeed()
         let mockPersistence = MockFeedPersistenceService()
         mockPersistence.feeds = [feed]
@@ -1468,13 +1500,44 @@ struct HomeViewModelTests {
 
         let result = viewModel.loadMoreUnreadArticlesAndReport()
 
-        #expect(result == false)
+        #expect(result == .exhausted)
         #expect(viewModel.unreadArticlesList.count == 1)
     }
 
-    @Test("loadMoreSavedArticlesAndReport returns true when new articles are loaded")
+    @Test("loadMoreUnreadArticlesAndReport returns .failed on persistence error")
     @MainActor
-    func loadMoreSavedArticlesAndReportReturnsTrue() {
+    func loadMoreUnreadArticlesAndReportReturnsFailed() {
+        let feed = TestFixtures.makePersistentFeed()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+
+        let totalCount = HomeViewModel.pageSize + 5
+        let articles = (0..<totalCount).map { i in
+            let article = TestFixtures.makePersistentArticle(
+                articleID: "u\(i)",
+                publishedDate: Date(timeIntervalSince1970: Double(totalCount - i) * 1_000_000),
+                isRead: false
+            )
+            article.feed = feed
+            return article
+        }
+        mockPersistence.articlesByFeedID[feed.id] = articles
+
+        let viewModel = HomeViewModel(persistence: mockPersistence)
+        viewModel.loadUnreadArticles()
+
+        #expect(viewModel.hasMoreUnreadArticles == true)
+
+        mockPersistence.errorToThrow = NSError(domain: "test", code: 1)
+        let result = viewModel.loadMoreUnreadArticlesAndReport()
+
+        #expect(result == .failed("Unable to load unread articles."))
+        #expect(viewModel.errorMessage != nil)
+    }
+
+    @Test("loadMoreSavedArticlesAndReport returns .loaded when new articles are loaded")
+    @MainActor
+    func loadMoreSavedArticlesAndReportReturnsLoaded() {
         let feed = TestFixtures.makePersistentFeed()
         let mockPersistence = MockFeedPersistenceService()
         mockPersistence.feeds = [feed]
@@ -1499,13 +1562,13 @@ struct HomeViewModelTests {
 
         let result = viewModel.loadMoreSavedArticlesAndReport()
 
-        #expect(result == true)
+        #expect(result == .loaded)
         #expect(viewModel.savedArticlesList.count == totalCount)
     }
 
-    @Test("loadMoreSavedArticlesAndReport returns false when no more articles exist")
+    @Test("loadMoreSavedArticlesAndReport returns .exhausted when no more articles exist")
     @MainActor
-    func loadMoreSavedArticlesAndReportReturnsFalse() {
+    func loadMoreSavedArticlesAndReportReturnsExhausted() {
         let feed = TestFixtures.makePersistentFeed()
         let mockPersistence = MockFeedPersistenceService()
         mockPersistence.feeds = [feed]
@@ -1526,7 +1589,38 @@ struct HomeViewModelTests {
 
         let result = viewModel.loadMoreSavedArticlesAndReport()
 
-        #expect(result == false)
+        #expect(result == .exhausted)
         #expect(viewModel.savedArticlesList.count == 1)
+    }
+
+    @Test("loadMoreSavedArticlesAndReport returns .failed on persistence error")
+    @MainActor
+    func loadMoreSavedArticlesAndReportReturnsFailed() {
+        let feed = TestFixtures.makePersistentFeed()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+
+        let totalCount = HomeViewModel.pageSize + 5
+        let articles = (0..<totalCount).map { i in
+            let article = TestFixtures.makePersistentArticle(
+                articleID: "s\(i)",
+                isSaved: true,
+                savedDate: Date(timeIntervalSince1970: Double(totalCount - i) * 1_000)
+            )
+            article.feed = feed
+            return article
+        }
+        mockPersistence.articlesByFeedID[feed.id] = articles
+
+        let viewModel = HomeViewModel(persistence: mockPersistence)
+        viewModel.loadSavedArticles()
+
+        #expect(viewModel.hasMoreSavedArticles == true)
+
+        mockPersistence.errorToThrow = NSError(domain: "test", code: 1)
+        let result = viewModel.loadMoreSavedArticlesAndReport()
+
+        #expect(result == .failed("Unable to load saved articles."))
+        #expect(viewModel.errorMessage != nil)
     }
 }

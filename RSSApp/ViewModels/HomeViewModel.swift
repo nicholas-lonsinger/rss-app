@@ -138,12 +138,19 @@ final class HomeViewModel {
         )
     }
 
-    /// Loads the next page of all articles and returns whether new articles were loaded.
+    /// Loads the next page of all articles and returns the outcome.
     /// Used by the article reader to trigger pagination when the user navigates past the last loaded article.
-    func loadMoreAllArticlesAndReport() -> Bool {
+    func loadMoreAllArticlesAndReport() -> LoadMoreResult {
         let countBefore = allArticlesList.count
+        let errorBefore = errorMessage
         loadMoreAllArticles()
-        return allArticlesList.count > countBefore
+        if allArticlesList.count > countBefore {
+            return .loaded
+        } else if errorMessage != nil && errorMessage != errorBefore {
+            return .failed(errorMessage ?? "Unable to load more articles.")
+        } else {
+            return .exhausted
+        }
     }
 
     // MARK: - Unread Articles (paginated)
@@ -171,12 +178,19 @@ final class HomeViewModel {
         )
     }
 
-    /// Loads the next page of unread articles and returns whether new articles were loaded.
+    /// Loads the next page of unread articles and returns the outcome.
     /// Used by the article reader to trigger pagination when the user navigates past the last loaded article.
-    func loadMoreUnreadArticlesAndReport() -> Bool {
+    func loadMoreUnreadArticlesAndReport() -> LoadMoreResult {
         let countBefore = unreadArticlesList.count
+        let errorBefore = errorMessage
         loadMoreUnreadArticles()
-        return unreadArticlesList.count > countBefore
+        if unreadArticlesList.count > countBefore {
+            return .loaded
+        } else if errorMessage != nil && errorMessage != errorBefore {
+            return .failed(errorMessage ?? "Unable to load more articles.")
+        } else {
+            return .exhausted
+        }
     }
 
     // MARK: - Saved Articles (paginated)
@@ -204,12 +218,19 @@ final class HomeViewModel {
         )
     }
 
-    /// Loads the next page of saved articles and returns whether new articles were loaded.
+    /// Loads the next page of saved articles and returns the outcome.
     /// Used by the article reader to trigger pagination when the user navigates past the last loaded article.
-    func loadMoreSavedArticlesAndReport() -> Bool {
+    func loadMoreSavedArticlesAndReport() -> LoadMoreResult {
         let countBefore = savedArticlesList.count
+        let errorBefore = errorMessage
         loadMoreSavedArticles()
-        return savedArticlesList.count > countBefore
+        if savedArticlesList.count > countBefore {
+            return .loaded
+        } else if errorMessage != nil && errorMessage != errorBefore {
+            return .failed(errorMessage ?? "Unable to load more articles.")
+        } else {
+            return .exhausted
+        }
     }
 
     // MARK: - Pagination Helpers
