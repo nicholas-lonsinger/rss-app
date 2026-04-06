@@ -171,7 +171,8 @@ struct ThumbnailPrefetchService: ThumbnailPrefetching {
 
 private let downloadRetryLogger = Logger(category: "ThumbnailPrefetchService")
 
-/// Downloads a single thumbnail with within-cycle retry on failure.
+/// Downloads a single thumbnail with within-cycle retry on transient failure.
+/// Permanent failures (4xx, invalid data) skip retries immediately.
 /// This is a free function to avoid capturing `@MainActor self` in the `Sendable` task group closure.
 private func downloadWithRetry(
     articleID: String,
@@ -200,18 +201,22 @@ private func downloadWithRetry(
             }
         }
 
-        let cached = await thumbnailService.resolveAndCacheThumbnail(
+        let result = await thumbnailService.resolveAndCacheThumbnail(
             thumbnailURL: thumbnailURL,
             articleLink: articleLink,
             articleID: articleID
         )
 
-        if cached {
+        switch result {
+        case .cached:
             return ThumbnailDownloadResult(articleID: articleID, outcome: .cached)
-        }
-
-        if attempt < ThumbnailPrefetchConstants.maxTransientRetries {
-            downloadRetryLogger.debug("Thumbnail download attempt \(attempt + 1, privacy: .public) failed for article \(articleID, privacy: .public), retrying")
+        case .permanentFailure:
+            downloadRetryLogger.info("Permanent failure for article \(articleID, privacy: .public) — skipping retries")
+            return ThumbnailDownloadResult(articleID: articleID, outcome: .failed)
+        case .transientFailure:
+            if attempt < ThumbnailPrefetchConstants.maxTransientRetries {
+                downloadRetryLogger.debug("Transient failure on attempt \(attempt + 1, privacy: .public) for article \(articleID, privacy: .public), retrying")
+            }
         }
     }
 

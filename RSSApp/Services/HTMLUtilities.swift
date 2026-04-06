@@ -87,20 +87,30 @@ enum HTMLUtilities {
     }
 
     /// Extracts the `og:image` URL from an HTML page's `<meta>` tags.
-    static func extractOGImageURL(from html: String) -> URL? {
+    /// When `baseURL` is provided, protocol-relative URLs (e.g., `//cdn.example.com/img.jpg`)
+    /// are resolved against the base URL's scheme.
+    static func extractOGImageURL(from html: String, baseURL: URL? = nil) -> URL? {
         // Match <meta property="og:image" content="..."> with either attribute order
         let pattern1 = ##/<meta\s[^>]*?property=["']og:image["'][^>]*?content=["']([^"']+)["']/##
             .ignoresCase()
         let pattern2 = ##/<meta\s[^>]*?content=["']([^"']+)["'][^>]*?property=["']og:image["']/##
             .ignoresCase()
 
+        let rawValue: String?
         if let match = html.firstMatch(of: pattern1) {
-            return URL(string: String(match.1))
+            rawValue = String(match.1)
+        } else if let match = html.firstMatch(of: pattern2) {
+            rawValue = String(match.1)
+        } else {
+            rawValue = nil
         }
-        if let match = html.firstMatch(of: pattern2) {
-            return URL(string: String(match.1))
+
+        guard let rawValue else { return nil }
+
+        if let baseURL {
+            return resolveURL(rawValue, base: baseURL)
         }
-        return nil
+        return URL(string: rawValue)
     }
 
     /// Extracts icon URLs from HTML `<link>` tags, ordered by priority:

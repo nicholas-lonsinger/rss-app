@@ -20,7 +20,7 @@ struct ThumbnailPrefetchServiceTests {
         persistence.articlesByFeedID = [feed.id: [article]]
 
         let mockThumbnail = MockArticleThumbnailService()
-        mockThumbnail.resolveResult = true
+        mockThumbnail.resolveResult = .cached
 
         let service = ThumbnailPrefetchService(persistence: persistence, thumbnailService: mockThumbnail)
         await service.prefetchThumbnails()
@@ -85,7 +85,7 @@ struct ThumbnailPrefetchServiceTests {
         persistence.articlesByFeedID = [feed.id: [article]]
 
         let mockThumbnail = MockArticleThumbnailService()
-        mockThumbnail.resolveResult = false
+        mockThumbnail.resolveResult = .transientFailure
 
         let service = ThumbnailPrefetchService(persistence: persistence, thumbnailService: mockThumbnail)
         await service.prefetchThumbnails()
@@ -156,7 +156,7 @@ struct ThumbnailPrefetchServiceTests {
         ]
 
         let mockThumbnail = MockArticleThumbnailService()
-        mockThumbnail.resolveResult = true
+        mockThumbnail.resolveResult = .cached
 
         let service = ThumbnailPrefetchService(persistence: persistence, thumbnailService: mockThumbnail)
         await service.prefetchThumbnails()
@@ -249,6 +249,32 @@ struct ThumbnailPrefetchServiceTests {
         #expect(mock.callCount(for: "last-chance") == expectedCalls)
     }
 
+    // MARK: - Permanent Failure Skips Retries
+
+    @Test("downloadWithRetry does not retry on permanent failure")
+    @MainActor
+    func permanentFailureSkipsRetry() async {
+        let persistence = MockFeedPersistenceService()
+        let feed = TestFixtures.makePersistentFeed()
+        let article = TestFixtures.makePersistentArticle(
+            articleID: "perm-fail",
+            thumbnailURL: URL(string: "https://example.com/gone.jpg")
+        )
+        persistence.feeds = [feed]
+        persistence.articlesByFeedID = [feed.id: [article]]
+
+        let mockThumbnail = MockArticleThumbnailService()
+        mockThumbnail.resolveResult = .permanentFailure
+
+        let service = ThumbnailPrefetchService(persistence: persistence, thumbnailService: mockThumbnail)
+        await service.prefetchThumbnails()
+
+        // Permanent failure should be called only once — no retries
+        #expect(mockThumbnail.resolveCallCount == 1)
+        #expect(article.isThumbnailCached == false)
+        #expect(article.thumbnailRetryCount == 1)
+    }
+
     // MARK: - Articles Without Image Sources
 
     @Test("prefetchThumbnails skips articles with no thumbnail URL and no link")
@@ -265,7 +291,7 @@ struct ThumbnailPrefetchServiceTests {
         persistence.articlesByFeedID = [feed.id: [article]]
 
         let mockThumbnail = MockArticleThumbnailService()
-        mockThumbnail.resolveResult = false
+        mockThumbnail.resolveResult = .transientFailure
 
         let service = ThumbnailPrefetchService(persistence: persistence, thumbnailService: mockThumbnail)
         await service.prefetchThumbnails()
@@ -310,7 +336,7 @@ struct ThumbnailPrefetchServiceTests {
 
 // MARK: - Selective Mock
 
-/// A mock that succeeds for specific article IDs and fails for all others.
+/// A mock that succeeds for specific article IDs and returns permanent failure for all others.
 private final class SelectiveThumbnailMock: ArticleThumbnailCaching, @unchecked Sendable {
 
     let successArticleIDs: Set<String>
@@ -319,12 +345,12 @@ private final class SelectiveThumbnailMock: ArticleThumbnailCaching, @unchecked 
         self.successArticleIDs = successArticleIDs
     }
 
-    func cacheThumbnail(from remoteURL: URL, articleID: String) async -> Bool {
-        successArticleIDs.contains(articleID)
+    func cacheThumbnail(from remoteURL: URL, articleID: String) async -> ThumbnailCacheResult {
+        successArticleIDs.contains(articleID) ? .cached : .permanentFailure
     }
 
-    func resolveAndCacheThumbnail(thumbnailURL: URL?, articleLink: URL?, articleID: String) async -> Bool {
-        successArticleIDs.contains(articleID)
+    func resolveAndCacheThumbnail(thumbnailURL: URL?, articleLink: URL?, articleID: String) async -> ThumbnailCacheResult {
+        successArticleIDs.contains(articleID) ? .cached : .permanentFailure
     }
 
     func cachedThumbnailFileURL(for articleID: String) -> URL? {
@@ -336,14 +362,15 @@ private final class SelectiveThumbnailMock: ArticleThumbnailCaching, @unchecked 
 
 // MARK: - Sequence Mock
 
-/// A mock that fails a configurable number of times per article ID before succeeding.
+/// A mock that returns transient failure a configurable number of times per article ID before succeeding.
 /// Used to test the within-cycle transient retry loop in `downloadWithRetry`.
 // RATIONALE: @unchecked Sendable is safe because the mock is accessed from task group
 // child tasks that run one-at-a-time per article ID, and the lock serializes counter access.
 private final class SequenceThumbnailMock: ArticleThumbnailCaching, @unchecked Sendable {
 
-    /// Number of times `resolveAndCacheThumbnail` must fail before it returns `true` for each article.
-    /// If the fail count equals or exceeds total calls, the article never succeeds.
+    /// Number of times `resolveAndCacheThumbnail` must return `.transientFailure` before
+    /// it returns `.cached` for each article. If the fail count equals or exceeds total calls,
+    /// the article never succeeds.
     private let failCountBeforeSuccess: [String: Int]
 
     /// Per-article call counter, protected by a lock for concurrent task group access.
@@ -359,18 +386,18 @@ private final class SequenceThumbnailMock: ArticleThumbnailCaching, @unchecked S
         lock.withLock { callCounts[articleID, default: 0] }
     }
 
-    func cacheThumbnail(from remoteURL: URL, articleID: String) async -> Bool {
-        false
+    func cacheThumbnail(from remoteURL: URL, articleID: String) async -> ThumbnailCacheResult {
+        .transientFailure
     }
 
-    func resolveAndCacheThumbnail(thumbnailURL: URL?, articleLink: URL?, articleID: String) async -> Bool {
+    func resolveAndCacheThumbnail(thumbnailURL: URL?, articleLink: URL?, articleID: String) async -> ThumbnailCacheResult {
         let currentCall: Int = lock.withLock {
             let count = callCounts[articleID, default: 0]
             callCounts[articleID] = count + 1
             return count
         }
         let failsNeeded = failCountBeforeSuccess[articleID, default: 0]
-        return currentCall >= failsNeeded
+        return currentCall >= failsNeeded ? .cached : .transientFailure
     }
 
     func cachedThumbnailFileURL(for articleID: String) -> URL? {

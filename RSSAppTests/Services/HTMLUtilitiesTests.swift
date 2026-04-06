@@ -235,4 +235,42 @@ struct HTMLUtilitiesTests {
         let url = HTMLUtilities.extractOGImageURL(from: html)
         #expect(url?.absoluteString == "https://cdn-images.example.com/max/1200/1*abc123.jpeg")
     }
+
+    @Test("Resolves protocol-relative og:image URL with baseURL")
+    func extractOGImageProtocolRelative() {
+        let html = """
+            <html><head>
+            <meta property="og:image" content="//cdn.example.com/image.jpg">
+            </head></html>
+            """
+        let baseURL = URL(string: "https://example.com/article/1")!
+        let url = HTMLUtilities.extractOGImageURL(from: html, baseURL: baseURL)
+        #expect(url?.absoluteString == "https://cdn.example.com/image.jpg")
+    }
+
+    @Test("Protocol-relative og:image without baseURL returns schemeless URL")
+    func extractOGImageProtocolRelativeNoBase() {
+        let html = """
+            <html><head>
+            <meta property="og:image" content="//cdn.example.com/image.jpg">
+            </head></html>
+            """
+        // Without a baseURL, URL(string:) accepts "//..." as a valid scheme-relative reference,
+        // but the result has no scheme — downstream cacheThumbnail rejects non-HTTP URLs.
+        let url = HTMLUtilities.extractOGImageURL(from: html)
+        #expect(url != nil)
+        #expect(url?.scheme == nil)
+    }
+
+    @Test("Relative og:image URL resolved with baseURL")
+    func extractOGImageRelativeURL() {
+        let html = """
+            <html><head>
+            <meta property="og:image" content="/images/og-banner.png">
+            </head></html>
+            """
+        let baseURL = URL(string: "https://example.com/blog/post")!
+        let url = HTMLUtilities.extractOGImageURL(from: html, baseURL: baseURL)
+        #expect(url?.absoluteString == "https://example.com/images/og-banner.png")
+    }
 }

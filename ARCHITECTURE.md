@@ -36,13 +36,14 @@ RSSApp/
 │   ├── ContentExtractor.swift          # ContentExtracting protocol + extraction pipeline orchestrator
 │   ├── DOMSerializerConstants.swift    # Shared JS bridge constants (message handler name, serializer call)
 │   ├── FeedFetchingService.swift       # FeedFetching protocol + URLSession implementation
-│   ├── ArticleThumbnailService.swift   # ArticleThumbnailCaching protocol + thumbnail download, resize-to-120px, JPEG disk caching
-│   ├── FeedIconService.swift           # FeedIconResolving protocol + icon URL resolution (feed XML → site HTML → /favicon.ico) and file-system caching
+│   ├── ArticleThumbnailService.swift   # ThumbnailCacheResult enum + ArticleThumbnailCaching protocol + thumbnail download with transient/permanent error classification, URL scheme validation, resize-to-120px, JPEG disk caching
+│   ├── FeedIconService.swift           # FeedIconResolving protocol + icon URL resolution (feed XML → site HTML → /favicon.ico), size-limited HTML fetch, and file-system caching
+│   ├── URLRequest+UserAgent.swift      # URLRequest extension with shared mobile Safari User-Agent header for CDN compatibility
 │   ├── FeedPersistenceService.swift    # FeedPersisting protocol + SwiftData implementation (feeds, articles, content cache, read/unread, saved/unsaved, bulk mark all read, sort order, article count + bulk delete for retention cleanup with saved-article exemption)
 │   ├── FeedStorageService.swift        # FeedStoring protocol + UserDefaults persistence — retained for migration only
 │   ├── FeedURLValidator.swift          # Shared URL normalization + validation (trim, scheme prepend, HTTP/HTTPS + host check)
 │   ├── UserDefaultsMigrationService.swift # One-time migration from UserDefaults SubscribedFeed list to SwiftData PersistentFeed
-│   ├── HTMLUtilities.swift             # HTML/XML escaping (text + attributes), tag stripping, entity decoding, image extraction, og:image extraction, icon URL extraction
+│   ├── HTMLUtilities.swift             # HTML/XML escaping (text + attributes), tag stripping, entity decoding, image extraction, og:image extraction (with protocol-relative URL resolution via optional baseURL), icon URL extraction
 │   ├── KeychainService.swift           # Keychain wrapper for secure API key storage
 │   ├── MetadataExtractor.swift         # Extracts article title/byline from meta tags and DOM elements
 │   ├── ModelConfigurationValidator.swift # ModelValidation + MaxTokensValidation enums — input validation for model ID and max tokens
@@ -138,7 +139,7 @@ RSSAppTests/
 │   ├── MetadataExtractorTests.swift    # Title/byline extraction from meta tags and DOM
 │   ├── ModelConfigurationValidationTests.swift # ModelValidation and MaxTokensValidation input validation
 │   ├── RSSParsingServiceTests.swift    # Channel parsing, thumbnails, IDs, edge cases
-│   └── ThumbnailPrefetchServiceTests.swift # Bulk prefetch, skip cached/maxed, retry count, mixed results, error handling
+│   └── ThumbnailPrefetchServiceTests.swift # Bulk prefetch, skip cached/maxed, retry count, permanent failure skip, mixed results, error handling
 ├── ViewModels/
 │   ├── AddFeedViewModelTests.swift         # URL validation, duplicate detection, success/failure
 │   ├── EditFeedViewModelTests.swift        # URL editing, validation, duplicate detection, success/failure
