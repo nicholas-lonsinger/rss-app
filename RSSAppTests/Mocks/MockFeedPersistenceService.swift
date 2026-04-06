@@ -197,6 +197,29 @@ final class MockFeedPersistenceService: FeedPersisting {
         return articlesByFeedID.values.flatMap { $0 }.filter { !$0.isRead }.count
     }
 
+    // MARK: - Saved Article Operations
+
+    func toggleArticleSaved(_ article: PersistentArticle) throws {
+        if let error = errorToThrow { throw error }
+        let newSaved = !article.isSaved
+        article.isSaved = newSaved
+        article.savedDate = newSaved ? Date() : nil
+    }
+
+    func allSavedArticles(offset: Int, limit: Int) throws -> [PersistentArticle] {
+        if let error = errorToThrow { throw error }
+        let all = articlesByFeedID.values
+            .flatMap { $0 }
+            .filter { $0.isSaved }
+            .sorted { ($0.savedDate ?? .distantPast) > ($1.savedDate ?? .distantPast) }
+        return Array(all.dropFirst(offset).prefix(limit))
+    }
+
+    func savedCount() throws -> Int {
+        if let error = errorToThrow { throw error }
+        return articlesByFeedID.values.flatMap { $0 }.filter { $0.isSaved }.count
+    }
+
     // MARK: - Content Cache
 
     func cachedContent(for article: PersistentArticle) throws -> PersistentArticleContent? {
@@ -248,7 +271,9 @@ final class MockFeedPersistenceService: FeedPersisting {
         let totalCount = all.count
         guard totalCount > limit else { return [] }
         let excess = totalCount - limit
-        return Array(all.prefix(excess)).map { (articleID: $0.articleID, isThumbnailCached: $0.isThumbnailCached) }
+        // Exclude saved articles from retention cleanup, matching real implementation
+        let unsaved = all.filter { !$0.isSaved }
+        return Array(unsaved.prefix(excess)).map { (articleID: $0.articleID, isThumbnailCached: $0.isThumbnailCached) }
     }
 
     func deleteArticles(withIDs articleIDs: Set<String>) throws {

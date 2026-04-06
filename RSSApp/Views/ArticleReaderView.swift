@@ -30,6 +30,13 @@ struct ArticleReaderView: View {
                         Button("Done") { dismiss() }
                     }
                     ToolbarItemGroup(placement: .topBarTrailing) {
+                        Button {
+                            toggleSaved()
+                        } label: {
+                            Image(systemName: article.isSaved ? "bookmark.fill" : "bookmark")
+                        }
+                        .accessibilityLabel(article.isSaved ? "Unsave article" : "Save article")
+
                         if isExtracting {
                             ProgressView()
                                 .accessibilityLabel("Extracting article content")
@@ -84,6 +91,21 @@ struct ArticleReaderView: View {
                         persistence: persistence
                     )
                 }
+        }
+    }
+
+    // MARK: - Actions
+
+    private func toggleSaved() {
+        guard let persistence else {
+            Self.logger.warning("Cannot toggle saved — no persistence service")
+            return
+        }
+        do {
+            try persistence.toggleArticleSaved(article)
+            Self.logger.debug("Toggled saved state for '\(article.title, privacy: .public)'")
+        } catch {
+            Self.logger.error("Failed to toggle saved state: \(error, privacy: .public)")
         }
     }
 

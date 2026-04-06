@@ -11,6 +11,7 @@ final class HomeViewModel {
     static let pageSize = 50
 
     private(set) var unreadCount: Int = 0
+    private(set) var savedCount: Int = 0
     private(set) var isRefreshing = false
     private(set) var errorMessage: String?
 
@@ -23,6 +24,11 @@ final class HomeViewModel {
 
     private(set) var unreadArticlesList: [PersistentArticle] = []
     private(set) var hasMoreUnreadArticles = true
+
+    // MARK: - Pagination state for saved articles
+
+    private(set) var savedArticlesList: [PersistentArticle] = []
+    private(set) var hasMoreSavedArticles = true
 
     // RATIONALE: Unlike FeedViewModel.sortAscending which auto-reloads on set,
     // HomeViewModel does not auto-reload because it serves two independent views
@@ -96,6 +102,16 @@ final class HomeViewModel {
         }
     }
 
+    func loadSavedCount() {
+        do {
+            savedCount = try persistence.savedCount()
+            Self.logger.debug("Total saved count: \(self.savedCount, privacy: .public)")
+        } catch {
+            errorMessage = "Unable to load saved count."
+            Self.logger.error("Failed to load total saved count: \(error, privacy: .public)")
+        }
+    }
+
     // MARK: - All Articles (paginated)
 
     /// Resets pagination and loads the first page of all articles.
@@ -143,6 +159,31 @@ final class HomeViewModel {
             hasMore: &hasMoreUnreadArticles,
             fetch: { offset, limit in try self.persistence.allUnreadArticles(offset: offset, limit: limit, ascending: ascending) },
             label: "unread articles"
+        )
+    }
+
+    // MARK: - Saved Articles (paginated)
+
+    /// Resets pagination and loads the first page of saved articles.
+    /// On failure, preserves the previously loaded list to avoid flashing an empty state.
+    func loadSavedArticles() {
+        let previous = savedArticlesList
+        savedArticlesList = []
+        hasMoreSavedArticles = true
+        loadMoreSavedArticles()
+        if savedArticlesList.isEmpty && errorMessage != nil {
+            savedArticlesList = previous
+        }
+    }
+
+    /// Loads the next page of saved articles and appends to the existing list.
+    /// Saved articles are always sorted by `savedDate` descending (most recently saved first).
+    func loadMoreSavedArticles() {
+        loadMorePage(
+            into: &savedArticlesList,
+            hasMore: &hasMoreSavedArticles,
+            fetch: { offset, limit in try self.persistence.allSavedArticles(offset: offset, limit: limit) },
+            label: "saved articles"
         )
     }
 
@@ -194,6 +235,16 @@ final class HomeViewModel {
         } catch {
             errorMessage = "Unable to update read status."
             Self.logger.error("Failed to toggle read status: \(error, privacy: .public)")
+        }
+    }
+
+    func toggleSaved(_ article: PersistentArticle) {
+        do {
+            try persistence.toggleArticleSaved(article)
+            loadSavedCount()
+        } catch {
+            errorMessage = "Unable to update saved status."
+            Self.logger.error("Failed to toggle saved status: \(error, privacy: .public)")
         }
     }
 

@@ -980,4 +980,146 @@ struct FeedPersistenceServiceTests {
 
         #expect(try service.totalArticleCount() == 1)
     }
+
+    // MARK: - Saved Article Operations
+
+    @Test("toggleArticleSaved saves an unsaved article")
+    @MainActor
+    func toggleArticleSavedSaves() throws {
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+        try service.upsertArticles([TestFixtures.makeArticle(id: "a1")], for: feed)
+        try service.save()
+
+        let articles = try service.articles(for: feed)
+        let article = articles[0]
+        #expect(!article.isSaved)
+        #expect(article.savedDate == nil)
+
+        try service.toggleArticleSaved(article)
+
+        #expect(article.isSaved)
+        #expect(article.savedDate != nil)
+    }
+
+    @Test("toggleArticleSaved unsaves a saved article")
+    @MainActor
+    func toggleArticleSavedUnsaves() throws {
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+        try service.upsertArticles([TestFixtures.makeArticle(id: "a1")], for: feed)
+        try service.save()
+
+        let articles = try service.articles(for: feed)
+        let article = articles[0]
+        try service.toggleArticleSaved(article)
+        #expect(article.isSaved)
+
+        try service.toggleArticleSaved(article)
+        #expect(!article.isSaved)
+        #expect(article.savedDate == nil)
+    }
+
+    @Test("allSavedArticles returns only saved articles sorted by savedDate descending")
+    @MainActor
+    func allSavedArticlesSortedBySavedDate() throws {
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+        try service.upsertArticles([
+            TestFixtures.makeArticle(id: "a1"),
+            TestFixtures.makeArticle(id: "a2"),
+            TestFixtures.makeArticle(id: "a3"),
+        ], for: feed)
+        try service.save()
+
+        let articles = try service.articles(for: feed)
+        // Save a1 first, then a3 — a3 should appear first in results (most recently saved)
+        let a1 = articles.first { $0.articleID == "a1" }!
+        let a3 = articles.first { $0.articleID == "a3" }!
+        try service.toggleArticleSaved(a1)
+        try service.toggleArticleSaved(a3)
+
+        let saved = try service.allSavedArticles(offset: 0, limit: 10)
+        #expect(saved.count == 2)
+        #expect(saved[0].articleID == "a3")
+        #expect(saved[1].articleID == "a1")
+    }
+
+    @Test("allSavedArticles respects offset and limit")
+    @MainActor
+    func allSavedArticlesPagination() throws {
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+        try service.upsertArticles([
+            TestFixtures.makeArticle(id: "a1"),
+            TestFixtures.makeArticle(id: "a2"),
+        ], for: feed)
+        try service.save()
+
+        let articles = try service.articles(for: feed)
+        for article in articles {
+            try service.toggleArticleSaved(article)
+        }
+
+        let page = try service.allSavedArticles(offset: 1, limit: 1)
+        #expect(page.count == 1)
+    }
+
+    @Test("savedCount returns count of saved articles")
+    @MainActor
+    func savedCountReturnsCorrectCount() throws {
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+        try service.upsertArticles([
+            TestFixtures.makeArticle(id: "a1"),
+            TestFixtures.makeArticle(id: "a2"),
+            TestFixtures.makeArticle(id: "a3"),
+        ], for: feed)
+        try service.save()
+
+        #expect(try service.savedCount() == 0)
+
+        let articles = try service.articles(for: feed)
+        try service.toggleArticleSaved(articles[0])
+        try service.toggleArticleSaved(articles[1])
+
+        #expect(try service.savedCount() == 2)
+    }
+
+    @Test("oldestArticleIDsExceedingLimit excludes saved articles")
+    @MainActor
+    func oldestArticleIDsExcludesSaved() throws {
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+        // Create 3 articles, oldest first
+        try service.upsertArticles([
+            TestFixtures.makeArticle(id: "old", publishedDate: Date(timeIntervalSince1970: 1_000)),
+            TestFixtures.makeArticle(id: "mid", publishedDate: Date(timeIntervalSince1970: 2_000)),
+            TestFixtures.makeArticle(id: "new", publishedDate: Date(timeIntervalSince1970: 3_000)),
+        ], for: feed)
+        try service.save()
+
+        // Save the oldest article — it should be exempt from cleanup
+        let articles = try service.articles(for: feed)
+        let oldest = articles.first { $0.articleID == "old" }!
+        try service.toggleArticleSaved(oldest)
+
+        // With a limit of 2, we have 3 articles total, 1 excess
+        // The oldest unsaved article ("mid") should be selected for cleanup, not "old" (saved)
+        let toDelete = try service.oldestArticleIDsExceedingLimit(2)
+        #expect(toDelete.count == 1)
+        #expect(toDelete[0].articleID == "mid")
+    }
 }

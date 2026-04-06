@@ -44,6 +44,17 @@ struct ArticleListView: View {
                         }
                         .tint(article.isRead ? .blue : .gray)
                     }
+                    .swipeActions(edge: .trailing) {
+                        Button {
+                            viewModel.toggleSaved(article)
+                        } label: {
+                            Label(
+                                article.isSaved ? "Unsave" : "Save",
+                                systemImage: article.isSaved ? "bookmark.slash" : "bookmark"
+                            )
+                        }
+                        .tint(.orange)
+                    }
                     .onAppear {
                         if article.articleID == viewModel.articles.last?.articleID {
                             viewModel.loadMoreArticles()
