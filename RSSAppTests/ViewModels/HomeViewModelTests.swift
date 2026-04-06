@@ -1273,4 +1273,92 @@ struct HomeViewModelTests {
 
         #expect(viewModel.errorMessage != nil)
     }
+
+    // MARK: - Local List Removal
+
+    @Test("removeFromSavedList removes article from savedArticlesList without reloading")
+    @MainActor
+    func removeFromSavedListRemovesArticle() {
+        let feed = TestFixtures.makePersistentFeed()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+
+        let saved1 = TestFixtures.makePersistentArticle(
+            articleID: "s1",
+            isSaved: true,
+            savedDate: Date(timeIntervalSince1970: 1_000)
+        )
+        saved1.feed = feed
+        let saved2 = TestFixtures.makePersistentArticle(
+            articleID: "s2",
+            isSaved: true,
+            savedDate: Date(timeIntervalSince1970: 2_000)
+        )
+        saved2.feed = feed
+        mockPersistence.articlesByFeedID[feed.id] = [saved1, saved2]
+
+        let viewModel = HomeViewModel(persistence: mockPersistence)
+        viewModel.loadSavedArticles()
+        #expect(viewModel.savedArticlesList.count == 2)
+
+        viewModel.removeFromSavedList(saved1)
+
+        #expect(viewModel.savedArticlesList.count == 1)
+        #expect(viewModel.savedArticlesList.first?.articleID == "s2")
+    }
+
+    @Test("removeFromSavedList is no-op when article not in list")
+    @MainActor
+    func removeFromSavedListNoOp() {
+        let feed = TestFixtures.makePersistentFeed()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+
+        let saved = TestFixtures.makePersistentArticle(
+            articleID: "s1",
+            isSaved: true,
+            savedDate: Date()
+        )
+        saved.feed = feed
+        mockPersistence.articlesByFeedID[feed.id] = [saved]
+
+        let viewModel = HomeViewModel(persistence: mockPersistence)
+        viewModel.loadSavedArticles()
+        #expect(viewModel.savedArticlesList.count == 1)
+
+        let notInList = TestFixtures.makePersistentArticle(articleID: "other")
+        viewModel.removeFromSavedList(notInList)
+
+        #expect(viewModel.savedArticlesList.count == 1)
+    }
+
+    @Test("removeFromSavedList preserves remaining article order")
+    @MainActor
+    func removeFromSavedListPreservesOrder() {
+        let feed = TestFixtures.makePersistentFeed()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+
+        let articles = (0..<5).map { i in
+            let article = TestFixtures.makePersistentArticle(
+                articleID: "s\(i)",
+                isSaved: true,
+                savedDate: Date(timeIntervalSince1970: Double(i) * 1_000)
+            )
+            article.feed = feed
+            return article
+        }
+        mockPersistence.articlesByFeedID[feed.id] = articles
+
+        let viewModel = HomeViewModel(persistence: mockPersistence)
+        viewModel.loadSavedArticles()
+        #expect(viewModel.savedArticlesList.count == 5)
+
+        // Remove the middle article
+        viewModel.removeFromSavedList(articles[2])
+
+        #expect(viewModel.savedArticlesList.count == 4)
+        let remainingIDs = viewModel.savedArticlesList.map(\.articleID)
+        #expect(remainingIDs == ["s4", "s3", "s1", "s0"])
+    }
 }

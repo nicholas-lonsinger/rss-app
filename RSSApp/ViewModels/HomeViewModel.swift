@@ -249,6 +249,13 @@ final class HomeViewModel {
         }
     }
 
+    /// Removes an article from the local saved articles list without reloading from persistence.
+    /// Used after unsaving an article in SavedArticlesView to avoid resetting pagination and scroll position.
+    func removeFromSavedList(_ article: PersistentArticle) {
+        savedArticlesList.removeAll { $0.articleID == article.articleID }
+        Self.logger.debug("Removed article '\(article.articleID, privacy: .public)' from saved list (remaining: \(self.savedArticlesList.count, privacy: .public))")
+    }
+
     /// Marks all articles across all feeds as read.
     func markAllAsRead() {
         do {
