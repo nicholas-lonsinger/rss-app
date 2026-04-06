@@ -2,6 +2,7 @@ import SwiftUI
 
 struct HomeView: View {
 
+    @Environment(\.scenePhase) private var scenePhase
     @State private var viewModel: HomeViewModel
     @State private var feedListViewModel: FeedListViewModel
     private let persistence: FeedPersisting
@@ -42,7 +43,7 @@ struct HomeView: View {
                 case .savedArticles:
                     SavedArticlesView(persistence: persistence, homeViewModel: viewModel)
                 case .allFeeds:
-                    FeedListView(persistence: persistence, isEmbedded: true)
+                    FeedListView(persistence: persistence, isEmbedded: true, homeViewModel: viewModel)
                 }
             }
             .navigationDestination(for: SettingsDestination.self) { destination in
@@ -50,7 +51,8 @@ struct HomeView: View {
                 case .settings:
                     SettingsView(
                         persistence: persistence,
-                        viewModel: feedListViewModel
+                        viewModel: feedListViewModel,
+                        homeViewModel: viewModel
                     )
                 }
             }
@@ -71,6 +73,12 @@ struct HomeView: View {
                 Button("OK") { viewModel.clearError() }
             } message: {
                 Text(viewModel.errorMessage ?? "")
+            }
+            .onChange(of: scenePhase) { _, newPhase in
+                if newPhase == .active {
+                    viewModel.loadUnreadCount()
+                    viewModel.loadSavedCount()
+                }
             }
         }
     }

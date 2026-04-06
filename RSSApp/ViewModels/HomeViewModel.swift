@@ -47,14 +47,20 @@ final class HomeViewModel {
     }
 
     private let persistence: FeedPersisting
+    private let badgeService: AppBadgeUpdating
 
     /// Async closure that performs the actual network feed refresh.
     /// Returns an error message string on failure, or nil on success.
     /// Injected by the caller to perform the actual network feed refresh.
     private let refreshFeeds: (@Sendable () async -> String?)?
 
-    init(persistence: FeedPersisting, refreshFeeds: (@Sendable () async -> String?)? = nil) {
+    init(
+        persistence: FeedPersisting,
+        badgeService: AppBadgeUpdating = AppBadgeService(),
+        refreshFeeds: (@Sendable () async -> String?)? = nil
+    ) {
         self.persistence = persistence
+        self.badgeService = badgeService
         self.refreshFeeds = refreshFeeds
     }
 
@@ -97,10 +103,19 @@ final class HomeViewModel {
         do {
             unreadCount = try persistence.totalUnreadCount()
             Self.logger.debug("Total unread count: \(self.unreadCount, privacy: .public)")
+            // RATIONALE: Fire-and-forget Task is intentional. Badge update is best-effort
+            // and should not block article loading or propagate errors to the UI.
+            Task { await badgeService.updateBadge(unreadCount: unreadCount) }
         } catch {
             errorMessage = "Unable to load unread count."
             Self.logger.error("Failed to load total unread count: \(error, privacy: .public)")
         }
+    }
+
+    /// Updates the app icon badge to reflect the current unread count.
+    /// Call directly when the badge setting changes to apply immediately.
+    func updateBadge() async {
+        await badgeService.updateBadge(unreadCount: unreadCount)
     }
 
     func loadSavedCount() {

@@ -13,6 +13,7 @@ struct FeedListView: View {
     private static let logger = Logger(category: "FeedListView")
 
     @State private var viewModel: FeedListViewModel
+    @State private var homeViewModel: HomeViewModel
     @State private var navigationPath = NavigationPath()
     @State private var showAddFeed = false
     @State private var feedToEdit: PersistentFeed?
@@ -26,10 +27,13 @@ struct FeedListView: View {
     ///   - persistence: The persistence service for feed data.
     ///   - isEmbedded: When `true`, omits the wrapping `NavigationStack` so this view
     ///     can be pushed inside a parent stack (e.g., from `HomeView`). Defaults to `false`.
-    init(persistence: FeedPersisting, isEmbedded: Bool = false) {
+    ///   - homeViewModel: The home view model for badge updates in settings. When nil
+    ///     (standalone mode), a minimal instance is created internally.
+    init(persistence: FeedPersisting, isEmbedded: Bool = false, homeViewModel: HomeViewModel? = nil) {
         self.persistence = persistence
         self.isEmbedded = isEmbedded
         _viewModel = State(initialValue: FeedListViewModel(persistence: persistence))
+        _homeViewModel = State(initialValue: homeViewModel ?? HomeViewModel(persistence: persistence))
     }
 
     var body: some View {
@@ -41,7 +45,11 @@ struct FeedListView: View {
                     .navigationDestination(for: SettingsDestination.self) { destination in
                         switch destination {
                         case .settings:
-                            SettingsView(persistence: persistence, viewModel: viewModel)
+                            SettingsView(
+                                persistence: persistence,
+                                viewModel: viewModel,
+                                homeViewModel: homeViewModel
+                            )
                         }
                     }
             }
