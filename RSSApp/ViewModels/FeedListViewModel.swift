@@ -386,6 +386,19 @@ final class FeedListViewModel {
             Self.logger.error("Failed to save after refresh: \(error, privacy: .public)")
         }
 
+        // Enforce article retention limit after save but before loadFeeds() so the
+        // UI reflects the final database state, including any articles removed by cleanup.
+        var retentionCleanupFailed = false
+        do {
+            try articleRetention.enforceArticleLimit(
+                persistence: persistence,
+                thumbnailService: thumbnailService
+            )
+        } catch {
+            retentionCleanupFailed = true
+            Self.logger.error("Article retention cleanup failed: \(error, privacy: .public)")
+        }
+
         // loadFeeds() clears errorMessage on success, so error feedback must be set after this call.
         loadFeeds()
         Self.logger.notice("Refresh complete: \(self.feeds.count - failureCount, privacy: .public) updated, \(failureCount, privacy: .public) failed")
@@ -394,21 +407,8 @@ final class FeedListViewModel {
             errorMessage = "Unable to save updated feeds."
         } else if failureCount > 0 {
             errorMessage = "\(failureCount) of \(feedsToRefresh.count) feed(s) could not be updated."
-        }
-
-        // Enforce article retention limit after refresh — delete oldest articles
-        // that exceed the configured limit, including their disk-cached thumbnails.
-        do {
-            try articleRetention.enforceArticleLimit(
-                persistence: persistence,
-                thumbnailService: thumbnailService
-            )
-        } catch {
-            Self.logger.error("Article retention cleanup failed: \(error, privacy: .public)")
-            // Only set if no higher-priority error (save failure, fetch failure) is already displayed.
-            if errorMessage == nil {
-                errorMessage = "Article cleanup could not complete."
-            }
+        } else if retentionCleanupFailed {
+            errorMessage = "Article cleanup could not complete."
         }
 
         // Cancel any in-flight prefetch from a previous refresh cycle before starting a new one

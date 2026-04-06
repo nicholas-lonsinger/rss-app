@@ -411,7 +411,10 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
 
         let excess = totalCount - limit
         var descriptor = FetchDescriptor<PersistentArticle>(
-            sortBy: [SortDescriptor(\.publishedDate, order: .forward)]
+            sortBy: [
+                SortDescriptor(\.publishedDate, order: .forward),
+                SortDescriptor(\.articleID, order: .forward)
+            ]
         )
         descriptor.fetchLimit = excess
         let articles = try modelContext.fetch(descriptor)
