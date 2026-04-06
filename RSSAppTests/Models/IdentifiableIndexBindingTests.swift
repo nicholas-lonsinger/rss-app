@@ -5,7 +5,7 @@ import Testing
 @Suite("IdentifiableIndex Binding Extension Tests")
 struct IdentifiableIndexBindingTests {
 
-    /// Thread-safe storage for binding-backed tests under Swift 6 strict concurrency.
+    /// MainActor-isolated mutable storage for binding-backed tests under Swift 6 strict concurrency.
     @MainActor
     private final class Box {
         var value: Int?
