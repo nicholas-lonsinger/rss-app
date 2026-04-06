@@ -13,6 +13,7 @@ struct SettingsView: View {
 
     @State private var badgeEnabled: Bool
     @State private var showPermissionDeniedAlert = false
+    @State private var isRevertingToggle = false
     // RATIONALE: Concrete AppBadgeService instead of `any AppBadgeUpdating` because
     // the protocol's `badgeEnabled` setter requires mutable access through existentials,
     // which is incompatible with SwiftUI's immutable view structs. Protocol abstraction
@@ -33,17 +34,17 @@ struct SettingsView: View {
                 Label("App Badge", systemImage: "app.badge")
             }
             .onChange(of: badgeEnabled) { _, newValue in
+                guard !isRevertingToggle else { return }
                 badgeService.badgeEnabled = newValue
                 Task {
                     if newValue {
-                        let status = await badgeService.checkPermission()
-                        if status == .denied {
-                            Self.logger.notice("Badge toggle enabled but notification permission denied — reverting toggle and showing alert")
+                        let shouldKeepOn = await homeViewModel.handleBadgeToggleEnabled()
+                        if !shouldKeepOn {
+                            isRevertingToggle = true
                             badgeEnabled = false
                             badgeService.badgeEnabled = false
+                            isRevertingToggle = false
                             showPermissionDeniedAlert = true
-                        } else {
-                            await homeViewModel.updateBadge()
                         }
                     } else {
                         await badgeService.clearBadge()
@@ -72,8 +73,15 @@ struct SettingsView: View {
         .navigationTitle("Settings")
         .alert("Notifications Disabled", isPresented: $showPermissionDeniedAlert) {
             Button("Open Settings") {
-                if let url = URL(string: UIApplication.openSettingsURLString) {
-                    UIApplication.shared.open(url)
+                guard let url = URL(string: UIApplication.openSettingsURLString) else {
+                    Self.logger.fault("Failed to create URL from UIApplication.openSettingsURLString '\(UIApplication.openSettingsURLString, privacy: .public)'")
+                    assertionFailure("Failed to create URL from UIApplication.openSettingsURLString")
+                    return
+                }
+                UIApplication.shared.open(url) { success in
+                    if !success {
+                        Self.logger.error("UIApplication.shared.open failed for settings URL")
+                    }
                 }
             }
             Button("Cancel", role: .cancel) { }

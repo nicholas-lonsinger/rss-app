@@ -5,6 +5,12 @@ import os
 // MARK: - Protocol
 
 /// The result of checking notification badge permission.
+///
+/// This is a lossy projection of Apple's `UNAuthorizationStatus` into three
+/// application-relevant cases. `.authorized` collapses `.authorized`,
+/// `.provisional`, and `.ephemeral`; `.denied` maps directly; `.notDetermined`
+/// maps directly. Any future `@unknown default` cases are treated as `.denied`
+/// for safety.
 enum BadgePermissionStatus: Sendable {
     /// Badge permission is authorized (or provisional/ephemeral).
     case authorized

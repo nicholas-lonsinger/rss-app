@@ -57,7 +57,7 @@ RSSApp/
 │   ├── DiscussionViewModel.swift       # @Observable @MainActor — chat history + Claude streaming
 │   ├── FeedListViewModel.swift         # @Observable @MainActor — feed list management, refresh, OPML, unread counts, icon resolution via FeedPersisting
 │   ├── FeedViewModel.swift             # @Observable @MainActor — cached + network article loading, read/unread, sort order, read filter, mark all as read via FeedPersisting
-│   └── HomeViewModel.swift             # @Observable @MainActor — total unread count, cross-feed article queries, read/unread, sort order, mark all as read via FeedPersisting; app icon badge updates via AppBadgeUpdating
+│   └── HomeViewModel.swift             # @Observable @MainActor — total unread count, cross-feed article queries, read/unread, sort order, mark all as read via FeedPersisting; app icon badge updates via AppBadgeUpdating; handleBadgeToggleEnabled() for permission-check-and-revert logic
 ├── Views/                              # SwiftUI views
 │   ├── ActivityShareView.swift          # UIViewControllerRepresentable wrapping UIActivityViewController
 │   ├── AddFeedView.swift               # Sheet for adding a new feed — URL input + validation
@@ -96,7 +96,7 @@ RSSAppTests/
 │   ├── TestFixtures.swift              # Sample RSS XML, factory methods for Article/RSSFeed/PersistentFeed/PersistentArticle
 │   └── WebViewTestHelpers.swift        # WKWebView-based serialization helpers for integration tests
 ├── Mocks/
-│   ├── MockAppBadgeService.swift            # AppBadgeUpdating mock with call count tracking, injectable badge-enabled flag, and injectable BadgePermissionStatus
+│   ├── MockAppBadgeService.swift            # AppBadgeUpdating mock with call count tracking, injectable badge-enabled flag, injectable BadgePermissionStatus, and optional permissionStatusAfterPrompt to simulate prompt denial
 │   ├── MockArticleExtractionService.swift  # ArticleExtracting mock with injectable content/errors
 │   ├── MockArticleRetentionService.swift   # ArticleRetaining mock with call count tracking
 │   ├── MockArticleThumbnailService.swift   # ArticleThumbnailCaching mock with injectable cache results
@@ -112,7 +112,6 @@ RSSAppTests/
 │   └── MockURLSessionBytesProvider.swift   # URLSessionBytesProviding mock with URLProtocol-backed controlled SSE lines
 ├── Models/
 │   ├── ArticleTests.swift              # Article creation, identity, hashable
-│   ├── BadgePermissionStatusTests.swift # BadgePermissionStatus enum cases, Equatable conformance
 │   ├── DOMNodeTests.swift              # DOMNode accessors, text/element queries, tree traversal
 │   ├── HomeGroupTests.swift            # HomeGroup enum cases, IDs, properties, Hashable conformance
 │   ├── IdentifiableIndexTests.swift    # IdentifiableIndex value storage, id derivation, distinctness
@@ -148,6 +147,7 @@ RSSAppTests/
 │   ├── FeedListViewModelTests.swift        # Load, remove by object, remove by IndexSet
 │   ├── FeedViewModelTests.swift            # Load success/failure, state transitions, sort order, read filter, mark all as read
 │   ├── HomeViewModelBadgeTests.swift        # Badge integration: loadUnreadCount triggers badge update, zero/error paths, mark-read/toggle/mark-all-as-read cascade badge updates
+│   ├── HomeViewModelBadgeToggleTests.swift  # Badge toggle permission flow: denied reverts, authorized proceeds, notDetermined-then-denied reverts, notDetermined-then-granted proceeds
 │   └── HomeViewModelTests.swift            # Unread count, saved count, cross-feed article queries, read/unread status, saved status, sort order, mark all as read
 ```
 
