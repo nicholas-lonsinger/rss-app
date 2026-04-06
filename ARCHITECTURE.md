@@ -16,6 +16,7 @@ RSSApp/
 │   ├── ChatMessage.swift               # Chat message with role (user/assistant) and content
 │   ├── DOMNode.swift                   # SerializedDOM + DOMNode tree from domSerializer.js
 │   ├── HomeGroup.swift                 # Enum — Home screen group types (allArticles, unreadArticles, savedArticles, allFeeds) with Identifiable, Hashable, CaseIterable
+│   ├── IdentifiableIndex.swift         # Lightweight Identifiable wrapper for Int indices — enables fullScreenCover(item:) with index-based navigation
 │   ├── ModelConversion.swift           # Bidirectional conversion: PersistentFeed↔SubscribedFeed, PersistentArticle↔Article, PersistentArticleContent↔ArticleContent
 │   ├── OPMLFeedEntry.swift              # Intermediate OPML parsed entry (title, feedURL, siteURL, description)
 │   ├── OPMLImportResult.swift           # OPML import outcome counts (added, skipped, total)
@@ -64,7 +65,7 @@ RSSApp/
 │   ├── APIKeySettingsView.swift        # Keychain API key entry/removal UI (pushed from SettingsView or presented as sheet)
 │   ├── ArticleDiscussionView.swift     # Chat sheet — message bubbles + streaming input
 │   ├── ArticleListView.swift           # Feed article list with loading/error/content states
-│   ├── ArticleReaderView.swift         # Full-screen reader — WKWebView + AI sparkles toolbar (API key → summary, no key → API key settings)
+│   ├── ArticleReaderView.swift         # Full-screen reader — WKWebView + AI sparkles toolbar + previous/next article navigation via bottom toolbar with pagination integration
 │   ├── ArticleReaderWebView.swift      # UIViewRepresentable wrapping WKWebView with DOM serializer injection
 │   ├── ArticleRowView.swift            # Single article row — thumbnail, title, snippet, date, read/unread styling
 │   ├── ArticleThumbnailView.swift     # Article thumbnail display — loads cached JPEG from disk, fallback photo placeholder
@@ -142,7 +143,7 @@ RSSAppTests/
 │   └── HomeViewModelTests.swift            # Unread count, saved count, cross-feed article queries, read/unread status, saved status, sort order, mark all as read
 ```
 
-**Total: 65 source files + 1 resource, 50 test source files + 1 fixture.**
+**Total: 66 source files + 1 resource, 50 test source files + 1 fixture.**
 
 ## Key Components
 
@@ -152,7 +153,9 @@ The directory tree annotations describe each file's purpose. This section covers
 
 **SwiftData persistence model.** `PersistentFeed` → `@Relationship(deleteRule: .cascade)` → `[PersistentArticle]` → `@Relationship(deleteRule: .cascade)` → optional `PersistentArticleContent`. All `@Model` properties use optionals or defaults for future CloudKit compatibility. `ModelConversion` provides bidirectional conversion extensions: `PersistentFeed` ↔ `SubscribedFeed`, `PersistentArticle` ↔ `Article`, `PersistentArticleContent` ↔ `ArticleContent`. Transient parser structs (`Article`, `RSSFeed`, `ArticleContent`) remain as transfer objects from the RSS parser and content extractor. `FeedPersisting` (`@MainActor` protocol) defines the persistence API; `SwiftDataFeedPersistenceService` implements it with feed CRUD, article upsert (deduplicating by `articleID` within a feed, preserving read and saved status), content caching, paginated queries via `FetchDescriptor.fetchOffset`/`fetchLimit` with configurable sort order (`ascending` parameter), per-feed unread article queries, saved article queries (sorted by `savedDate` descending), `toggleArticleSaved()`, and bulk `markAllArticlesRead()` / `markAllArticlesRead(for:)` operations.
 
-**Cache-first loading (`FeedViewModel`).** On `loadFeed()`, displays the first page of cached `[PersistentArticle]` immediately (page size 50), then fetches from network and upserts new articles, reloading up to `max(articles.count, pageSize)` to preserve scroll position. `loadMoreArticles()` provides infinite scroll with deduplication and error-stop (`hasMore` set to `false` on error). Loading spinner only shown when no cached articles; error only shown when network fails and no cached articles (offline resilience). Pagination errors surface via `.alert` when articles are already loaded. Supports a `showUnreadOnly` toggle (per-feed filter) and a global `sortAscending` preference (persisted in UserDefaults under `articleSortAscending`, shared between `FeedViewModel` and `HomeViewModel`). `markAllAsRead()` bulk-marks all articles in the feed as read via the persistence layer.
+**Cache-first loading (`FeedViewModel`).** On `loadFeed()`, displays the first page of cached `[PersistentArticle]` immediately (page size 50), then fetches from network and upserts new articles, reloading up to `max(articles.count, pageSize)` to preserve scroll position. `loadMoreArticles()` provides infinite scroll with deduplication and error-stop (`hasMore` set to `false` on error). `loadMoreAndReport()` wraps `loadMoreArticles()` and returns `true` if new articles were appended (used by `ArticleReaderView` navigation). Loading spinner only shown when no cached articles; error only shown when network fails and no cached articles (offline resilience). Pagination errors surface via `.alert` when articles are already loaded. Supports a `showUnreadOnly` toggle (per-feed filter) and a global `sortAscending` preference (persisted in UserDefaults under `articleSortAscending`, shared between `FeedViewModel` and `HomeViewModel`). `markAllAsRead()` bulk-marks all articles in the feed as read via the persistence layer.
+
+**Article reader navigation.** `ArticleReaderView` receives the originating list's article array, a `Binding<Int>` to the current index, and an optional `loadMore` closure. Bottom toolbar displays previous (chevron.backward) and next (chevron.forward) buttons; previous is disabled at index 0, next is disabled at the last loaded article when no more pages exist. When the user navigates past the last loaded article, the `loadMore` closure triggers pagination (`loadMoreAndReport()` / `loadMore*ArticlesAndReport()`) and advances only if new articles were loaded. On navigation, `ReaderExtractionState` is reset, the `ArticleReaderWebView` reloads via `.id(article.articleID)`, and the new article is marked as read. List views pass their article arrays and use `IdentifiableIndex` (an `Identifiable` wrapper for `Int`) to bridge the index-based model with `fullScreenCover(item:)`. All four list views support navigation: `ArticleListView`, `AllArticlesView`, `UnreadArticlesView`, and `SavedArticlesView`.
 
 **Claude API streaming flow.** `KeychainService` (`KeychainServicing` protocol, wraps `Security` framework `kSecClassGenericPassword`) loads the Anthropic API key → `ClaudeAPIService` (`ClaudeAPIServicing` protocol) POSTs to the Messages API with `stream: true`, reads SSE lines via `URLSessionBytesProviding` (injectable, defaults to `URLSession.shared`), yields text deltas via `AsyncThrowingStream<String, Error>` → `DiscussionViewModel` appends user turn, creates empty assistant placeholder, then streams chunks into `messages[lastIndex].content`. Model identifier and max output tokens read from `UserDefaults` at call time (keys: `claude_model_identifier`, `claude_max_tokens`) with fallback defaults (`claude-haiku-4-5-20251001`, `4096`).
 
@@ -231,6 +234,10 @@ RSSAppApp (@main)
 | Global oldest-first cleanup across feeds | Deleting by global `publishedDate` regardless of feed keeps the most recent content; per-feed cleanup would unevenly penalize high-volume feeds. Saved articles are excluded from cleanup — they are exempt from the retention limit |
 | Cleanup after refresh, before prefetch | Runs after new articles are committed (so the count reflects the latest state) but before thumbnail prefetch (so we don't download thumbnails for articles about to be deleted) |
 | DB-first deletion order in article cleanup | SwiftData cascade delete removes `PersistentArticleContent` automatically, but disk-cached JPEG thumbnails are not auto-deleted; DB records are deleted first, then thumbnail files, so articles still in the DB always have intact thumbnails on partial failure; orphaned thumbnail files are harmless disk waste purged by the OS under storage pressure |
+| Index-based article reader navigation | Reader receives the article array + `Binding<Int>` index rather than a single article; enables previous/next without the reader owning or modifying the list. `IdentifiableIndex` wraps `Int` for `fullScreenCover(item:)` compatibility |
+| Bottom toolbar for navigation buttons | Previous/next buttons placed in bottom toolbar — keeps the top bar clean (Done, bookmark, AI sparkles) and matches Safari's bottom toolbar pattern |
+| Pagination-on-demand at list boundary | When navigating past the last loaded article, the reader's `loadMore` closure triggers the list's pagination and advances only if new articles were appended; prevents dead ends without speculative prefetching |
+| ReaderExtractionState reset on navigation | Each article navigation creates a fresh `ReaderExtractionState` and forces a web view reload via `.id(article.articleID)`, preventing stale extracted content from leaking between articles |
 
 ## Test Coverage
 

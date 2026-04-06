@@ -2,8 +2,17 @@ import SwiftUI
 import os
 
 struct ArticleReaderView: View {
-    let article: PersistentArticle
     let persistence: FeedPersisting?
+
+    /// The ordered list of articles from the originating list view.
+    let articles: [PersistentArticle]
+
+    /// Index of the currently displayed article within `articles`.
+    @Binding var currentIndex: Int
+
+    /// Closure to trigger loading more articles when the user navigates past the last loaded article.
+    /// Returns `true` if more articles were loaded, `false` if no more are available.
+    let loadMore: (() -> Bool)?
 
     private static let logger = Logger(category: "ArticleReaderView")
 
@@ -16,6 +25,21 @@ struct ArticleReaderView: View {
 
     private let keychainService = KeychainService()
 
+    /// The currently displayed article.
+    private var article: PersistentArticle {
+        articles[currentIndex]
+    }
+
+    /// Whether the user can navigate to the previous article.
+    private var canGoBack: Bool {
+        currentIndex > 0
+    }
+
+    /// Whether the user can navigate to the next article.
+    private var canGoForward: Bool {
+        currentIndex < articles.count - 1
+    }
+
     /// Whether content extraction is still in progress (API key present but content not yet available).
     private var isExtracting: Bool {
         hasAPIKey && extractionState.content == nil && article.link != nil
@@ -24,6 +48,7 @@ struct ArticleReaderView: View {
     var body: some View {
         NavigationStack {
             articleContent
+                .id(article.articleID)
                 .navigationTitle(article.title)
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
@@ -55,6 +80,25 @@ struct ArticleReaderView: View {
                             }
                             .accessibilityLabel("Summarize with AI")
                         }
+                    }
+                    ToolbarItemGroup(placement: .bottomBar) {
+                        Button {
+                            navigateToPrevious()
+                        } label: {
+                            Image(systemName: "chevron.backward")
+                        }
+                        .disabled(!canGoBack)
+                        .accessibilityLabel("Previous article")
+
+                        Spacer()
+
+                        Button {
+                            navigateToNext()
+                        } label: {
+                            Image(systemName: "chevron.forward")
+                        }
+                        .disabled(!canGoForward)
+                        .accessibilityLabel("Next article")
                     }
                 }
                 .onAppear {
@@ -109,7 +153,57 @@ struct ArticleReaderView: View {
         )
     }
 
+    // MARK: - Navigation
+
+    private func navigateToPrevious() {
+        guard canGoBack else { return }
+        Self.logger.debug("Navigating to previous article (index \(self.currentIndex - 1, privacy: .public))")
+        currentIndex -= 1
+        onArticleChanged()
+    }
+
+    private func navigateToNext() {
+        let isAtLastLoaded = currentIndex == articles.count - 1
+
+        if isAtLastLoaded {
+            // Try to load more articles before advancing
+            if let loadMore, loadMore() {
+                Self.logger.debug("Loaded more articles, advancing to next (index \(self.currentIndex + 1, privacy: .public))")
+                currentIndex += 1
+                onArticleChanged()
+            } else {
+                Self.logger.debug("No more articles available at end of list")
+            }
+        } else {
+            Self.logger.debug("Navigating to next article (index \(self.currentIndex + 1, privacy: .public))")
+            currentIndex += 1
+            onArticleChanged()
+        }
+    }
+
+    /// Resets extraction state and marks the new article as read after navigation.
+    private func onArticleChanged() {
+        extractionState = ReaderExtractionState()
+        showSummary = false
+        markCurrentArticleAsRead()
+    }
+
     // MARK: - Actions
+
+    private func markCurrentArticleAsRead() {
+        guard !article.isRead else { return }
+        guard let persistence else {
+            Self.logger.fault("Cannot mark article as read — no persistence service")
+            assertionFailure("markCurrentArticleAsRead called but persistence is nil")
+            return
+        }
+        do {
+            try persistence.markArticleRead(article, isRead: true)
+            Self.logger.debug("Marked article '\(article.title, privacy: .public)' as read via navigation")
+        } catch {
+            Self.logger.error("Failed to mark article as read: \(error, privacy: .public)")
+        }
+    }
 
     private func toggleSaved() {
         guard let persistence else {

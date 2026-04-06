@@ -122,6 +122,14 @@ final class FeedViewModel {
         }
     }
 
+    /// Loads the next page and returns whether new articles were loaded.
+    /// Used by the article reader to trigger pagination when the user navigates past the last loaded article.
+    func loadMoreAndReport() -> Bool {
+        let countBefore = articles.count
+        loadMoreArticles()
+        return articles.count > countBefore
+    }
+
     func markAsRead(_ article: PersistentArticle) {
         guard !article.isRead else { return }
         do {

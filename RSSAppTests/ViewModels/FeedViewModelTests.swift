@@ -796,4 +796,61 @@ struct FeedViewModelTests {
 
         #expect(viewModel.errorMessage != nil)
     }
+
+    // MARK: - Load More And Report
+
+    @Test("loadMoreAndReport returns true when new articles are loaded")
+    @MainActor
+    func loadMoreAndReportReturnsTrue() async {
+        let feed = TestFixtures.makePersistentFeed(feedURL: URL(string: "https://example.com/feed")!)
+        let mock = MockFeedFetchingService()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+
+        // Create pageSize + 5 articles to force a second page
+        let totalCount = FeedViewModel.pageSize + 5
+        let articles = (0..<totalCount).map { i in
+            TestFixtures.makeArticle(
+                id: "a\(i)",
+                title: "Article \(i)",
+                publishedDate: Date(timeIntervalSince1970: Double(totalCount - i) * 1_000_000)
+            )
+        }
+        mock.feedToReturn = TestFixtures.makeFeed(articles: articles)
+
+        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence)
+        await viewModel.loadFeed()
+
+        #expect(viewModel.articles.count == FeedViewModel.pageSize)
+        #expect(viewModel.hasMoreArticles == true)
+
+        let result = viewModel.loadMoreAndReport()
+
+        #expect(result == true)
+        #expect(viewModel.articles.count == totalCount)
+    }
+
+    @Test("loadMoreAndReport returns false when no more articles exist")
+    @MainActor
+    func loadMoreAndReportReturnsFalse() async {
+        let feed = TestFixtures.makePersistentFeed(feedURL: URL(string: "https://example.com/feed")!)
+        let mock = MockFeedFetchingService()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+
+        mock.feedToReturn = TestFixtures.makeFeed(articles: [
+            TestFixtures.makeArticle(id: "1", title: "Only Article"),
+        ])
+
+        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence)
+        await viewModel.loadFeed()
+
+        #expect(viewModel.articles.count == 1)
+        #expect(viewModel.hasMoreArticles == false)
+
+        let result = viewModel.loadMoreAndReport()
+
+        #expect(result == false)
+        #expect(viewModel.articles.count == 1)
+    }
 }

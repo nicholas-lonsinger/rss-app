@@ -1361,4 +1361,172 @@ struct HomeViewModelTests {
         let remainingIDs = viewModel.savedArticlesList.map(\.articleID)
         #expect(remainingIDs == ["s4", "s3", "s1", "s0"])
     }
+
+    // MARK: - Load More And Report
+
+    @Test("loadMoreAllArticlesAndReport returns true when new articles are loaded")
+    @MainActor
+    func loadMoreAllArticlesAndReportReturnsTrue() {
+        let feed = TestFixtures.makePersistentFeed()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+
+        // Create pageSize + 5 articles to force a second page
+        let totalCount = HomeViewModel.pageSize + 5
+        let articles = (0..<totalCount).map { i in
+            let article = TestFixtures.makePersistentArticle(
+                articleID: "a\(i)",
+                publishedDate: Date(timeIntervalSince1970: Double(totalCount - i) * 1_000_000)
+            )
+            article.feed = feed
+            return article
+        }
+        mockPersistence.articlesByFeedID[feed.id] = articles
+
+        let viewModel = HomeViewModel(persistence: mockPersistence)
+        viewModel.loadAllArticles()
+
+        #expect(viewModel.allArticlesList.count == HomeViewModel.pageSize)
+        #expect(viewModel.hasMoreAllArticles == true)
+
+        let result = viewModel.loadMoreAllArticlesAndReport()
+
+        #expect(result == true)
+        #expect(viewModel.allArticlesList.count == totalCount)
+    }
+
+    @Test("loadMoreAllArticlesAndReport returns false when no more articles exist")
+    @MainActor
+    func loadMoreAllArticlesAndReportReturnsFalse() {
+        let feed = TestFixtures.makePersistentFeed()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+
+        let article = TestFixtures.makePersistentArticle(articleID: "a1")
+        article.feed = feed
+        mockPersistence.articlesByFeedID[feed.id] = [article]
+
+        let viewModel = HomeViewModel(persistence: mockPersistence)
+        viewModel.loadAllArticles()
+
+        #expect(viewModel.allArticlesList.count == 1)
+        #expect(viewModel.hasMoreAllArticles == false)
+
+        let result = viewModel.loadMoreAllArticlesAndReport()
+
+        #expect(result == false)
+        #expect(viewModel.allArticlesList.count == 1)
+    }
+
+    @Test("loadMoreUnreadArticlesAndReport returns true when new articles are loaded")
+    @MainActor
+    func loadMoreUnreadArticlesAndReportReturnsTrue() {
+        let feed = TestFixtures.makePersistentFeed()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+
+        let totalCount = HomeViewModel.pageSize + 5
+        let articles = (0..<totalCount).map { i in
+            let article = TestFixtures.makePersistentArticle(
+                articleID: "u\(i)",
+                publishedDate: Date(timeIntervalSince1970: Double(totalCount - i) * 1_000_000),
+                isRead: false
+            )
+            article.feed = feed
+            return article
+        }
+        mockPersistence.articlesByFeedID[feed.id] = articles
+
+        let viewModel = HomeViewModel(persistence: mockPersistence)
+        viewModel.loadUnreadArticles()
+
+        #expect(viewModel.unreadArticlesList.count == HomeViewModel.pageSize)
+        #expect(viewModel.hasMoreUnreadArticles == true)
+
+        let result = viewModel.loadMoreUnreadArticlesAndReport()
+
+        #expect(result == true)
+        #expect(viewModel.unreadArticlesList.count == totalCount)
+    }
+
+    @Test("loadMoreUnreadArticlesAndReport returns false when no more articles exist")
+    @MainActor
+    func loadMoreUnreadArticlesAndReportReturnsFalse() {
+        let feed = TestFixtures.makePersistentFeed()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+
+        let article = TestFixtures.makePersistentArticle(articleID: "u1", isRead: false)
+        article.feed = feed
+        mockPersistence.articlesByFeedID[feed.id] = [article]
+
+        let viewModel = HomeViewModel(persistence: mockPersistence)
+        viewModel.loadUnreadArticles()
+
+        #expect(viewModel.unreadArticlesList.count == 1)
+        #expect(viewModel.hasMoreUnreadArticles == false)
+
+        let result = viewModel.loadMoreUnreadArticlesAndReport()
+
+        #expect(result == false)
+        #expect(viewModel.unreadArticlesList.count == 1)
+    }
+
+    @Test("loadMoreSavedArticlesAndReport returns true when new articles are loaded")
+    @MainActor
+    func loadMoreSavedArticlesAndReportReturnsTrue() {
+        let feed = TestFixtures.makePersistentFeed()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+
+        let totalCount = HomeViewModel.pageSize + 5
+        let articles = (0..<totalCount).map { i in
+            let article = TestFixtures.makePersistentArticle(
+                articleID: "s\(i)",
+                isSaved: true,
+                savedDate: Date(timeIntervalSince1970: Double(totalCount - i) * 1_000)
+            )
+            article.feed = feed
+            return article
+        }
+        mockPersistence.articlesByFeedID[feed.id] = articles
+
+        let viewModel = HomeViewModel(persistence: mockPersistence)
+        viewModel.loadSavedArticles()
+
+        #expect(viewModel.savedArticlesList.count == HomeViewModel.pageSize)
+        #expect(viewModel.hasMoreSavedArticles == true)
+
+        let result = viewModel.loadMoreSavedArticlesAndReport()
+
+        #expect(result == true)
+        #expect(viewModel.savedArticlesList.count == totalCount)
+    }
+
+    @Test("loadMoreSavedArticlesAndReport returns false when no more articles exist")
+    @MainActor
+    func loadMoreSavedArticlesAndReportReturnsFalse() {
+        let feed = TestFixtures.makePersistentFeed()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+
+        let article = TestFixtures.makePersistentArticle(
+            articleID: "s1",
+            isSaved: true,
+            savedDate: Date()
+        )
+        article.feed = feed
+        mockPersistence.articlesByFeedID[feed.id] = [article]
+
+        let viewModel = HomeViewModel(persistence: mockPersistence)
+        viewModel.loadSavedArticles()
+
+        #expect(viewModel.savedArticlesList.count == 1)
+        #expect(viewModel.hasMoreSavedArticles == false)
+
+        let result = viewModel.loadMoreSavedArticlesAndReport()
+
+        #expect(result == false)
+        #expect(viewModel.savedArticlesList.count == 1)
+    }
 }

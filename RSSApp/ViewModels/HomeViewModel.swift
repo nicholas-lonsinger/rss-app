@@ -138,6 +138,14 @@ final class HomeViewModel {
         )
     }
 
+    /// Loads the next page of all articles and returns whether new articles were loaded.
+    /// Used by the article reader to trigger pagination when the user navigates past the last loaded article.
+    func loadMoreAllArticlesAndReport() -> Bool {
+        let countBefore = allArticlesList.count
+        loadMoreAllArticles()
+        return allArticlesList.count > countBefore
+    }
+
     // MARK: - Unread Articles (paginated)
 
     /// Resets pagination and loads the first page of unread articles.
@@ -163,6 +171,14 @@ final class HomeViewModel {
         )
     }
 
+    /// Loads the next page of unread articles and returns whether new articles were loaded.
+    /// Used by the article reader to trigger pagination when the user navigates past the last loaded article.
+    func loadMoreUnreadArticlesAndReport() -> Bool {
+        let countBefore = unreadArticlesList.count
+        loadMoreUnreadArticles()
+        return unreadArticlesList.count > countBefore
+    }
+
     // MARK: - Saved Articles (paginated)
 
     /// Resets pagination and loads the first page of saved articles.
@@ -186,6 +202,14 @@ final class HomeViewModel {
             fetch: { offset, limit in try self.persistence.allSavedArticles(offset: offset, limit: limit) },
             label: "saved articles"
         )
+    }
+
+    /// Loads the next page of saved articles and returns whether new articles were loaded.
+    /// Used by the article reader to trigger pagination when the user navigates past the last loaded article.
+    func loadMoreSavedArticlesAndReport() -> Bool {
+        let countBefore = savedArticlesList.count
+        loadMoreSavedArticles()
+        return savedArticlesList.count > countBefore
     }
 
     // MARK: - Pagination Helpers
