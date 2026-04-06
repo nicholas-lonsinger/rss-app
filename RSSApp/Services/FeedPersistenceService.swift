@@ -463,20 +463,42 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
         return articles.map { (articleID: $0.articleID, isThumbnailCached: $0.isThumbnailCached) }
     }
 
+    /// Batch size for article deletion. Kept below SQLite's default 999 variable limit
+    /// to avoid parameter overflow, while being large enough for efficient throughput.
+    private static let deletionBatchSize = 500
+
     func deleteArticles(withIDs articleIDs: Set<String>) throws {
         guard !articleIDs.isEmpty else { return }
-        let idsArray = Array(articleIDs)
-        let descriptor = FetchDescriptor<PersistentArticle>(
-            predicate: #Predicate { idsArray.contains($0.articleID) }
-        )
-        let articles = try modelContext.fetch(descriptor)
-        if articles.count != articleIDs.count {
-            Self.logger.warning("Requested deletion of \(articleIDs.count, privacy: .public) articles but found \(articles.count, privacy: .public)")
+
+        let allIDs = Array(articleIDs)
+        var totalDeleted = 0
+
+        for batchStart in stride(from: 0, to: allIDs.count, by: Self.deletionBatchSize) {
+            let batchNumber = batchStart / Self.deletionBatchSize + 1
+            let batchEnd = min(batchStart + Self.deletionBatchSize, allIDs.count)
+            let batchIDs = Array(allIDs[batchStart..<batchEnd])
+
+            do {
+                let descriptor = FetchDescriptor<PersistentArticle>(
+                    predicate: #Predicate { batchIDs.contains($0.articleID) }
+                )
+                let articles = try modelContext.fetch(descriptor)
+                for article in articles {
+                    modelContext.delete(article)
+                }
+                try modelContext.save()
+                totalDeleted += articles.count
+                Self.logger.debug("Deleted batch \(batchNumber, privacy: .public): \(articles.count, privacy: .public) articles")
+            } catch {
+                Self.logger.error("Batch \(batchNumber, privacy: .public) failed after \(totalDeleted, privacy: .public) of \(articleIDs.count, privacy: .public) articles already deleted: \(error, privacy: .public)")
+                throw error
+            }
         }
-        for article in articles {
-            modelContext.delete(article)
+
+        if totalDeleted != articleIDs.count {
+            Self.logger.warning("Requested deletion of \(articleIDs.count, privacy: .public) articles but deleted \(totalDeleted, privacy: .public)")
+        } else {
+            Self.logger.notice("Deleted \(totalDeleted, privacy: .public) articles during cleanup")
         }
-        try modelContext.save()
-        Self.logger.notice("Deleted \(articles.count, privacy: .public) articles during cleanup")
     }
 }

@@ -981,6 +981,37 @@ struct FeedPersistenceServiceTests {
         #expect(try service.totalArticleCount() == 1)
     }
 
+    @Test("deleteArticles handles count exceeding batch size")
+    @MainActor
+    func deleteArticlesBatched() throws {
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+
+        // Create 600 articles to delete + 5 to keep (exceeds the 500 batch size)
+        let deleteCount = 600
+        let keepCount = 5
+        var articles: [Article] = []
+        for i in 0..<deleteCount {
+            articles.append(TestFixtures.makeArticle(id: "delete-\(i)"))
+        }
+        for i in 0..<keepCount {
+            articles.append(TestFixtures.makeArticle(id: "keep-\(i)"))
+        }
+        try service.upsertArticles(articles, for: feed)
+        try service.save()
+
+        let deleteIDs = Set((0..<deleteCount).map { "delete-\($0)" })
+        try service.deleteArticles(withIDs: deleteIDs)
+
+        let remaining = try service.articles(for: feed)
+        #expect(remaining.count == keepCount)
+        for i in 0..<keepCount {
+            #expect(remaining.contains { $0.articleID == "keep-\(i)" })
+        }
+    }
+
     // MARK: - Saved Article Operations
 
     @Test("toggleArticleSaved saves an unsaved article")
