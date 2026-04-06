@@ -287,6 +287,10 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
             predicate: #Predicate { $0.feed?.persistentModelID == feedID && !$0.isRead }
         )
         let unreadArticles = try modelContext.fetch(descriptor)
+        guard !unreadArticles.isEmpty else {
+            Self.logger.debug("No unread articles to mark as read for feed '\(feed.title, privacy: .public)'")
+            return
+        }
         let now = Date()
         for article in unreadArticles {
             article.isRead = true
@@ -301,6 +305,10 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
             predicate: #Predicate { !$0.isRead }
         )
         let unreadArticles = try modelContext.fetch(descriptor)
+        guard !unreadArticles.isEmpty else {
+            Self.logger.debug("No unread articles to mark as read across all feeds")
+            return
+        }
         let now = Date()
         for article in unreadArticles {
             article.isRead = true
