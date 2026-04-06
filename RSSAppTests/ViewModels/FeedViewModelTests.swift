@@ -196,7 +196,7 @@ struct FeedViewModelTests {
         #expect(viewModel.articles.count == 1)
     }
 
-    @Test("loadMoreArticles sets errorMessage on persistence failure")
+    @Test("loadMoreArticles sets errorMessage on persistence failure and preserves hasMore for retry")
     @MainActor
     func loadMoreArticlesPersistenceError() async {
         let feed = TestFixtures.makePersistentFeed(feedURL: URL(string: "https://example.com/feed")!)
@@ -227,7 +227,8 @@ struct FeedViewModelTests {
 
         #expect(viewModel.errorMessage != nil)
         #expect(viewModel.articles.count == articleCountBefore)
-        #expect(viewModel.hasMoreArticles == false)
+        // hasMoreArticles preserved so the user can retry
+        #expect(viewModel.hasMoreArticles == true)
     }
 
     @Test("loadFeed sets hasMoreArticles to false when cached articles fewer than page size")
@@ -854,7 +855,7 @@ struct FeedViewModelTests {
         #expect(viewModel.articles.count == 1)
     }
 
-    @Test("loadMoreAndReport returns .failed when persistence error occurs")
+    @Test("loadMoreAndReport returns .failed when persistence error occurs and preserves hasMore for retry")
     @MainActor
     func loadMoreAndReportReturnsFailed() async {
         let feed = TestFixtures.makePersistentFeed(feedURL: URL(string: "https://example.com/feed")!)
@@ -883,8 +884,48 @@ struct FeedViewModelTests {
         let result = viewModel.loadMoreAndReport()
 
         #expect(result == .failed("Unable to load more articles."))
-        #expect(viewModel.hasMoreArticles == false)
+        // hasMoreArticles preserved so the user can retry
+        #expect(viewModel.hasMoreArticles == true)
         // loadMoreAndReport clears errorMessage so only the article reader shows the error
         #expect(viewModel.errorMessage == nil)
+    }
+
+    @Test("loadMoreArticles succeeds on retry after transient error")
+    @MainActor
+    func loadMoreArticlesRetryAfterError() async {
+        let feed = TestFixtures.makePersistentFeed(feedURL: URL(string: "https://example.com/feed")!)
+        let mock = MockFeedFetchingService()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+
+        // Create enough articles for pagination
+        let totalCount = FeedViewModel.pageSize + 5
+        let articles = (0..<totalCount).map { i in
+            TestFixtures.makeArticle(
+                id: "a\(i)",
+                title: "Article \(i)",
+                publishedDate: Date(timeIntervalSince1970: Double(totalCount - i) * 1_000_000)
+            )
+        }
+        mock.feedToReturn = TestFixtures.makeFeed(articles: articles)
+
+        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence)
+        await viewModel.loadFeed()
+
+        #expect(viewModel.hasMoreArticles == true)
+        let articleCountBeforeError = viewModel.articles.count
+
+        // First attempt fails
+        mockPersistence.errorToThrow = NSError(domain: "test", code: 1)
+        let failedResult = viewModel.loadMoreArticles()
+        #expect(failedResult == .failed("Unable to load more articles."))
+        #expect(viewModel.hasMoreArticles == true)
+        #expect(viewModel.articles.count == articleCountBeforeError)
+
+        // Clear error and retry succeeds
+        mockPersistence.errorToThrow = nil
+        let retryResult = viewModel.loadMoreArticles()
+        #expect(retryResult == .loaded)
+        #expect(viewModel.articles.count > articleCountBeforeError)
     }
 }

@@ -224,7 +224,7 @@ final class HomeViewModel {
     // MARK: - Pagination Helpers
 
     /// Fetches the next page of articles, deduplicates, and appends to the list.
-    /// Sets `hasMore` to `false` on error to prevent infinite retry loops.
+    /// On error, preserves `hasMore` so the user can retry by tapping next again.
     private func loadMorePage(
         into list: inout [PersistentArticle],
         hasMore: inout Bool,
@@ -242,7 +242,10 @@ final class HomeViewModel {
             Self.logger.debug("Loaded page of \(page.count, privacy: .public) \(label, privacy: .public) (\(newItems.count, privacy: .public) new, total: \(totalCount, privacy: .public))")
             return newItems.isEmpty ? .exhausted : .loaded
         } catch {
-            hasMore = false
+            // RATIONALE: hasMore is intentionally NOT set to false on error.
+            // Pagination errors are transient (database hiccups, etc.) and the user
+            // should be able to retry by tapping next again. The error is surfaced via
+            // LoadMoreResult.failed so the caller can display an alert.
             let message = "Unable to load \(label)."
             errorMessage = message
             Self.logger.error("Failed to load \(label) page: \(error, privacy: .public)")
