@@ -1447,7 +1447,9 @@ struct HomeViewModelTests {
         let result = viewModel.loadMoreAllArticlesAndReport()
 
         #expect(result == .failed("Unable to load all articles."))
-        #expect(viewModel.errorMessage != nil)
+        #expect(viewModel.hasMoreAllArticles == false)
+        // loadMoreAllArticlesAndReport clears errorMessage so only the article reader shows the error
+        #expect(viewModel.errorMessage == nil)
     }
 
     @Test("loadMoreUnreadArticlesAndReport returns .loaded when new articles are loaded")
@@ -1532,7 +1534,9 @@ struct HomeViewModelTests {
         let result = viewModel.loadMoreUnreadArticlesAndReport()
 
         #expect(result == .failed("Unable to load unread articles."))
-        #expect(viewModel.errorMessage != nil)
+        #expect(viewModel.hasMoreUnreadArticles == false)
+        // loadMoreUnreadArticlesAndReport clears errorMessage so only the article reader shows the error
+        #expect(viewModel.errorMessage == nil)
     }
 
     @Test("loadMoreSavedArticlesAndReport returns .loaded when new articles are loaded")
@@ -1621,6 +1625,8 @@ struct HomeViewModelTests {
         let result = viewModel.loadMoreSavedArticlesAndReport()
 
         #expect(result == .failed("Unable to load saved articles."))
-        #expect(viewModel.errorMessage != nil)
+        #expect(viewModel.hasMoreSavedArticles == false)
+        // loadMoreSavedArticlesAndReport clears errorMessage so only the article reader shows the error
+        #expect(viewModel.errorMessage == nil)
     }
 }

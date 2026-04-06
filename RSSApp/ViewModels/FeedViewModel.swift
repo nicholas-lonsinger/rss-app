@@ -102,8 +102,9 @@ final class FeedViewModel {
     }
 
     /// Loads the next page of articles and appends to the existing list.
-    func loadMoreArticles() {
-        guard hasMoreArticles else { return }
+    @discardableResult
+    func loadMoreArticles() -> LoadMoreResult {
+        guard hasMoreArticles else { return .exhausted }
         do {
             let page = try fetchCurrentPage(
                 offset: articles.count,
@@ -115,26 +116,23 @@ final class FeedViewModel {
             articles.append(contentsOf: newItems)
             hasMoreArticles = page.count == Self.pageSize
             Self.logger.debug("Loaded page of \(page.count, privacy: .public) articles for feed (\(newItems.count, privacy: .public) new, total: \(self.articles.count, privacy: .public))")
+            return newItems.isEmpty ? .exhausted : .loaded
         } catch {
             hasMoreArticles = false
             errorMessage = "Unable to load more articles."
             Self.logger.error("Failed to load articles page: \(error, privacy: .public)")
+            return .failed("Unable to load more articles.")
         }
     }
 
-    /// Loads the next page and returns the outcome.
-    /// Used by the article reader to trigger pagination when the user navigates past the last loaded article.
+    /// Loads the next page and returns the outcome, clearing `errorMessage` on failure
+    /// so only the caller (article reader) displays the error — not the list view's alert.
     func loadMoreAndReport() -> LoadMoreResult {
-        let countBefore = articles.count
-        let errorBefore = errorMessage
-        loadMoreArticles()
-        if articles.count > countBefore {
-            return .loaded
-        } else if errorMessage != nil && errorMessage != errorBefore {
-            return .failed(errorMessage ?? "Unable to load more articles.")
-        } else {
-            return .exhausted
+        let result = loadMoreArticles()
+        if case .failed = result {
+            errorMessage = nil
         }
+        return result
     }
 
     func markAsRead(_ article: PersistentArticle) {

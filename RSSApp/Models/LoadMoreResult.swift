@@ -1,6 +1,6 @@
 /// Result of a pagination load-more operation, distinguishing between
 /// successfully loaded articles, an exhausted data source (no more pages),
-/// and a failed database query.
+/// and a failed operation.
 enum LoadMoreResult: Equatable, Sendable {
     /// New articles were successfully loaded.
     case loaded

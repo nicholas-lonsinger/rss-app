@@ -883,6 +883,8 @@ struct FeedViewModelTests {
         let result = viewModel.loadMoreAndReport()
 
         #expect(result == .failed("Unable to load more articles."))
-        #expect(viewModel.errorMessage != nil)
+        #expect(viewModel.hasMoreArticles == false)
+        // loadMoreAndReport clears errorMessage so only the article reader shows the error
+        #expect(viewModel.errorMessage == nil)
     }
 }
