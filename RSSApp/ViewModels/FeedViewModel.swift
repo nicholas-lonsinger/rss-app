@@ -122,9 +122,10 @@ final class FeedViewModel {
             // Pagination errors are transient (database hiccups, etc.) and the user
             // should be able to retry by tapping next again. The error is surfaced via
             // LoadMoreResult.failed so the caller can display an alert.
-            errorMessage = "Unable to load more articles."
+            let message = "Unable to load more articles."
+            errorMessage = message
             Self.logger.error("Failed to load articles page: \(error, privacy: .public)")
-            return .failed("Unable to load more articles.")
+            return .failed(message)
         }
     }
 
