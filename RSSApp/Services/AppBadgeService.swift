@@ -6,10 +6,10 @@ import os
 
 @MainActor
 protocol AppBadgeUpdating: Sendable {
-    /// The current badge mode setting. Changes are persisted to UserDefaults.
-    var badgeMode: AppBadgeMode { get set }
+    /// Whether the app icon badge is enabled. Changes are persisted to UserDefaults.
+    var badgeEnabled: Bool { get set }
 
-    /// Updates the app icon badge based on the current mode and unread count.
+    /// Updates the app icon badge based on the current setting and unread count.
     /// Requests notification permission if needed (badge-only, no alerts/sounds).
     /// - Parameter unreadCount: The total number of unread articles across all feeds.
     func updateBadge(unreadCount: Int) async
@@ -24,25 +24,43 @@ protocol AppBadgeUpdating: Sendable {
 struct AppBadgeService: AppBadgeUpdating {
 
     private static let logger = Logger(category: "AppBadgeService")
-    private static let badgeModeDefaultsKey = "appBadgeMode"
+    private static let badgeEnabledDefaultsKey = "appBadgeEnabled"
 
     private let notificationCenter: UNUserNotificationCenter
 
+    private static let legacyBadgeModeKey = "appBadgeMode"
+
     init(notificationCenter: UNUserNotificationCenter = .current()) {
         self.notificationCenter = notificationCenter
+        Self.migrateFromBadgeModeIfNeeded()
     }
 
-    var badgeMode: AppBadgeMode {
+    /// One-time migration from the old 3-mode `appBadgeMode` key to `appBadgeEnabled`.
+    private static func migrateFromBadgeModeIfNeeded() {
+        let defaults = UserDefaults.standard
+        guard let oldMode = defaults.string(forKey: legacyBadgeModeKey) else { return }
+        guard defaults.object(forKey: badgeEnabledDefaultsKey) == nil else { return }
+
+        let enabled = oldMode != "off"
+        defaults.set(enabled, forKey: badgeEnabledDefaultsKey)
+        defaults.removeObject(forKey: legacyBadgeModeKey)
+        logger.notice("Migrated badge mode '\(oldMode, privacy: .public)' to badgeEnabled=\(enabled, privacy: .public)")
+    }
+
+    var badgeEnabled: Bool {
         get {
-            let stored = UserDefaults.standard.string(forKey: Self.badgeModeDefaultsKey) ?? ""
-            return AppBadgeMode(rawValue: stored) ?? .defaultMode
+            // Default to true (badge on) when key has never been set.
+            if UserDefaults.standard.object(forKey: Self.badgeEnabledDefaultsKey) == nil {
+                return true
+            }
+            return UserDefaults.standard.bool(forKey: Self.badgeEnabledDefaultsKey)
         }
         // RATIONALE: nonmutating because the backing store is UserDefaults, not a stored
         // property on self. This allows views to call the setter without requiring a mutable
         // binding to the service.
         nonmutating set {
-            UserDefaults.standard.set(newValue.rawValue, forKey: Self.badgeModeDefaultsKey)
-            Self.logger.notice("Badge mode changed to '\(newValue.rawValue, privacy: .public)'")
+            UserDefaults.standard.set(newValue, forKey: Self.badgeEnabledDefaultsKey)
+            Self.logger.notice("Badge enabled changed to \(newValue, privacy: .public)")
         }
     }
 
@@ -53,16 +71,12 @@ struct AppBadgeService: AppBadgeUpdating {
             return
         }
 
-        let mode = badgeMode
-        Self.logger.debug("updateBadge(unreadCount: \(unreadCount, privacy: .public)) with mode '\(mode.rawValue, privacy: .public)'")
+        Self.logger.debug("updateBadge(unreadCount: \(unreadCount, privacy: .public), badgeEnabled: \(badgeEnabled, privacy: .public))")
 
-        switch mode {
-        case .off:
-            await clearBadge()
-        case .count:
+        if badgeEnabled {
             await setBadgeCount(unreadCount)
-        case .indicator:
-            await setBadgeCount(unreadCount > 0 ? 1 : 0)
+        } else {
+            await clearBadge()
         }
     }
 

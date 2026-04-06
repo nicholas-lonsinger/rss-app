@@ -6,15 +6,10 @@ final class MockAppBadgeService: AppBadgeUpdating {
 
     // MARK: - State
 
-    var currentBadgeMode: AppBadgeMode = .count
+    var badgeEnabled: Bool = true
     private(set) var updateBadgeCallCount = 0
     private(set) var clearBadgeCallCount = 0
     private(set) var lastUnreadCount: Int?
-
-    var badgeMode: AppBadgeMode {
-        get { currentBadgeMode }
-        set { currentBadgeMode = newValue }
-    }
 
     func updateBadge(unreadCount: Int) async {
         updateBadgeCallCount += 1
