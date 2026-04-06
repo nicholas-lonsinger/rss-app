@@ -24,6 +24,11 @@ final class HomeViewModel {
     private(set) var unreadArticlesList: [PersistentArticle] = []
     private(set) var hasMoreUnreadArticles = true
 
+    // RATIONALE: Unlike FeedViewModel.sortAscending which auto-reloads on set,
+    // HomeViewModel does not auto-reload because it serves two independent views
+    // (AllArticlesView and UnreadArticlesView) that each need to reload their own
+    // specific list. Callers toggle the property then call the appropriate reload
+    // method (loadAllArticles or loadUnreadArticles) for their view.
     /// Current sort order — reads from the global UserDefaults preference.
     var sortAscending: Bool {
         get { UserDefaults.standard.bool(forKey: FeedViewModel.sortAscendingKey) }

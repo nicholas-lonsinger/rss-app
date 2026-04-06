@@ -848,4 +848,58 @@ struct HomeViewModelTests {
         // Clean up
         UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
     }
+
+    @Test("markAllAsRead reloads allArticlesList with updated read state")
+    @MainActor
+    func markAllAsReadReloadsAllArticlesList() {
+        let feed = TestFixtures.makePersistentFeed()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+
+        let article1 = TestFixtures.makePersistentArticle(articleID: "a1", isRead: false)
+        article1.feed = feed
+        let article2 = TestFixtures.makePersistentArticle(articleID: "a2", isRead: false)
+        article2.feed = feed
+        mockPersistence.articlesByFeedID[feed.id] = [article1, article2]
+
+        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
+        let viewModel = HomeViewModel(persistence: mockPersistence)
+        viewModel.loadAllArticles()
+        #expect(viewModel.allArticlesList.count == 2)
+
+        viewModel.markAllAsRead()
+
+        // allArticlesList should be reloaded (still 2 articles, but now all read)
+        #expect(viewModel.allArticlesList.count == 2)
+        let allRead = viewModel.allArticlesList.allSatisfy(\.isRead)
+        #expect(allRead)
+
+        // Clean up
+        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
+    }
+
+    @Test("sortAscending setter is no-op when set to same value")
+    @MainActor
+    func sortAscendingSameValueNoOp() {
+        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
+        let mockPersistence = MockFeedPersistenceService()
+        let viewModel = HomeViewModel(persistence: mockPersistence)
+
+        #expect(viewModel.sortAscending == false)
+
+        // Set to same value (false) — should not write to UserDefaults
+        viewModel.sortAscending = false
+        // Verify it's still false (no change)
+        #expect(viewModel.sortAscending == false)
+
+        // Now set to true, then set to true again
+        viewModel.sortAscending = true
+        #expect(viewModel.sortAscending == true)
+
+        viewModel.sortAscending = true
+        #expect(viewModel.sortAscending == true)
+
+        // Clean up
+        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
+    }
 }

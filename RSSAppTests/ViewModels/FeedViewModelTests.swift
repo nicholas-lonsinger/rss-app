@@ -525,4 +525,119 @@ struct FeedViewModelTests {
 
         #expect(viewModel.errorMessage != nil)
     }
+
+    // MARK: - Reload Error Paths
+
+    @Test("reloadArticles sets errorMessage when persistence fails during filter toggle")
+    @MainActor
+    func reloadArticlesErrorOnFilterToggle() async {
+        let feed = TestFixtures.makePersistentFeed(feedURL: URL(string: "https://example.com/feed")!)
+        let mock = MockFeedFetchingService()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+
+        let article = TestFixtures.makePersistentArticle(articleID: "a1", isRead: false)
+        article.feed = feed
+        mockPersistence.articlesByFeedID[feed.id] = [article]
+
+        mock.feedToReturn = TestFixtures.makeFeed()
+
+        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
+        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence)
+        await viewModel.loadFeed()
+        #expect(viewModel.articles.count == 1)
+
+        // Inject error before toggling filter
+        mockPersistence.errorToThrow = NSError(domain: "test", code: 1)
+        viewModel.showUnreadOnly = true
+
+        #expect(viewModel.errorMessage == "Unable to reload articles.")
+
+        // Clean up
+        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
+    }
+
+    @Test("reloadArticles sets errorMessage when persistence fails during sort toggle")
+    @MainActor
+    func reloadArticlesErrorOnSortToggle() async {
+        let feed = TestFixtures.makePersistentFeed(feedURL: URL(string: "https://example.com/feed")!)
+        let mock = MockFeedFetchingService()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+
+        let article = TestFixtures.makePersistentArticle(articleID: "a1")
+        article.feed = feed
+        mockPersistence.articlesByFeedID[feed.id] = [article]
+
+        mock.feedToReturn = TestFixtures.makeFeed()
+
+        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
+        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence)
+        await viewModel.loadFeed()
+        #expect(viewModel.articles.count == 1)
+
+        // Inject error before toggling sort
+        mockPersistence.errorToThrow = NSError(domain: "test", code: 1)
+        viewModel.sortAscending = true
+
+        #expect(viewModel.errorMessage == "Unable to reload articles.")
+
+        // Clean up
+        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
+    }
+
+    // MARK: - Pagination with Unread Filter
+
+    @Test("loadMoreArticles paginates correctly with showUnreadOnly active")
+    @MainActor
+    func loadMoreArticlesWithUnreadFilter() async {
+        let feed = TestFixtures.makePersistentFeed(feedURL: URL(string: "https://example.com/feed")!)
+        let mock = MockFeedFetchingService()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+
+        // Create pageSize + 3 unread articles to force a second page
+        let totalCount = FeedViewModel.pageSize + 3
+        let articles = (0..<totalCount).map { i in
+            let article = TestFixtures.makePersistentArticle(
+                articleID: "u\(i)",
+                publishedDate: Date(timeIntervalSince1970: Double(totalCount - i) * 1_000_000),
+                isRead: false
+            )
+            article.feed = feed
+            return article
+        }
+        // Also add a read article that should be excluded
+        let readArticle = TestFixtures.makePersistentArticle(
+            articleID: "read1",
+            publishedDate: Date(timeIntervalSince1970: 999_999_999),
+            isRead: true
+        )
+        readArticle.feed = feed
+        mockPersistence.articlesByFeedID[feed.id] = articles + [readArticle]
+
+        mock.feedToReturn = TestFixtures.makeFeed()
+
+        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
+        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence)
+        viewModel.showUnreadOnly = true
+        await viewModel.loadFeed()
+
+        // First page should have pageSize unread articles
+        #expect(viewModel.articles.count == FeedViewModel.pageSize)
+        #expect(viewModel.hasMoreArticles == true)
+        // None should be the read article
+        #expect(!viewModel.articles.contains { $0.articleID == "read1" })
+
+        // Load next page
+        viewModel.loadMoreArticles()
+
+        #expect(viewModel.articles.count == totalCount)
+        #expect(viewModel.hasMoreArticles == false)
+        // Still no read article
+        #expect(!viewModel.articles.contains { $0.articleID == "read1" })
+
+        // Clean up
+        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
+    }
 }
