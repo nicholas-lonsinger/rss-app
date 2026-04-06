@@ -46,7 +46,7 @@ struct SavedArticlesView: View {
                     .swipeActions(edge: .trailing) {
                         Button {
                             homeViewModel.toggleSaved(article)
-                            homeViewModel.loadSavedArticles()
+                            homeViewModel.removeFromSavedList(article)
                         } label: {
                             Label("Unsave", systemImage: "bookmark.slash")
                         }
