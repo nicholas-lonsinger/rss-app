@@ -474,25 +474,31 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
         var totalDeleted = 0
 
         for batchStart in stride(from: 0, to: allIDs.count, by: Self.deletionBatchSize) {
+            let batchNumber = batchStart / Self.deletionBatchSize + 1
             let batchEnd = min(batchStart + Self.deletionBatchSize, allIDs.count)
             let batchIDs = Array(allIDs[batchStart..<batchEnd])
 
-            let descriptor = FetchDescriptor<PersistentArticle>(
-                predicate: #Predicate { batchIDs.contains($0.articleID) }
-            )
-            let articles = try modelContext.fetch(descriptor)
-            for article in articles {
-                modelContext.delete(article)
+            do {
+                let descriptor = FetchDescriptor<PersistentArticle>(
+                    predicate: #Predicate { batchIDs.contains($0.articleID) }
+                )
+                let articles = try modelContext.fetch(descriptor)
+                for article in articles {
+                    modelContext.delete(article)
+                }
+                try modelContext.save()
+                totalDeleted += articles.count
+                Self.logger.debug("Deleted batch \(batchNumber, privacy: .public): \(articles.count, privacy: .public) articles")
+            } catch {
+                Self.logger.error("Batch \(batchNumber, privacy: .public) failed after \(totalDeleted, privacy: .public) of \(articleIDs.count, privacy: .public) articles already deleted: \(error, privacy: .public)")
+                throw error
             }
-            try modelContext.save()
-            totalDeleted += articles.count
-
-            Self.logger.debug("Deleted batch \(batchStart / Self.deletionBatchSize + 1, privacy: .public): \(articles.count, privacy: .public) articles")
         }
 
         if totalDeleted != articleIDs.count {
             Self.logger.warning("Requested deletion of \(articleIDs.count, privacy: .public) articles but deleted \(totalDeleted, privacy: .public)")
+        } else {
+            Self.logger.notice("Deleted \(totalDeleted, privacy: .public) articles during cleanup")
         }
-        Self.logger.notice("Deleted \(totalDeleted, privacy: .public) articles during cleanup")
     }
 }
