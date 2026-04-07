@@ -39,9 +39,18 @@ final class NetworkMonitorService: NetworkMonitoring, @unchecked Sendable {
     private var currentPath: NWPath?
     private let lock = NSLock()
 
-    init() {
+    /// Closure that returns the current WiFi-only preference. Injected so tests can
+    /// control the preference value without touching `UserDefaults.standard`.
+    private let wifiOnlyProvider: @Sendable () -> Bool
+
+    /// Creates a network monitor that reads the WiFi-only preference from the supplied
+    /// provider closure. Defaults to `BackgroundImageDownloadSettings.wifiOnly` for
+    /// production use; tests can inject a fixed-value closure to exercise the
+    /// preference branches independently of `UserDefaults`.
+    init(wifiOnlyProvider: @escaping @Sendable () -> Bool = { BackgroundImageDownloadSettings.wifiOnly }) {
         self.monitor = NWPathMonitor()
         self.queue = DispatchQueue(label: "com.nicholas-lonsinger.rss-app.network-monitor", qos: .utility)
+        self.wifiOnlyProvider = wifiOnlyProvider
 
         monitor.pathUpdateHandler = { [weak self] path in
             guard let self else { return }
@@ -59,7 +68,7 @@ final class NetworkMonitorService: NetworkMonitoring, @unchecked Sendable {
     }
 
     func isBackgroundDownloadAllowed() -> Bool {
-        let wifiOnly = BackgroundImageDownloadSettings.wifiOnly
+        let wifiOnly = wifiOnlyProvider()
 
         lock.lock()
         let path = currentPath
