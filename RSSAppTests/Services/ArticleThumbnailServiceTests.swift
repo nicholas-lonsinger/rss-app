@@ -175,4 +175,278 @@ struct ArticleThumbnailServiceTests {
         let thrown = await task.value
         #expect(thrown is CancellationError, "Expected CancellationError, got \(String(describing: thrown))")
     }
+
+    // MARK: - isPermanentHTTPFailure
+    //
+    // Direct unit tests for the pure HTTP status classification helper used by both
+    // `cacheThumbnail` and `resolveOGImage` to decide between transient and permanent
+    // failures. These lock in the boundary values so future refactors can't accidentally
+    // reclassify 429/408 as permanent or drop a 4xx code into the transient bucket.
+
+    @Test("isPermanentHTTPFailure classifies 400 as permanent")
+    func isPermanentHTTPFailureClassifies400() {
+        #expect(ArticleThumbnailService.isPermanentHTTPFailure(code: 400) == true)
+    }
+
+    @Test("isPermanentHTTPFailure classifies 403 as permanent")
+    func isPermanentHTTPFailureClassifies403() {
+        #expect(ArticleThumbnailService.isPermanentHTTPFailure(code: 403) == true)
+    }
+
+    @Test("isPermanentHTTPFailure classifies 404 as permanent")
+    func isPermanentHTTPFailureClassifies404() {
+        #expect(ArticleThumbnailService.isPermanentHTTPFailure(code: 404) == true)
+    }
+
+    @Test("isPermanentHTTPFailure classifies 410 as permanent")
+    func isPermanentHTTPFailureClassifies410() {
+        #expect(ArticleThumbnailService.isPermanentHTTPFailure(code: 410) == true)
+    }
+
+    @Test("isPermanentHTTPFailure classifies 499 as permanent (upper 4xx boundary)")
+    func isPermanentHTTPFailureClassifies499() {
+        #expect(ArticleThumbnailService.isPermanentHTTPFailure(code: 499) == true)
+    }
+
+    @Test("isPermanentHTTPFailure treats 408 as transient")
+    func isPermanentHTTPFailureTreats408AsTransient() {
+        // 408 Request Timeout is transient despite being 4xx.
+        #expect(ArticleThumbnailService.isPermanentHTTPFailure(code: 408) == false)
+    }
+
+    @Test("isPermanentHTTPFailure treats 429 as transient")
+    func isPermanentHTTPFailureTreats429AsTransient() {
+        // 429 Too Many Requests is rate limiting — retry-worthy.
+        #expect(ArticleThumbnailService.isPermanentHTTPFailure(code: 429) == false)
+    }
+
+    @Test("isPermanentHTTPFailure treats 500 as transient")
+    func isPermanentHTTPFailureTreats500AsTransient() {
+        #expect(ArticleThumbnailService.isPermanentHTTPFailure(code: 500) == false)
+    }
+
+    @Test("isPermanentHTTPFailure treats 502 as transient")
+    func isPermanentHTTPFailureTreats502AsTransient() {
+        #expect(ArticleThumbnailService.isPermanentHTTPFailure(code: 502) == false)
+    }
+
+    @Test("isPermanentHTTPFailure treats 503 as transient")
+    func isPermanentHTTPFailureTreats503AsTransient() {
+        #expect(ArticleThumbnailService.isPermanentHTTPFailure(code: 503) == false)
+    }
+
+    @Test("isPermanentHTTPFailure treats 504 as transient")
+    func isPermanentHTTPFailureTreats504AsTransient() {
+        #expect(ArticleThumbnailService.isPermanentHTTPFailure(code: 504) == false)
+    }
+
+    @Test("isPermanentHTTPFailure treats -1 (non-HTTPURLResponse sentinel) as transient")
+    func isPermanentHTTPFailureTreatsSentinelAsTransient() {
+        // The service uses -1 as the sentinel when a response isn't an HTTPURLResponse.
+        #expect(ArticleThumbnailService.isPermanentHTTPFailure(code: -1) == false)
+    }
+
+    @Test("isPermanentHTTPFailure treats 200 as non-permanent (outside 4xx range)")
+    func isPermanentHTTPFailureTreats200AsNonPermanent() {
+        // Success codes aren't "permanent failures" — the classifier only fires on non-2xx.
+        #expect(ArticleThumbnailService.isPermanentHTTPFailure(code: 200) == false)
+    }
+
+    // MARK: - resolveOGImage HTTP Classification
+    //
+    // End-to-end coverage for the HTTP status code classification logic in
+    // `resolveOGImage(from:)`, driven by a URLProtocol-backed mock session so
+    // the tests never touch the network. This locks in the issue #229 / PR #227
+    // contract: 4xx (except 408/429) should map to `.notFound` so the prefetcher
+    // stops retrying, while 408/429/5xx map to `.fetchFailed` to allow retry.
+
+    @Test("resolveOGImage maps 404 to .notFound")
+    func resolveOGImageMaps404ToNotFound() async throws {
+        let mockSession = MockHTMLURLSessionProvider()
+        mockSession.statusCode = 404
+        let service = ArticleThumbnailService(session: mockSession)
+        let articleLink = URL(string: "https://example.com/article-404")!
+
+        let result = try await service.resolveOGImage(from: articleLink)
+
+        #expect(result == .notFound)
+    }
+
+    @Test("resolveOGImage maps 403 to .notFound")
+    func resolveOGImageMaps403ToNotFound() async throws {
+        let mockSession = MockHTMLURLSessionProvider()
+        mockSession.statusCode = 403
+        let service = ArticleThumbnailService(session: mockSession)
+        let articleLink = URL(string: "https://example.com/article-403")!
+
+        let result = try await service.resolveOGImage(from: articleLink)
+
+        #expect(result == .notFound)
+    }
+
+    @Test("resolveOGImage maps 410 to .notFound")
+    func resolveOGImageMaps410ToNotFound() async throws {
+        let mockSession = MockHTMLURLSessionProvider()
+        mockSession.statusCode = 410
+        let service = ArticleThumbnailService(session: mockSession)
+        let articleLink = URL(string: "https://example.com/article-410")!
+
+        let result = try await service.resolveOGImage(from: articleLink)
+
+        #expect(result == .notFound)
+    }
+
+    @Test("resolveOGImage maps 400 to .notFound")
+    func resolveOGImageMaps400ToNotFound() async throws {
+        let mockSession = MockHTMLURLSessionProvider()
+        mockSession.statusCode = 400
+        let service = ArticleThumbnailService(session: mockSession)
+        let articleLink = URL(string: "https://example.com/article-400")!
+
+        let result = try await service.resolveOGImage(from: articleLink)
+
+        #expect(result == .notFound)
+    }
+
+    @Test("resolveOGImage maps 408 to .fetchFailed")
+    func resolveOGImageMaps408ToFetchFailed() async throws {
+        let mockSession = MockHTMLURLSessionProvider()
+        mockSession.statusCode = 408
+        let service = ArticleThumbnailService(session: mockSession)
+        let articleLink = URL(string: "https://example.com/article-408")!
+
+        let result = try await service.resolveOGImage(from: articleLink)
+
+        #expect(result == .fetchFailed)
+    }
+
+    @Test("resolveOGImage maps 429 to .fetchFailed")
+    func resolveOGImageMaps429ToFetchFailed() async throws {
+        let mockSession = MockHTMLURLSessionProvider()
+        mockSession.statusCode = 429
+        let service = ArticleThumbnailService(session: mockSession)
+        let articleLink = URL(string: "https://example.com/article-429")!
+
+        let result = try await service.resolveOGImage(from: articleLink)
+
+        #expect(result == .fetchFailed)
+    }
+
+    @Test("resolveOGImage maps 500 to .fetchFailed")
+    func resolveOGImageMaps500ToFetchFailed() async throws {
+        let mockSession = MockHTMLURLSessionProvider()
+        mockSession.statusCode = 500
+        let service = ArticleThumbnailService(session: mockSession)
+        let articleLink = URL(string: "https://example.com/article-500")!
+
+        let result = try await service.resolveOGImage(from: articleLink)
+
+        #expect(result == .fetchFailed)
+    }
+
+    @Test("resolveOGImage maps 502 to .fetchFailed")
+    func resolveOGImageMaps502ToFetchFailed() async throws {
+        let mockSession = MockHTMLURLSessionProvider()
+        mockSession.statusCode = 502
+        let service = ArticleThumbnailService(session: mockSession)
+        let articleLink = URL(string: "https://example.com/article-502")!
+
+        let result = try await service.resolveOGImage(from: articleLink)
+
+        #expect(result == .fetchFailed)
+    }
+
+    @Test("resolveOGImage maps 503 to .fetchFailed")
+    func resolveOGImageMaps503ToFetchFailed() async throws {
+        let mockSession = MockHTMLURLSessionProvider()
+        mockSession.statusCode = 503
+        let service = ArticleThumbnailService(session: mockSession)
+        let articleLink = URL(string: "https://example.com/article-503")!
+
+        let result = try await service.resolveOGImage(from: articleLink)
+
+        #expect(result == .fetchFailed)
+    }
+
+    @Test("resolveOGImage returns .found when og:image is present in the HTML head")
+    func resolveOGImageFindsOGImageTag() async throws {
+        let mockSession = MockHTMLURLSessionProvider()
+        mockSession.statusCode = 200
+        mockSession.htmlBody = """
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Test Article</title>
+            <meta property="og:image" content="https://cdn.example.com/image.jpg">
+        </head>
+        <body>Article body</body>
+        </html>
+        """
+        let service = ArticleThumbnailService(session: mockSession)
+        let articleLink = URL(string: "https://example.com/article")!
+
+        let result = try await service.resolveOGImage(from: articleLink)
+
+        #expect(result == .found(URL(string: "https://cdn.example.com/image.jpg")!))
+    }
+
+    @Test("resolveOGImage returns .notFound when HTML has no og:image tag")
+    func resolveOGImageReturnsNotFoundForMissingTag() async throws {
+        let mockSession = MockHTMLURLSessionProvider()
+        mockSession.statusCode = 200
+        mockSession.htmlBody = """
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Test Article</title>
+            <meta property="og:title" content="No image here">
+        </head>
+        <body>Article body</body>
+        </html>
+        """
+        let service = ArticleThumbnailService(session: mockSession)
+        let articleLink = URL(string: "https://example.com/article")!
+
+        let result = try await service.resolveOGImage(from: articleLink)
+
+        #expect(result == .notFound)
+    }
+
+    @Test("resolveOGImage resolves relative og:image URLs against the article base URL")
+    func resolveOGImageResolvesRelativeURL() async throws {
+        let mockSession = MockHTMLURLSessionProvider()
+        mockSession.statusCode = 200
+        mockSession.htmlBody = """
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta property="og:image" content="/images/hero.jpg">
+        </head>
+        </html>
+        """
+        let service = ArticleThumbnailService(session: mockSession)
+        let articleLink = URL(string: "https://example.com/posts/my-article")!
+
+        let result = try await service.resolveOGImage(from: articleLink)
+
+        // HTMLUtilities.extractOGImageURL resolves relative URLs using the baseURL.
+        #expect(result == .found(URL(string: "https://example.com/images/hero.jpg")!))
+    }
+
+    @Test("resolveOGImage maps non-HTTPURLResponse to .fetchFailed via -1 sentinel")
+    func resolveOGImageNonHTTPResponseReturnsFetchFailed() async throws {
+        // Issue #229 explicitly called out the non-HTTPURLResponse → .fetchFailed
+        // path as a required integration scenario. The service guards on
+        // `(response as? HTTPURLResponse)` and falls back to the -1 sentinel
+        // when the cast fails; -1 is treated as transient by `isPermanentHTTPFailure`,
+        // so the overall outcome must be `.fetchFailed` (worth retrying).
+        let mockSession = MockHTMLURLSessionProvider()
+        mockSession.useNonHTTPResponse = true
+        let service = ArticleThumbnailService(session: mockSession)
+        let articleLink = URL(string: "https://example.com/article-non-http")!
+
+        let result = try await service.resolveOGImage(from: articleLink)
+
+        #expect(result == .fetchFailed)
+    }
 }
