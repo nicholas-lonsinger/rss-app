@@ -16,7 +16,7 @@ RSSApp/
 │   ├── ChatMessage.swift               # Chat message with role (user/assistant) and content
 │   ├── DOMNode.swift                   # SerializedDOM + DOMNode tree from domSerializer.js
 │   ├── HomeGroup.swift                 # Enum — Home screen group types (allArticles, unreadArticles, savedArticles, allFeeds) with Identifiable, Hashable, CaseIterable
-│   ├── IdentifiableIndex.swift         # Lightweight Identifiable wrapper for Int indices; includes Binding<Int?> extension with shared identifiableIndex/nonOptionalIndex/isNotNil helpers for push navigation
+│   ├── IdentifiableIndex.swift         # Binding<Int?> extension with nonOptionalIndex and isNotNil helpers for push navigation
 │   ├── LoadMoreResult.swift            # Enum — pagination load-more outcome (loaded, exhausted, failed) for article reader navigation error feedback
 │   ├── ModelConversion.swift           # Bidirectional conversion: PersistentFeed↔SubscribedFeed, PersistentArticle↔Article, PersistentArticleContent↔ArticleContent
 │   ├── OPMLFeedEntry.swift              # Intermediate OPML parsed entry (title, feedURL, siteURL, description)
@@ -118,8 +118,7 @@ RSSAppTests/
 │   ├── ArticleTests.swift              # Article creation, identity, hashable
 │   ├── DOMNodeTests.swift              # DOMNode accessors, text/element queries, tree traversal
 │   ├── HomeGroupTests.swift            # HomeGroup enum cases, IDs, properties, Hashable conformance
-│   ├── IdentifiableIndexTests.swift    # IdentifiableIndex value storage, id derivation, distinctness
-│   ├── IdentifiableIndexBindingTests.swift # Binding<Int?> extension: identifiableIndex/nonOptionalIndex/isNotNil get/set, roundtrip, combined usage, push navigation integration
+│   ├── IdentifiableIndexBindingTests.swift # Binding<Int?> extension: nonOptionalIndex/isNotNil get/set, combined push navigation integration
 │   ├── LoadMoreResultTests.swift       # LoadMoreResult enum cases, Equatable conformance
 │   └── SubscribedFeedTests.swift       # updatingMetadata preserves identity, does not mutate
 ├── Services/

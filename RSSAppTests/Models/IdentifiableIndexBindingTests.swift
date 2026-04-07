@@ -2,7 +2,7 @@ import SwiftUI
 import Testing
 @testable import RSSApp
 
-@Suite("IdentifiableIndex Binding Extension Tests")
+@Suite("Binding<Int?> Extension Tests")
 struct IdentifiableIndexBindingTests {
 
     /// MainActor-isolated mutable storage for binding-backed tests under Swift 6 strict concurrency.
@@ -17,51 +17,6 @@ struct IdentifiableIndexBindingTests {
         var binding: Binding<Int?> {
             Binding(get: { self.value }, set: { self.value = $0 })
         }
-    }
-
-    // MARK: - identifiableIndex
-
-    @Test("identifiableIndex get returns nil when underlying value is nil")
-    @MainActor func identifiableIndexGetNil() {
-        let box = Box(nil)
-        let result = box.binding.identifiableIndex.wrappedValue
-        #expect(result == nil)
-    }
-
-    @Test("identifiableIndex get wraps non-nil value in IdentifiableIndex")
-    @MainActor func identifiableIndexGetNonNil() {
-        let box = Box(5)
-        let result = box.binding.identifiableIndex.wrappedValue
-        #expect(result?.value == 5)
-        #expect(result?.id == 5)
-    }
-
-    @Test("identifiableIndex set unwraps IdentifiableIndex to Int")
-    @MainActor func identifiableIndexSetNonNil() {
-        let box = Box(nil)
-        box.binding.identifiableIndex.wrappedValue = IdentifiableIndex(value: 3)
-        #expect(box.value == 3)
-    }
-
-    @Test("identifiableIndex set nil clears the underlying value")
-    @MainActor func identifiableIndexSetNil() {
-        let box = Box(10)
-        box.binding.identifiableIndex.wrappedValue = nil
-        #expect(box.value == nil)
-    }
-
-    @Test("identifiableIndex roundtrips correctly")
-    @MainActor func identifiableIndexRoundtrip() {
-        let box = Box(nil)
-        let binding = box.binding
-
-        // Set via identifiableIndex
-        binding.identifiableIndex.wrappedValue = IdentifiableIndex(value: 7)
-        #expect(box.value == 7)
-
-        // Read back via identifiableIndex
-        let result = binding.identifiableIndex.wrappedValue
-        #expect(result?.value == 7)
     }
 
     // MARK: - nonOptionalIndex
@@ -146,20 +101,6 @@ struct IdentifiableIndexBindingTests {
 
     // MARK: - Combined usage
 
-    @Test("identifiableIndex and nonOptionalIndex share the same backing value")
-    @MainActor func combinedUsage() {
-        let box = Box(nil)
-        let binding = box.binding
-
-        // Set via identifiableIndex
-        binding.identifiableIndex.wrappedValue = IdentifiableIndex(value: 8)
-        #expect(binding.nonOptionalIndex.wrappedValue == 8)
-
-        // Set via nonOptionalIndex
-        binding.nonOptionalIndex.wrappedValue = 12
-        #expect(binding.identifiableIndex.wrappedValue?.value == 12)
-    }
-
     @Test("isNotNil integrates with nonOptionalIndex for push navigation pattern")
     @MainActor func isNotNilWithNonOptionalIndex() {
         let box = Box(nil)
@@ -175,8 +116,12 @@ struct IdentifiableIndexBindingTests {
         #expect(box.value == 4)
         #expect(binding.isNotNil.wrappedValue == true)
 
-        // Simulate navigating back (clearing selection)
+        // Simulate dismissing the reader (clearing selection)
         binding.isNotNil.wrappedValue = false
         #expect(box.value == nil)
     }
+
+    // isNotNil set true when underlying value is nil triggers assertionFailure (by design
+    // per defensive unwrapping guidelines) — not testable in debug builds. The no-op path
+    // is only exercised in release builds.
 }
