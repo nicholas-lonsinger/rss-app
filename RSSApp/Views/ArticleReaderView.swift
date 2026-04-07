@@ -21,7 +21,9 @@ struct ArticleReaderView: View {
     @State private var extractionState = ReaderExtractionState()
     @State private var hasAPIKey = false
     @State private var errorMessage: String?
-    @Environment(\.dismiss) private var dismiss
+
+    /// Tracks the direction of article navigation for the vertical slide transition.
+    @State private var navigationDirection: NavigationDirection = .forward
 
     private let keychainService = KeychainService()
 
@@ -63,124 +65,113 @@ struct ArticleReaderView: View {
 
     var body: some View {
         if articles.isEmpty {
-            NavigationStack {
-                ContentUnavailableView {
-                    Label("No Articles", systemImage: "doc.text")
-                } description: {
-                    Text("There are no articles to display.")
-                }
-                .toolbar {
-                    ToolbarItem(placement: .topBarLeading) {
-                        Button("Done") { dismiss() }
-                    }
-                }
+            ContentUnavailableView {
+                Label("No Articles", systemImage: "doc.text")
+            } description: {
+                Text("There are no articles to display.")
             }
         } else {
-            NavigationStack {
-                articleContent
-                    .id(article.articleID)
-                    .navigationTitle(article.title)
-                    .navigationBarTitleDisplayMode(.inline)
-                    .toolbar {
-                        ToolbarItem(placement: .topBarLeading) {
-                            Button("Done") { dismiss() }
+            articleContent
+                .id(article.articleID)
+                .transition(navigationDirection.transition)
+                .navigationTitle(article.title)
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItemGroup(placement: .topBarTrailing) {
+                        Button {
+                            toggleSaved()
+                        } label: {
+                            Image(systemName: article.isSaved ? "bookmark.fill" : "bookmark")
                         }
-                        ToolbarItemGroup(placement: .topBarTrailing) {
-                            Button {
-                                toggleSaved()
-                            } label: {
-                                Image(systemName: article.isSaved ? "bookmark.fill" : "bookmark")
-                            }
-                            .accessibilityLabel(article.isSaved ? "Unsave article" : "Save article")
+                        .accessibilityLabel(article.isSaved ? "Unsave article" : "Save article")
 
-                            if isExtracting {
-                                ProgressView()
-                                    .accessibilityLabel("Extracting article content")
-                            } else {
-                                Button {
-                                    if hasAPIKey {
-                                        Self.logger.debug("AI button tapped — API key present, showing summary")
-                                        showSummary = true
-                                    } else {
-                                        Self.logger.debug("AI button tapped — no API key, showing API key settings")
-                                        showAPIKeySettings = true
-                                    }
-                                } label: {
-                                    Image(systemName: "sparkles")
+                        if isExtracting {
+                            ProgressView()
+                                .accessibilityLabel("Extracting article content")
+                        } else {
+                            Button {
+                                if hasAPIKey {
+                                    Self.logger.debug("AI button tapped — API key present, showing summary")
+                                    showSummary = true
+                                } else {
+                                    Self.logger.debug("AI button tapped — no API key, showing API key settings")
+                                    showAPIKeySettings = true
                                 }
-                                .accessibilityLabel("Summarize with AI")
-                            }
-                        }
-                        ToolbarItemGroup(placement: .bottomBar) {
-                            Button {
-                                navigateToPrevious()
                             } label: {
-                                Image(systemName: "chevron.backward")
+                                Image(systemName: "sparkles")
                             }
-                            .disabled(!canGoBack)
-                            .accessibilityLabel("Previous article")
+                            .accessibilityLabel("Summarize with AI")
+                        }
+                    }
+                    ToolbarItemGroup(placement: .bottomBar) {
+                        Button {
+                            navigateToPrevious()
+                        } label: {
+                            Image(systemName: "chevron.up")
+                        }
+                        .disabled(!canGoBack)
+                        .accessibilityLabel("Previous article")
 
-                            Spacer()
+                        Spacer()
 
-                            Button {
-                                navigateToNext()
-                            } label: {
-                                Image(systemName: "chevron.forward")
-                            }
-                            .disabled(!canGoForward)
-                            .accessibilityLabel("Next article")
+                        Button {
+                            navigateToNext()
+                        } label: {
+                            Image(systemName: "chevron.down")
                         }
+                        .disabled(!canGoForward)
+                        .accessibilityLabel("Next article")
                     }
-                    .onAppear {
-                        do {
-                            hasAPIKey = try keychainService.hasAPIKey()
-                        } catch {
-                            hasAPIKey = false
-                            Self.logger.error("Keychain read failed in onAppear: \(error, privacy: .public)")
-                        }
+                }
+                .onAppear {
+                    do {
+                        hasAPIKey = try keychainService.hasAPIKey()
+                    } catch {
+                        hasAPIKey = false
+                        Self.logger.error("Keychain read failed in onAppear: \(error, privacy: .public)")
                     }
-                    .onChange(of: currentIndex) {
-                        // Deferred mark-as-read for the pagination path: after loadMore appends
-                        // new articles to the view model, SwiftUI re-renders this view with the
-                        // updated array, and this handler ensures the newly visible article is
-                        // marked as read. For normal navigation, markCurrentArticleAsRead() is
-                        // also called directly in onArticleChanged(); the isRead guard prevents
-                        // double-work.
-                        markCurrentArticleAsRead()
+                }
+                .onChange(of: currentIndex) {
+                    // Deferred mark-as-read for the pagination path: after loadMore appends
+                    // new articles to the view model, SwiftUI re-renders this view with the
+                    // updated array, and this handler ensures the newly visible article is
+                    // marked as read. For normal navigation, markCurrentArticleAsRead() is
+                    // also called directly in onArticleChanged(); the isRead guard prevents
+                    // double-work.
+                    markCurrentArticleAsRead()
+                }
+                .sheet(isPresented: $showAPIKeySettings, onDismiss: {
+                    do {
+                        hasAPIKey = try keychainService.hasAPIKey()
+                    } catch {
+                        hasAPIKey = false
+                        Self.logger.error("Keychain read failed on settings dismiss: \(error, privacy: .public)")
                     }
-                    .sheet(isPresented: $showAPIKeySettings, onDismiss: {
-                        do {
-                            hasAPIKey = try keychainService.hasAPIKey()
-                        } catch {
-                            hasAPIKey = false
-                            Self.logger.error("Keychain read failed on settings dismiss: \(error, privacy: .public)")
-                        }
-                    }) {
-                        NavigationStack {
-                            APIKeySettingsView()
-                                .toolbar {
-                                    ToolbarItem(placement: .topBarTrailing) {
-                                        Button("Done") { showAPIKeySettings = false }
-                                    }
+                }) {
+                    NavigationStack {
+                        APIKeySettingsView()
+                            .toolbar {
+                                ToolbarItem(placement: .topBarTrailing) {
+                                    Button("Done") { showAPIKeySettings = false }
                                 }
-                        }
+                            }
                     }
-                    // RATIONALE: ArticleSummaryView has no navigation path to API key settings,
-                    // so no hasAPIKey cache refresh is needed on dismiss.
-                    .sheet(isPresented: $showSummary) {
-                        ArticleSummaryView(
-                            article: article.toArticle(),
-                            preExtractedContent: extractionState.content,
-                            persistentArticle: article,
-                            persistence: persistence
-                        )
-                    }
-                    .alert("Error", isPresented: errorAlertBinding) {
-                        Button("OK") { errorMessage = nil }
-                    } message: {
-                        Text(errorMessage ?? "")
-                    }
-            }
+                }
+                // RATIONALE: ArticleSummaryView has no navigation path to API key settings,
+                // so no hasAPIKey cache refresh is needed on dismiss.
+                .sheet(isPresented: $showSummary) {
+                    ArticleSummaryView(
+                        article: article.toArticle(),
+                        preExtractedContent: extractionState.content,
+                        persistentArticle: article,
+                        persistence: persistence
+                    )
+                }
+                .alert("Error", isPresented: errorAlertBinding) {
+                    Button("OK") { errorMessage = nil }
+                } message: {
+                    Text(errorMessage ?? "")
+                }
         }
     }
 
@@ -198,7 +189,10 @@ struct ArticleReaderView: View {
     private func navigateToPrevious() {
         guard canGoBack else { return }
         Self.logger.debug("Navigating to previous article (index \(self.currentIndex - 1, privacy: .public))")
-        currentIndex -= 1
+        navigationDirection = .backward
+        withAnimation {
+            currentIndex -= 1
+        }
         onArticleChanged()
     }
 
@@ -223,7 +217,10 @@ struct ArticleReaderView: View {
                 // the view re-renders with the fresh array.
                 extractionState = ReaderExtractionState()
                 showSummary = false
-                currentIndex += 1
+                navigationDirection = .forward
+                withAnimation {
+                    currentIndex += 1
+                }
             case .exhausted:
                 Self.logger.info("No more articles available at end of list")
             case .failed(let message):
@@ -232,7 +229,10 @@ struct ArticleReaderView: View {
             }
         } else {
             Self.logger.debug("Navigating to next article (index \(self.currentIndex + 1, privacy: .public))")
-            currentIndex += 1
+            navigationDirection = .forward
+            withAnimation {
+                currentIndex += 1
+            }
             onArticleChanged()
         }
     }
@@ -289,6 +289,35 @@ struct ArticleReaderView: View {
                 Label("Article Unavailable", systemImage: "exclamationmark.triangle")
             } description: {
                 Text("This article has no URL.")
+            }
+        }
+    }
+}
+
+// MARK: - Navigation Direction
+
+extension ArticleReaderView {
+    /// Direction of article navigation, used to determine the vertical slide transition.
+    enum NavigationDirection {
+        /// Navigating to the next article (down in the list).
+        /// Current article slides up, new article slides in from the bottom.
+        case forward
+        /// Navigating to the previous article (up in the list).
+        /// Current article slides down, new article slides in from the top.
+        case backward
+
+        var transition: AnyTransition {
+            switch self {
+            case .forward:
+                .asymmetric(
+                    insertion: .move(edge: .bottom),
+                    removal: .move(edge: .top)
+                )
+            case .backward:
+                .asymmetric(
+                    insertion: .move(edge: .top),
+                    removal: .move(edge: .bottom)
+                )
             }
         }
     }
