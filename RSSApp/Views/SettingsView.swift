@@ -12,6 +12,7 @@ struct SettingsView: View {
     let homeViewModel: HomeViewModel
 
     @State private var badgeEnabled: Bool
+    @State private var wifiOnlyDownloads: Bool
     @State private var showPermissionDeniedAlert = false
     @State private var isRevertingToggle = false
     // RATIONALE: Concrete AppBadgeService instead of `any AppBadgeUpdating` because
@@ -26,6 +27,7 @@ struct SettingsView: View {
         self.homeViewModel = homeViewModel
         self.badgeService = badgeService
         _badgeEnabled = State(initialValue: badgeService.badgeEnabled)
+        _wifiOnlyDownloads = State(initialValue: BackgroundImageDownloadSettings.wifiOnly)
     }
 
     var body: some View {
@@ -50,6 +52,19 @@ struct SettingsView: View {
                         await badgeService.clearBadge()
                     }
                 }
+            }
+
+            Section {
+                Toggle(isOn: $wifiOnlyDownloads) {
+                    Label("WiFi Only Images", systemImage: "wifi")
+                }
+                .onChange(of: wifiOnlyDownloads) { _, newValue in
+                    BackgroundImageDownloadSettings.wifiOnly = newValue
+                }
+            } header: {
+                Text("Network")
+            } footer: {
+                Text("When enabled, background image downloads (thumbnails and feed icons) only run on WiFi. Images loaded while browsing are always fetched.")
             }
 
             NavigationLink {

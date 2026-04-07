@@ -544,7 +544,7 @@ struct FeedListViewModelTests {
             url2: TestFixtures.makeFeed(title: "New Two", feedDescription: "Desc Two"),
         ]
 
-        let viewModel = FeedListViewModel(persistence: mockPersistence, feedFetching: mockFetching, feedIconService: MockFeedIconService())
+        let viewModel = FeedListViewModel(persistence: mockPersistence, feedFetching: mockFetching, feedIconService: MockFeedIconService(), networkMonitor: MockNetworkMonitorService())
         viewModel.loadFeeds()
         await viewModel.refreshAllFeeds()
 
@@ -566,7 +566,7 @@ struct FeedListViewModelTests {
         let mockFetching = MockFeedFetchingService()
         mockFetching.errorsByURL = [url: FeedFetchingError.invalidResponse(statusCode: 500)]
 
-        let viewModel = FeedListViewModel(persistence: mockPersistence, feedFetching: mockFetching, feedIconService: MockFeedIconService())
+        let viewModel = FeedListViewModel(persistence: mockPersistence, feedFetching: mockFetching, feedIconService: MockFeedIconService(), networkMonitor: MockNetworkMonitorService())
         viewModel.loadFeeds()
         await viewModel.refreshAllFeeds()
 
@@ -590,7 +590,7 @@ struct FeedListViewModelTests {
         ]
         mockFetching.errorsByURL = [url2: FeedFetchingError.invalidResponse(statusCode: 404)]
 
-        let viewModel = FeedListViewModel(persistence: mockPersistence, feedFetching: mockFetching, feedIconService: MockFeedIconService())
+        let viewModel = FeedListViewModel(persistence: mockPersistence, feedFetching: mockFetching, feedIconService: MockFeedIconService(), networkMonitor: MockNetworkMonitorService())
         viewModel.loadFeeds()
         await viewModel.refreshAllFeeds()
 
@@ -605,7 +605,7 @@ struct FeedListViewModelTests {
         let mockPersistence = MockFeedPersistenceService()
         let mockFetching = MockFeedFetchingService()
 
-        let viewModel = FeedListViewModel(persistence: mockPersistence, feedFetching: mockFetching, feedIconService: MockFeedIconService())
+        let viewModel = FeedListViewModel(persistence: mockPersistence, feedFetching: mockFetching, feedIconService: MockFeedIconService(), networkMonitor: MockNetworkMonitorService())
         viewModel.loadFeeds()
         await viewModel.refreshAllFeeds()
 
@@ -625,7 +625,7 @@ struct FeedListViewModelTests {
         let mockFetching = MockFeedFetchingService()
         mockFetching.feedsByURL = [url: TestFixtures.makeFeed()]
 
-        let viewModel = FeedListViewModel(persistence: mockPersistence, feedFetching: mockFetching, feedIconService: MockFeedIconService())
+        let viewModel = FeedListViewModel(persistence: mockPersistence, feedFetching: mockFetching, feedIconService: MockFeedIconService(), networkMonitor: MockNetworkMonitorService())
         viewModel.loadFeeds()
         await viewModel.refreshAllFeeds()
 
@@ -643,7 +643,7 @@ struct FeedListViewModelTests {
         let mockFetching = MockFeedFetchingService()
         mockFetching.errorsByURL = [url: FeedFetchingError.invalidResponse(statusCode: 404)]
 
-        let viewModel = FeedListViewModel(persistence: mockPersistence, feedFetching: mockFetching, feedIconService: MockFeedIconService())
+        let viewModel = FeedListViewModel(persistence: mockPersistence, feedFetching: mockFetching, feedIconService: MockFeedIconService(), networkMonitor: MockNetworkMonitorService())
         viewModel.loadFeeds()
         await viewModel.refreshAllFeeds()
 
@@ -667,7 +667,7 @@ struct FeedListViewModelTests {
         let mockFetching = MockFeedFetchingService()
         mockFetching.feedsByURL = [url: TestFixtures.makeFeed(title: "Fixed")]
 
-        let viewModel = FeedListViewModel(persistence: mockPersistence, feedFetching: mockFetching, feedIconService: MockFeedIconService())
+        let viewModel = FeedListViewModel(persistence: mockPersistence, feedFetching: mockFetching, feedIconService: MockFeedIconService(), networkMonitor: MockNetworkMonitorService())
         viewModel.loadFeeds()
         await viewModel.refreshAllFeeds()
 
@@ -787,7 +787,8 @@ struct FeedListViewModelTests {
             persistence: mockPersistence,
             opmlService: mockOPML,
             feedFetching: mockFetching,
-            feedIconService: MockFeedIconService()
+            feedIconService: MockFeedIconService(),
+            networkMonitor: MockNetworkMonitorService()
         )
         await viewModel.importOPMLAndRefresh(from: Data())
 
@@ -943,7 +944,8 @@ struct FeedListViewModelTests {
         let viewModel = FeedListViewModel(
             persistence: mockPersistence,
             opmlService: mockOPML,
-            feedIconService: MockFeedIconService()
+            feedIconService: MockFeedIconService(),
+            networkMonitor: MockNetworkMonitorService()
         )
         await viewModel.importOPMLAndRefresh(from: nonexistentURL)
 
@@ -986,7 +988,8 @@ struct FeedListViewModelTests {
         let viewModel = FeedListViewModel(
             persistence: mockPersistence,
             feedFetching: mockFetching,
-            feedIconService: mockIconService
+            feedIconService: mockIconService,
+            networkMonitor: MockNetworkMonitorService()
         )
         viewModel.loadFeeds()
         await viewModel.refreshAllFeeds()
@@ -1013,7 +1016,8 @@ struct FeedListViewModelTests {
         let viewModel = FeedListViewModel(
             persistence: mockPersistence,
             feedFetching: mockFetching,
-            feedIconService: mockIconService
+            feedIconService: mockIconService,
+            networkMonitor: MockNetworkMonitorService()
         )
         viewModel.loadFeeds()
         await viewModel.refreshAllFeeds()
@@ -1042,7 +1046,7 @@ struct FeedListViewModelTests {
         let mockFetching = MockFeedFetchingService()
         mockFetching.shouldReturn304 = true
 
-        let viewModel = FeedListViewModel(persistence: mockPersistence, feedFetching: mockFetching, feedIconService: MockFeedIconService())
+        let viewModel = FeedListViewModel(persistence: mockPersistence, feedFetching: mockFetching, feedIconService: MockFeedIconService(), networkMonitor: MockNetworkMonitorService())
         viewModel.loadFeeds()
         await viewModel.refreshAllFeeds()
 
@@ -1070,7 +1074,8 @@ struct FeedListViewModelTests {
         let viewModel = FeedListViewModel(
             persistence: mockPersistence,
             feedFetching: mockFetching,
-            feedIconService: MockFeedIconService()
+            feedIconService: MockFeedIconService(),
+            networkMonitor: MockNetworkMonitorService()
         )
         viewModel.loadFeeds()
         await viewModel.refreshAllFeeds()
@@ -1093,7 +1098,8 @@ struct FeedListViewModelTests {
         let viewModel = FeedListViewModel(
             persistence: mockPersistence,
             feedFetching: mockFetching,
-            feedIconService: MockFeedIconService()
+            feedIconService: MockFeedIconService(),
+            networkMonitor: MockNetworkMonitorService()
         )
         viewModel.loadFeeds()
         await viewModel.refreshAllFeeds()
@@ -1118,7 +1124,8 @@ struct FeedListViewModelTests {
         let viewModel = FeedListViewModel(
             persistence: mockPersistence,
             feedFetching: mockFetching,
-            feedIconService: MockFeedIconService()
+            feedIconService: MockFeedIconService(),
+            networkMonitor: MockNetworkMonitorService()
         )
         viewModel.loadFeeds()
         await viewModel.refreshAllFeeds()
@@ -1143,7 +1150,8 @@ struct FeedListViewModelTests {
         let viewModel = FeedListViewModel(
             persistence: mockPersistence,
             feedFetching: mockFetching,
-            feedIconService: MockFeedIconService()
+            feedIconService: MockFeedIconService(),
+            networkMonitor: MockNetworkMonitorService()
         )
         viewModel.loadFeeds()
         await viewModel.refreshAllFeeds()
@@ -1173,7 +1181,8 @@ struct FeedListViewModelTests {
         let viewModel = FeedListViewModel(
             persistence: mockPersistence,
             feedFetching: mockFetching,
-            feedIconService: MockFeedIconService()
+            feedIconService: MockFeedIconService(),
+            networkMonitor: MockNetworkMonitorService()
         )
         viewModel.loadFeeds()
         await viewModel.refreshAllFeeds()
@@ -1198,7 +1207,8 @@ struct FeedListViewModelTests {
         let viewModel = FeedListViewModel(
             persistence: mockPersistence,
             feedFetching: mockFetching,
-            feedIconService: MockFeedIconService()
+            feedIconService: MockFeedIconService(),
+            networkMonitor: MockNetworkMonitorService()
         )
         viewModel.loadFeeds()
 
@@ -1239,7 +1249,8 @@ struct FeedListViewModelTests {
         let viewModel = FeedListViewModel(
             persistence: mockPersistence,
             feedFetching: mockFetching,
-            feedIconService: MockFeedIconService()
+            feedIconService: MockFeedIconService(),
+            networkMonitor: MockNetworkMonitorService()
         )
         viewModel.loadFeeds()
         await viewModel.refreshAllFeeds()
@@ -1277,7 +1288,8 @@ struct FeedListViewModelTests {
         let viewModel = FeedListViewModel(
             persistence: mockPersistence,
             feedFetching: mockFetching,
-            feedIconService: MockFeedIconService()
+            feedIconService: MockFeedIconService(),
+            networkMonitor: MockNetworkMonitorService()
         )
         viewModel.loadFeeds()
         await viewModel.refreshAllFeeds()
@@ -1307,7 +1319,8 @@ struct FeedListViewModelTests {
         let viewModel = FeedListViewModel(
             persistence: mockPersistence,
             feedFetching: mockFetching,
-            feedIconService: MockFeedIconService()
+            feedIconService: MockFeedIconService(),
+            networkMonitor: MockNetworkMonitorService()
         )
         viewModel.loadFeeds()
         await viewModel.refreshAllFeeds()
@@ -1338,7 +1351,8 @@ struct FeedListViewModelTests {
         let viewModel = FeedListViewModel(
             persistence: mockPersistence,
             feedFetching: mockFetching,
-            feedIconService: mockIconService
+            feedIconService: mockIconService,
+            networkMonitor: MockNetworkMonitorService()
         )
         viewModel.loadFeeds()
         await viewModel.refreshAllFeeds()
@@ -1367,7 +1381,8 @@ struct FeedListViewModelTests {
         let viewModel = FeedListViewModel(
             persistence: mockPersistence,
             feedFetching: mockFetching,
-            feedIconService: mockIconService
+            feedIconService: mockIconService,
+            networkMonitor: MockNetworkMonitorService()
         )
         viewModel.loadFeeds()
         await viewModel.refreshAllFeeds()
@@ -1399,7 +1414,8 @@ struct FeedListViewModelTests {
         let viewModel = FeedListViewModel(
             persistence: mockPersistence,
             feedFetching: mockFetching,
-            feedIconService: mockIconService
+            feedIconService: mockIconService,
+            networkMonitor: MockNetworkMonitorService()
         )
         viewModel.loadFeeds()
         await viewModel.refreshAllFeeds()
@@ -1435,7 +1451,8 @@ struct FeedListViewModelTests {
             persistence: mockPersistence,
             feedFetching: mockFetching,
             feedIconService: MockFeedIconService(),
-            thumbnailPrefetcher: mockPrefetcher
+            thumbnailPrefetcher: mockPrefetcher,
+            networkMonitor: MockNetworkMonitorService()
         )
         viewModel.loadFeeds()
 
@@ -1470,7 +1487,8 @@ struct FeedListViewModelTests {
             feedFetching: mockFetching,
             feedIconService: MockFeedIconService(),
             thumbnailPrefetcher: mockPrefetcher,
-            articleRetention: mockRetention
+            articleRetention: mockRetention,
+            networkMonitor: MockNetworkMonitorService()
         )
         viewModel.loadFeeds()
 
@@ -1503,7 +1521,8 @@ struct FeedListViewModelTests {
             feedFetching: mockFetching,
             feedIconService: MockFeedIconService(),
             thumbnailPrefetcher: mockPrefetcher,
-            articleRetention: mockRetention
+            articleRetention: mockRetention,
+            networkMonitor: MockNetworkMonitorService()
         )
         viewModel.loadFeeds()
 
