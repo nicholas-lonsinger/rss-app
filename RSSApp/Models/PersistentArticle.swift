@@ -26,24 +26,30 @@ final class PersistentArticle {
     /// Set to `true` by `FeedPersistenceService.upsertArticles` when a re-fetch detects
     /// a strictly newer Atom `<updated>` (or namespaced equivalent) on an existing row,
     /// alongside the cache invalidation, `isRead` reset, and `sortDate` bump that mark
-    /// the article as resurfaced (issue #74).
+    /// the article as resurfaced (issue #74). Cleared by
+    /// `FeedPersistenceService.markArticleRead(_:isRead:)` when the user opens the
+    /// article (the read transition), so the "Updated" badge in the row view
+    /// disappears the moment they read it. The flag has exactly one writer (upsert)
+    /// and exactly one clearer (markArticleRead-on-isRead-true).
     ///
     /// **Invariant:** when `true`, `updatedDate` is guaranteed non-nil — the mutation
     /// site in `upsertArticles` guards on `article.updatedDate != nil` before flipping
     /// the flag.
     ///
+    /// **Asymmetric clear:** `markArticleRead(_:isRead: false)` does NOT re-set
+    /// `wasUpdated`. Manually marking unread should not lie about the article having
+    /// been updated — the publisher revision is a fact about the content, not a
+    /// function of the user's read toggle.
+    ///
     /// **Destructive transition:** the update path resets `isRead = false` and
     /// `readDate = nil`. The original "first read" timestamp is NOT preserved across
-    /// detection. If a future feature needs "read-before-update" history, this decision
-    /// must be revisited. The `wasUpdated == true && isRead == false` combination
-    /// transiently encodes "resurfaced because the publisher revised it" — until the
-    /// user reads the article, at which point the flag is cleared (see TODO below).
+    /// detection. If a future feature needs "read-before-update" history, this
+    /// decision must be revisited. The `wasUpdated == true && isRead == false`
+    /// combination transiently encodes "resurfaced because the publisher revised it"
+    /// — until the user reads the article, at which point the flag is cleared.
     ///
     /// Existing rows persisted before this field was added deserialize as `false` via
     /// SwiftData's implicit schema migration, matching the default for fresh inserts.
-    // TODO(issue #74): clear `wasUpdated` on the read transition in `markArticleRead`
-    // so list rows can distinguish "newly resurfaced because content changed" from
-    // "brand new unread" via a UI badge.
     var wasUpdated: Bool
     var thumbnailURL: URL?
     var author: String?

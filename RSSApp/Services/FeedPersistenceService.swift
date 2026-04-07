@@ -470,6 +470,15 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
     func markArticleRead(_ article: PersistentArticle, isRead: Bool) throws {
         article.isRead = isRead
         article.readDate = isRead ? Date() : nil
+        // Clear the issue #74 update-detection flag when the user reads the article so
+        // the orange "Updated" badge disappears the moment they open it. Asymmetric on
+        // purpose: manually marking unread does NOT re-set `wasUpdated`, because the
+        // user toggling read state has nothing to do with whether the publisher
+        // actually revised the content. The flag is set only by `upsertArticles` and
+        // cleared only here.
+        if isRead {
+            article.wasUpdated = false
+        }
         try modelContext.save()
         Self.logger.debug("Marked article '\(article.title, privacy: .public)' as \(isRead ? "read" : "unread", privacy: .public)")
     }

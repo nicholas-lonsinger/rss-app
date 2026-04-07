@@ -661,10 +661,76 @@ struct FeedPersistenceServiceTests {
         try service.markArticleRead(articles[0], isRead: true)
         #expect(articles[0].isRead == true)
         #expect(articles[0].readDate != nil)
+        // Fresh articles default `wasUpdated` to false; marking read keeps it false.
+        #expect(articles[0].wasUpdated == false)
 
         try service.markArticleRead(articles[0], isRead: false)
         #expect(articles[0].isRead == false)
         #expect(articles[0].readDate == nil)
+        #expect(articles[0].wasUpdated == false)
+    }
+
+    @Test("markArticleRead clears wasUpdated when transitioning to read (issue #74)")
+    @MainActor
+    func markArticleReadClearsWasUpdatedOnRead() throws {
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+
+        // Drive the upsert update-detection path to set wasUpdated = true:
+        // seed an article, then re-fetch with a strictly newer updatedDate.
+        let baseline = Date(timeIntervalSince1970: 1_700_000_000)
+        try service.upsertArticles(
+            [TestFixtures.makeArticle(id: "u1", updatedDate: baseline)],
+            for: feed
+        )
+        try service.upsertArticles(
+            [TestFixtures.makeArticle(id: "u1", updatedDate: baseline.addingTimeInterval(3600))],
+            for: feed
+        )
+
+        let updated = try service.articles(for: feed)[0]
+        // Pre-condition: detection set the flag (and reset isRead).
+        #expect(updated.wasUpdated == true)
+        #expect(updated.isRead == false)
+
+        // Acting on the read transition clears the flag.
+        try service.markArticleRead(updated, isRead: true)
+        #expect(updated.isRead == true)
+        #expect(updated.wasUpdated == false)
+    }
+
+    @Test("markArticleRead does NOT re-set wasUpdated when transitioning to unread")
+    @MainActor
+    func markArticleReadDoesNotReSetWasUpdatedOnUnread() throws {
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+
+        // Set up a wasUpdated == true article via the upsert detection path.
+        let baseline = Date(timeIntervalSince1970: 1_700_000_000)
+        try service.upsertArticles(
+            [TestFixtures.makeArticle(id: "u1", updatedDate: baseline)],
+            for: feed
+        )
+        try service.upsertArticles(
+            [TestFixtures.makeArticle(id: "u1", updatedDate: baseline.addingTimeInterval(3600))],
+            for: feed
+        )
+
+        let updated = try service.articles(for: feed)[0]
+        // Read it (clears wasUpdated), then mark unread again.
+        try service.markArticleRead(updated, isRead: true)
+        #expect(updated.wasUpdated == false)
+
+        try service.markArticleRead(updated, isRead: false)
+        #expect(updated.isRead == false)
+        // Manual mark-unread must NOT lie about the article having been updated —
+        // the publisher revision is a fact about the content, not a function of
+        // the user's read toggle. Once cleared, wasUpdated stays cleared.
+        #expect(updated.wasUpdated == false)
     }
 
     @Test("unreadCount returns correct count")
