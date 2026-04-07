@@ -46,6 +46,9 @@ private struct ThumbnailDownloadResult: Sendable {
         case failed
         /// Article had no image source; no download was attempted.
         case skipped
+        /// Download was cancelled mid-flight via structured concurrency. Not counted
+        /// against the retry budget — the article should be retried fresh next cycle.
+        case cancelled
     }
 }
 
@@ -96,6 +99,7 @@ struct ThumbnailPrefetchService: ThumbnailPrefetching {
         var successCount = 0
         var failureCount = 0
         var skippedCount = 0
+        var cancelledCount = 0
         var persistenceFailureCount = 0
 
         let articlesByID = Dictionary(uniqueKeysWithValues: articles.map { ($0.articleID, $0) })
@@ -111,6 +115,9 @@ struct ThumbnailPrefetchService: ThumbnailPrefetching {
                     failureCount += 1
                 case .skipped:
                     skippedCount += 1
+                case .cancelled:
+                    // Cancelled work is not counted against retry budget — try again on next refresh cycle.
+                    cancelledCount += 1
                 }
             } catch {
                 persistenceFailureCount += 1
@@ -124,7 +131,7 @@ struct ThumbnailPrefetchService: ThumbnailPrefetching {
             Self.logger.error("Failed to save thumbnail status updates — \(successCount, privacy: .public) cached and \(failureCount, privacy: .public) failed status updates may be lost: \(error, privacy: .public)")
         }
 
-        Self.logger.notice("Thumbnail prefetch complete: \(successCount, privacy: .public) cached, \(failureCount, privacy: .public) failed, \(skippedCount, privacy: .public) skipped, \(persistenceFailureCount, privacy: .public) persistence errors")
+        Self.logger.notice("Thumbnail prefetch complete: \(successCount, privacy: .public) cached, \(failureCount, privacy: .public) failed, \(skippedCount, privacy: .public) skipped, \(cancelledCount, privacy: .public) cancelled, \(persistenceFailureCount, privacy: .public) persistence errors")
     }
 
     // MARK: - Private
@@ -188,7 +195,8 @@ private func downloadWithRetry(
 
     for attempt in 0...ThumbnailPrefetchConstants.maxTransientRetries {
         guard !Task.isCancelled else {
-            return ThumbnailDownloadResult(articleID: articleID, outcome: .failed)
+            // Cancelled before the attempt started — do not count against retry budget.
+            return ThumbnailDownloadResult(articleID: articleID, outcome: .cancelled)
         }
 
         if attempt > 0 {
@@ -196,16 +204,28 @@ private func downloadWithRetry(
             do {
                 try await Task.sleep(for: .seconds(delay))
             } catch {
-                // CancellationError — stop retrying immediately
-                return ThumbnailDownloadResult(articleID: articleID, outcome: .failed)
+                // CancellationError — stop retrying immediately and do not penalize the retry budget.
+                return ThumbnailDownloadResult(articleID: articleID, outcome: .cancelled)
             }
         }
 
-        let result = await thumbnailService.resolveAndCacheThumbnail(
-            thumbnailURL: thumbnailURL,
-            articleLink: articleLink,
-            articleID: articleID
-        )
+        let result: ThumbnailCacheResult
+        do {
+            result = try await thumbnailService.resolveAndCacheThumbnail(
+                thumbnailURL: thumbnailURL,
+                articleLink: articleLink,
+                articleID: articleID
+            )
+        } catch is CancellationError {
+            // Task was cancelled — stop retrying immediately without incrementing retry counters.
+            return ThumbnailDownloadResult(articleID: articleID, outcome: .cancelled)
+        } catch {
+            // RATIONALE: `resolveAndCacheThumbnail` only throws `CancellationError`; any other
+            // thrown error is an unexpected invariant violation. Log at fault and stop retrying.
+            downloadRetryLogger.fault("Unexpected error from resolveAndCacheThumbnail for article \(articleID, privacy: .public): \(error, privacy: .public)")
+            assertionFailure("Unexpected error from resolveAndCacheThumbnail: \(error)")
+            return ThumbnailDownloadResult(articleID: articleID, outcome: .failed)
+        }
 
         switch result {
         case .cached:

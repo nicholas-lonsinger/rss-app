@@ -22,11 +22,18 @@ protocol ArticleThumbnailCaching: Sendable {
 
     /// Downloads the image at `remoteURL`, resizes it to thumbnail dimensions,
     /// and caches it to disk under a hash of the article ID.
-    func cacheThumbnail(from remoteURL: URL, articleID: String) async -> ThumbnailCacheResult
+    ///
+    /// Throws `CancellationError` if the current task is cancelled during the download.
+    /// All other errors (network, HTTP, decode, filesystem) are surfaced via the returned
+    /// `ThumbnailCacheResult` so callers can distinguish retry-worthy from permanent failures.
+    func cacheThumbnail(from remoteURL: URL, articleID: String) async throws -> ThumbnailCacheResult
 
     /// Resolves and caches a thumbnail: tries `thumbnailURL` first, then fetches
     /// the article page at `articleLink` to extract `og:image` as a fallback.
-    func resolveAndCacheThumbnail(thumbnailURL: URL?, articleLink: URL?, articleID: String) async -> ThumbnailCacheResult
+    ///
+    /// Throws `CancellationError` if the current task is cancelled during resolution.
+    /// All other outcomes are reported via `ThumbnailCacheResult`.
+    func resolveAndCacheThumbnail(thumbnailURL: URL?, articleLink: URL?, articleID: String) async throws -> ThumbnailCacheResult
 
     /// Returns the local file URL for a cached thumbnail, or `nil` if not cached.
     func cachedThumbnailFileURL(for articleID: String) -> URL?
@@ -48,7 +55,7 @@ struct ArticleThumbnailService: ArticleThumbnailCaching {
 
     // MARK: - ArticleThumbnailCaching
 
-    func cacheThumbnail(from remoteURL: URL, articleID: String) async -> ThumbnailCacheResult {
+    func cacheThumbnail(from remoteURL: URL, articleID: String) async throws -> ThumbnailCacheResult {
         Self.logger.debug("cacheThumbnail() from \(remoteURL.absoluteString, privacy: .public) for article \(articleID, privacy: .public)")
 
         guard remoteURL.scheme == "http" || remoteURL.scheme == "https" else {
@@ -98,6 +105,12 @@ struct ArticleThumbnailService: ArticleThumbnailCaching {
 
             Self.logger.debug("Cached thumbnail for article \(articleID, privacy: .public) (\(jpegData.count, privacy: .public) bytes)")
             return .cached
+        } catch is CancellationError {
+            // Propagate structured-concurrency cancellation so callers stop retrying immediately.
+            throw CancellationError()
+        } catch let urlError as URLError where urlError.code == .cancelled {
+            // URLSession surfaces task cancellation as URLError(.cancelled); normalize to CancellationError.
+            throw CancellationError()
         } catch let urlError as URLError {
             Self.logger.warning("Network error caching thumbnail for \(remoteURL.absoluteString, privacy: .public): \(urlError, privacy: .public)")
             return .transientFailure
@@ -108,23 +121,23 @@ struct ArticleThumbnailService: ArticleThumbnailCaching {
         }
     }
 
-    func resolveAndCacheThumbnail(thumbnailURL: URL?, articleLink: URL?, articleID: String) async -> ThumbnailCacheResult {
+    func resolveAndCacheThumbnail(thumbnailURL: URL?, articleLink: URL?, articleID: String) async throws -> ThumbnailCacheResult {
         Self.logger.debug("resolveAndCacheThumbnail() thumbnailURL=\(thumbnailURL?.absoluteString ?? "nil", privacy: .public) articleLink=\(articleLink?.absoluteString ?? "nil", privacy: .public) articleID=\(articleID, privacy: .public)")
 
         var sawTransient = false
 
         // Priority 1: Direct thumbnail URL from feed
         if let thumbnailURL {
-            let result = await cacheThumbnail(from: thumbnailURL, articleID: articleID)
+            let result = try await cacheThumbnail(from: thumbnailURL, articleID: articleID)
             if result == .cached { return .cached }
             if result == .transientFailure { sawTransient = true }
         }
 
         // Priority 2: Fetch article page and extract og:image
         if let articleLink {
-            switch await resolveOGImage(from: articleLink) {
+            switch try await resolveOGImage(from: articleLink) {
             case .found(let ogImageURL):
-                let result = await cacheThumbnail(from: ogImageURL, articleID: articleID)
+                let result = try await cacheThumbnail(from: ogImageURL, articleID: articleID)
                 if result == .cached { return .cached }
                 if result == .transientFailure { sawTransient = true }
             case .fetchFailed:
@@ -203,7 +216,10 @@ struct ArticleThumbnailService: ArticleThumbnailCaching {
     private static let htmlHeadMaxBytes = 51_200 // 50 KB
 
     /// Fetches the beginning of an article page and extracts the `og:image` meta tag URL.
-    private func resolveOGImage(from articleLink: URL) async -> OGImageResult {
+    ///
+    /// Throws `CancellationError` if the task is cancelled during the fetch. Non-cancellation
+    /// errors (network, HTTP, decode) are surfaced via `OGImageResult`.
+    private func resolveOGImage(from articleLink: URL) async throws -> OGImageResult {
         Self.logger.debug("Resolving og:image from \(articleLink.absoluteString, privacy: .public)")
 
         do {
@@ -240,8 +256,17 @@ struct ArticleThumbnailService: ArticleThumbnailCaching {
             }
             Self.logger.debug("No og:image meta tag found in page from \(articleLink.absoluteString, privacy: .public)")
             return .notFound
+        } catch is CancellationError {
+            // Propagate structured-concurrency cancellation so callers stop retrying immediately.
+            throw CancellationError()
+        } catch let urlError as URLError where urlError.code == .cancelled {
+            // URLSession surfaces task cancellation as URLError(.cancelled); normalize to CancellationError.
+            throw CancellationError()
+        } catch let urlError as URLError {
+            Self.logger.warning("Network error fetching article page for og:image from \(articleLink.absoluteString, privacy: .public): \(urlError, privacy: .public)")
+            return .fetchFailed
         } catch {
-            Self.logger.warning("Failed to fetch article page for og:image: \(error, privacy: .public)")
+            Self.logger.warning("Failed to fetch article page for og:image from \(articleLink.absoluteString, privacy: .public): \(error, privacy: .public)")
             return .fetchFailed
         }
     }

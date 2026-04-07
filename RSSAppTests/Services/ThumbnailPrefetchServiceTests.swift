@@ -302,6 +302,34 @@ struct ThumbnailPrefetchServiceTests {
         #expect(mockThumbnail.resolveCallCount == 0)
     }
 
+    // MARK: - Cancellation Does Not Poison Retry Budget
+
+    @Test("prefetchThumbnails treats cancellation as a non-penalizing outcome")
+    @MainActor
+    func prefetchCancellationDoesNotIncrementRetryCount() async {
+        let persistence = MockFeedPersistenceService()
+        let feed = TestFixtures.makePersistentFeed()
+        let article = TestFixtures.makePersistentArticle(
+            articleID: "cancelled-article",
+            thumbnailURL: URL(string: "https://example.com/thumb.jpg")
+        )
+        persistence.feeds = [feed]
+        persistence.articlesByFeedID = [feed.id: [article]]
+
+        let mockThumbnail = MockArticleThumbnailService()
+        mockThumbnail.throwCancellation = true
+
+        let service = ThumbnailPrefetchService(persistence: persistence, thumbnailService: mockThumbnail)
+        await service.prefetchThumbnails()
+
+        // The resolve call was made (and threw CancellationError)
+        #expect(mockThumbnail.resolveCallCount == 1)
+        // Cancelled work must not be counted against the retry budget — try again next cycle.
+        #expect(article.thumbnailRetryCount == 0)
+        // And must not be marked as cached.
+        #expect(article.isThumbnailCached == false)
+    }
+
     // MARK: - Mixed Success and Failure
 
     @Test("prefetchThumbnails handles mixed success and failure across articles")
@@ -345,11 +373,11 @@ private final class SelectiveThumbnailMock: ArticleThumbnailCaching, @unchecked 
         self.successArticleIDs = successArticleIDs
     }
 
-    func cacheThumbnail(from remoteURL: URL, articleID: String) async -> ThumbnailCacheResult {
+    func cacheThumbnail(from remoteURL: URL, articleID: String) async throws -> ThumbnailCacheResult {
         successArticleIDs.contains(articleID) ? .cached : .permanentFailure
     }
 
-    func resolveAndCacheThumbnail(thumbnailURL: URL?, articleLink: URL?, articleID: String) async -> ThumbnailCacheResult {
+    func resolveAndCacheThumbnail(thumbnailURL: URL?, articleLink: URL?, articleID: String) async throws -> ThumbnailCacheResult {
         successArticleIDs.contains(articleID) ? .cached : .permanentFailure
     }
 
@@ -386,11 +414,11 @@ private final class SequenceThumbnailMock: ArticleThumbnailCaching, @unchecked S
         lock.withLock { callCounts[articleID, default: 0] }
     }
 
-    func cacheThumbnail(from remoteURL: URL, articleID: String) async -> ThumbnailCacheResult {
+    func cacheThumbnail(from remoteURL: URL, articleID: String) async throws -> ThumbnailCacheResult {
         .transientFailure
     }
 
-    func resolveAndCacheThumbnail(thumbnailURL: URL?, articleLink: URL?, articleID: String) async -> ThumbnailCacheResult {
+    func resolveAndCacheThumbnail(thumbnailURL: URL?, articleLink: URL?, articleID: String) async throws -> ThumbnailCacheResult {
         let currentCall: Int = lock.withLock {
             let count = callCounts[articleID, default: 0]
             callCounts[articleID] = count + 1
