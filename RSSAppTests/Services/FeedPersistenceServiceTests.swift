@@ -595,6 +595,34 @@ struct FeedPersistenceServiceTests {
         #expect(needing.isEmpty)
     }
 
+    @Test("articlesNeedingThumbnails returns articles in sortDate descending (newest first)")
+    @MainActor
+    func articlesNeedingThumbnailsSortsBySortDateDescending() throws {
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+
+        // Insert two uncached articles: one with a past pubDate, one with a future
+        // pubDate. Without the sortDate migration, the future article would come first
+        // by an inflated future timestamp; with sortDate clamping, both have sortDate
+        // ≈ now, but the past article (sortDate = now - 1h) comes after.
+        try service.upsertArticles([
+            TestFixtures.makeArticle(id: "future", publishedDate: Date().addingTimeInterval(4 * 60 * 60)),
+            TestFixtures.makeArticle(id: "past", publishedDate: Date().addingTimeInterval(-3600)),
+        ], for: feed)
+        try service.save()
+
+        let needing = try service.articlesNeedingThumbnails(maxRetryCount: 3)
+        #expect(needing.count == 2)
+        // Newest-first by sortDate: future is clamped to ~now, past is -1h.
+        #expect(needing[0].articleID == "future")
+        #expect(needing[1].articleID == "past")
+        // The clamped future article must NOT be sorted by its raw publishedDate;
+        // its sortDate is bounded by the past article's sortDate plus a small window.
+        #expect(needing[0].sortDate >= needing[1].sortDate)
+    }
+
     @Test("markThumbnailCached sets isThumbnailCached to true")
     @MainActor
     func markThumbnailCachedSetsFlag() throws {
@@ -1273,17 +1301,28 @@ struct FeedPersistenceServiceTests {
         // Load-bearing: publishedDate is preserved exactly as the publisher provided
         // it. A planned content-update detection feature compares pubDate values
         // across refreshes, so any mutation here would destroy that signal.
-        #expect(cloudflare.publishedDate != nil)
-        #expect(cloudflare.publishedDate! > Date()) // still 4 hours in the future, untouched
+        let preservedPubDate = try #require(cloudflare.publishedDate)
+        #expect(preservedPubDate > Date()) // still 4 hours in the future, untouched
 
         // sortDate is clamped to ingestion time (somewhere between `before` and
         // `after`). It must NOT equal the raw 4-hour-future publishedDate.
         #expect(cloudflare.sortDate >= before)
         #expect(cloudflare.sortDate <= after)
-        #expect(cloudflare.sortDate < cloudflare.publishedDate!)
+        #expect(cloudflare.sortDate < preservedPubDate)
 
         // verge's past pubDate passes through unchanged (min(past, now) == past).
         #expect(verge.sortDate == verge.publishedDate)
+
+        // Ordering: cloudflare's clamped sortDate (≈ now) is later than verge's
+        // sortDate (now − 30s), so cloudflare appears at index 0 in the descending
+        // newest-first sort. This is the post-fix expected ordering — the bug was
+        // that cloudflare appeared at index 0 by ~4 hours, dominating verge by an
+        // enormous margin. With sortDate, the gap is ~30 seconds (verge's offset),
+        // not ~4 hours. Pin the position so a regression that reverts to raw
+        // publishedDate sorting still produces the same index but for the wrong
+        // reason — the sortDate clamp assertion above is the load-bearing check.
+        #expect(result[0].articleID == "cloudflare")
+        #expect(result[1].articleID == "verge")
     }
 
     @Test("oldestArticleIDsExceedingLimit uses sortDate so future-dated articles are not deleted prematurely")
@@ -1315,5 +1354,94 @@ struct FeedPersistenceServiceTests {
         #expect(ids.contains("genuinely-old"))
         #expect(ids.contains("recent-real"))
         #expect(!ids.contains("future-claimed"))
+    }
+
+    // The four tests below close coverage on the per-feed and unread-only sort
+    // descriptors that the cross-feed `allArticles` and retention tests above don't
+    // exercise. Each pins a single migrated SortDescriptor with a future + past pair
+    // so a regression that reverts one descriptor to `\.publishedDate` would fail.
+
+    @Test("articles(for:offset:limit:ascending:false) clamps future-dated article")
+    @MainActor
+    func perFeedDescendingClampsFutureDatedArticle() throws {
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+        try service.upsertArticles([
+            TestFixtures.makeArticle(id: "future", publishedDate: Date().addingTimeInterval(4 * 60 * 60)),
+            TestFixtures.makeArticle(id: "past", publishedDate: Date().addingTimeInterval(-3600)),
+        ], for: feed)
+        try service.save()
+
+        let result = try service.articles(for: feed, offset: 0, limit: 10, ascending: false)
+        #expect(result.count == 2)
+        // Newest-first: future (clamped to ~now) comes before past (-1h).
+        #expect(result[0].articleID == "future")
+        #expect(result[1].articleID == "past")
+        // The future article must be sorted by clamped sortDate, not raw publishedDate.
+        #expect(result[0].sortDate < result[0].publishedDate!)
+    }
+
+    @Test("unreadArticles(for:offset:limit:ascending:false) clamps future-dated article")
+    @MainActor
+    func perFeedUnreadDescendingClampsFutureDatedArticle() throws {
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+        try service.upsertArticles([
+            TestFixtures.makeArticle(id: "future-unread", publishedDate: Date().addingTimeInterval(4 * 60 * 60)),
+            TestFixtures.makeArticle(id: "past-unread", publishedDate: Date().addingTimeInterval(-3600)),
+        ], for: feed)
+        try service.save()
+
+        let result = try service.unreadArticles(for: feed, offset: 0, limit: 10, ascending: false)
+        #expect(result.count == 2)
+        #expect(result[0].articleID == "future-unread")
+        #expect(result[1].articleID == "past-unread")
+        #expect(result[0].sortDate < result[0].publishedDate!)
+    }
+
+    @Test("allUnreadArticles() (no pagination) clamps future-dated article")
+    @MainActor
+    func crossFeedUnreadNoPaginationClampsFutureDatedArticle() throws {
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+        try service.upsertArticles([
+            TestFixtures.makeArticle(id: "future-unread", publishedDate: Date().addingTimeInterval(4 * 60 * 60)),
+            TestFixtures.makeArticle(id: "past-unread", publishedDate: Date().addingTimeInterval(-3600)),
+        ], for: feed)
+        try service.save()
+
+        let result = try service.allUnreadArticles()
+        #expect(result.count == 2)
+        #expect(result[0].articleID == "future-unread")
+        #expect(result[1].articleID == "past-unread")
+        #expect(result[0].sortDate < result[0].publishedDate!)
+    }
+
+    @Test("allUnreadArticles(offset:limit:ascending:true) sorts oldest-first by sortDate")
+    @MainActor
+    func crossFeedUnreadAscendingClampsFutureDatedArticle() throws {
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+        try service.upsertArticles([
+            TestFixtures.makeArticle(id: "future-unread", publishedDate: Date().addingTimeInterval(4 * 60 * 60)),
+            TestFixtures.makeArticle(id: "past-unread", publishedDate: Date().addingTimeInterval(-3600)),
+        ], for: feed)
+        try service.save()
+
+        let result = try service.allUnreadArticles(offset: 0, limit: 10, ascending: true)
+        #expect(result.count == 2)
+        // Oldest-first: past (-1h) comes before future (clamped to ~now).
+        #expect(result[0].articleID == "past-unread")
+        #expect(result[1].articleID == "future-unread")
+        // The future article must be sorted by clamped sortDate, not raw publishedDate.
+        #expect(result[1].sortDate < result[1].publishedDate!)
     }
 }

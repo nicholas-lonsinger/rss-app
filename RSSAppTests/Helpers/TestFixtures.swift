@@ -585,12 +585,13 @@ enum TestFixtures {
         thumbnailRetryCount: Int = 0,
         sortDate: Date? = nil
     ) -> PersistentArticle {
-        // Match production semantics: when callers don't override `sortDate`, it
-        // defaults to the supplied `publishedDate` (which itself defaults to a
-        // fixed past timestamp), or to `Date()` if both are nil. This keeps the
-        // ~90 existing call sites that only set `publishedDate` working unchanged.
-        let effectiveSortDate = sortDate ?? publishedDate ?? Date()
-        return PersistentArticle(
+        // Forward `sortDate` directly: the designated init defaults it to
+        // `PersistentArticle.clampedSortDate(publishedDate:)`, which is the same
+        // formula production uses via the `init(from: Article)` convenience init.
+        // This guarantees the fixture cannot drift from production semantics — even
+        // if a test passes a future `publishedDate`, the helper produces an article
+        // whose `sortDate` is clamped to "now" exactly the way production would.
+        PersistentArticle(
             articleID: articleID,
             title: title,
             link: link,
@@ -605,7 +606,7 @@ enum TestFixtures {
             savedDate: savedDate,
             isThumbnailCached: isThumbnailCached,
             thumbnailRetryCount: thumbnailRetryCount,
-            sortDate: effectiveSortDate
+            sortDate: sortDate
         )
     }
 

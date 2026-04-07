@@ -34,18 +34,10 @@ extension PersistentFeed {
 extension PersistentArticle {
 
     convenience init(from article: Article) {
-        // Compute the clamped sort key. Three cases:
-        //   1. `publishedDate` is in the past → use it directly (the common case).
-        //   2. `publishedDate` is in the future (e.g., Cloudflare scheduled posts) →
-        //      clamp to ingestion time so it sorts as fresh, not by an inflated future
-        //      timestamp that would pin it to the top of newest-first lists.
-        //   3. `publishedDate` is `nil` (parser rejected an implausible date, or the
-        //      feed simply omitted it) → fall back to ingestion time so the article
-        //      still has a stable, non-optional sort key.
-        // The original `publishedDate` is passed through unchanged for a planned
-        // content-update detection feature that compares pubDate values across refreshes.
-        let now = Date()
-        let sortDate = min(article.publishedDate ?? now, now)
+        // The designated init defaults `sortDate` to `clampedSortDate(publishedDate:)`,
+        // which preserves `publishedDate` verbatim and computes the sort key as
+        // `min(publishedDate ?? now, now)`. See `PersistentArticle.clampedSortDate(...)`
+        // and the `RATIONALE:` comment on `PersistentArticle.sortDate` for the rationale.
         self.init(
             articleID: article.id,
             title: article.title,
@@ -55,8 +47,7 @@ extension PersistentArticle {
             publishedDate: article.publishedDate,
             thumbnailURL: article.thumbnailURL,
             author: article.author,
-            categories: article.categories,
-            sortDate: sortDate
+            categories: article.categories
         )
     }
 

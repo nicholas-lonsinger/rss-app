@@ -27,7 +27,7 @@ struct ArticleRowView: View {
 
                 // Display the clamped `sortDate` rather than the raw `publishedDate` so
                 // future-dated scheduled posts (e.g., the Cloudflare blog) render as
-                // "just now" instead of a misleading "3 hours ago" — see
+                // "just now" instead of a misleading "in 3 hours" — see
                 // `PersistentArticle.sortDate` for the rationale.
                 Text(article.sortDate, style: .relative)
                     .font(.caption)
