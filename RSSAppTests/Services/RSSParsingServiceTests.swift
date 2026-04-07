@@ -1812,4 +1812,182 @@ struct RSSParsingServiceTests {
         #expect(snippet.count <= RSSParsingService.snippetMaxLength + 1) // +1 for ellipsis
         #expect(snippet.hasSuffix("…"))
     }
+
+    // MARK: - Hoisted DateFormatter Invariants
+    //
+    // `RSSParsingService` stores pre-built `DateFormatter` and `ISO8601DateFormatter`
+    // instances in `nonisolated(unsafe) static let` arrays to avoid per-call allocation
+    // (see PR #241, issue #217). The `nonisolated(unsafe)` guarantee relies on those
+    // formatters being initialized once and never mutated afterwards — only
+    // `date(from:)` may be called on them. A future edit that adds a stray
+    // `formatter.dateFormat = ...` or `formatter.timeZone = ...` would silently
+    // re-introduce a shared-mutable-state data race.
+    //
+    // These tests pin the invariant down so such a regression fails the suite rather
+    // than hiding until a concurrent refresh corrupts parsed dates. Each test captures
+    // the expected static configuration, then exercises every formatter through the
+    // public `parse()` entry point by feeding it matching pubDate strings, and finally
+    // re-asserts the configuration to prove `parseDate` did not mutate the shared
+    // instance on its way through.
+
+    /// Expected invariants for every hoisted `DateFormatter`: its stored `dateFormat`
+    /// matches the tuple's format string, its locale is pinned to `en_US_POSIX`, and
+    /// its timezone is pinned to the zero-offset zone that the production code set
+    /// via `TimeZone(identifier: "UTC")`.
+    ///
+    /// The timezone check intentionally compares the fixed offset from GMT (always 0
+    /// for UTC) rather than the `TimeZone.identifier` string. Foundation canonicalizes
+    /// `TimeZone(identifier: "UTC").identifier` to `"GMT"` on Apple platforms, so a
+    /// literal `identifier == "UTC"` comparison would falsely report a mutation even
+    /// though the production code is correct. Checking `secondsFromGMT() == 0` is what
+    /// the `DateFormatter` actually uses during parsing, which is the invariant that
+    /// matters for correctness.
+    private static func assertDateFormatterInvariants(
+        _ entries: [(format: String, formatter: DateFormatter)],
+        label: String
+    ) {
+        for entry in entries {
+            #expect(
+                entry.formatter.dateFormat == entry.format,
+                "\(label): dateFormat mutated away from '\(entry.format)' (now '\(entry.formatter.dateFormat ?? "nil")')"
+            )
+            #expect(
+                entry.formatter.locale?.identifier == "en_US_POSIX",
+                "\(label): locale mutated away from en_US_POSIX for format '\(entry.format)'"
+            )
+            let zone = entry.formatter.timeZone
+            #expect(
+                zone != nil,
+                "\(label): timeZone became nil for format '\(entry.format)'"
+            )
+            #expect(
+                zone?.secondsFromGMT() == 0,
+                "\(label): timeZone mutated away from UTC for format '\(entry.format)' (now '\(zone?.identifier ?? "nil")' with offset \(zone?.secondsFromGMT() ?? -1)s)"
+            )
+        }
+    }
+
+    @Test("HoistedDateFormatters.zoned entries preserve format, locale, and timeZone at rest")
+    func hoistedZonedFormattersInvariantAtRest() {
+        Self.assertDateFormatterInvariants(
+            RSSParsingService.hoistedZonedFormattersForTesting,
+            label: "HoistedDateFormatters.zoned"
+        )
+    }
+
+    @Test("HoistedDateFormatters.zoneless entries preserve format, locale, and timeZone at rest")
+    func hoistedZonelessFormattersInvariantAtRest() {
+        Self.assertDateFormatterInvariants(
+            RSSParsingService.hoistedZonelessFormattersForTesting,
+            label: "HoistedDateFormatters.zoneless"
+        )
+    }
+
+    @Test("ISO8601Formatters preserve their formatOptions at rest")
+    func iso8601FormattersInvariantAtRest() {
+        let expectedStandard: ISO8601DateFormatter.Options = [.withInternetDateTime]
+        let expectedFractional: ISO8601DateFormatter.Options = [.withInternetDateTime, .withFractionalSeconds]
+        #expect(
+            RSSParsingService.iso8601StandardFormatterForTesting.formatOptions == expectedStandard
+        )
+        #expect(
+            RSSParsingService.iso8601FractionalFormatterForTesting.formatOptions == expectedFractional
+        )
+    }
+
+    @Test("HoistedDateFormatters.zoned entries are not mutated by parseDate")
+    func hoistedZonedFormattersInvariantAfterParse() throws {
+        // Representative pubDate inputs that each match one of the zoned formats
+        // declared in `HoistedDateFormatters.zoned`. Exercising the full list forces
+        // `parseDate` to walk through every entry in the array, which is where a
+        // stray `formatter.dateFormat = ...` would be most tempting to add.
+        let zonedInputs = [
+            "Mon, 06 Apr 2026 08:30:00 -0700",            // EEE, dd MMM yyyy HH:mm:ss Z
+            "Mon, 06 Apr 2026 08:30:00 GMT",              // EEE, dd MMM yyyy HH:mm:ss zzz
+            "Mon, 6 Apr 2026 08:30:00 -0700",             // EEE, d MMM yyyy HH:mm:ss Z
+            "Mon, 6 Apr 2026 08:30:00 GMT",               // EEE, d MMM yyyy HH:mm:ss zzz
+            "6 Apr 2026 08:30:00 -0700",                  // d MMM yyyy HH:mm:ss Z
+            "6 Apr 2026 08:30:00 GMT",                    // d MMM yyyy HH:mm:ss zzz
+            "Mon, 06 Apr 2026 08:30 -0700",               // EEE, dd MMM yyyy HH:mm Z
+            "Mon, 06 Apr 2026 08:30 GMT",                 // EEE, dd MMM yyyy HH:mm zzz
+            "2026-04-06T08:30:00-0700",                   // yyyy-MM-dd'T'HH:mm:ssZ
+            "2026-04-06T08:30:00.123-0700",               // yyyy-MM-dd'T'HH:mm:ss.SSSZ
+            "2026-04-06 08:30:00-0700",                   // yyyy-MM-dd HH:mm:ssZ
+            "2026-04-06 08:30:00 GMT",                    // yyyy-MM-dd HH:mm:ss zzz
+        ]
+
+        for input in zonedInputs {
+            let xml = Self.rssXML(pubDate: input)
+            let feed = try service.parse(Data(xml.utf8))
+            #expect(
+                feed.articles[0].publishedDate != nil,
+                "Expected zoned input '\(input)' to parse to a non-nil date"
+            )
+        }
+
+        Self.assertDateFormatterInvariants(
+            RSSParsingService.hoistedZonedFormattersForTesting,
+            label: "HoistedDateFormatters.zoned (post-parse)"
+        )
+    }
+
+    @Test("HoistedDateFormatters.zoneless entries are not mutated by parseDate")
+    func hoistedZonelessFormattersInvariantAfterParse() throws {
+        // Zoneless inputs designed to bypass every explicit-zone format (and the
+        // ISO8601 formatters) so `parseDate` falls through to the zoneless block.
+        // Each input matches one entry in `HoistedDateFormatters.zoneless`.
+        let zonelessInputs = [
+            "Mon, 06 Apr 2026 08:30:00",   // EEE, dd MMM yyyy HH:mm:ss
+            "Mon, 06 Apr 2026 08:30",      // EEE, dd MMM yyyy HH:mm
+            "06 Apr 2026 08:30:00",        // dd MMM yyyy HH:mm:ss
+            "2026-04-06T08:30:00.123",     // yyyy-MM-dd'T'HH:mm:ss.SSS
+            "2026-04-06T08:30:00",         // yyyy-MM-dd'T'HH:mm:ss
+            "2026-04-06 08:30:00",         // yyyy-MM-dd HH:mm:ss
+            "2026-04-06",                  // yyyy-MM-dd
+        ]
+
+        for input in zonelessInputs {
+            let xml = Self.rssXML(pubDate: input)
+            let feed = try service.parse(Data(xml.utf8))
+            #expect(
+                feed.articles[0].publishedDate != nil,
+                "Expected zoneless input '\(input)' to parse to a non-nil date"
+            )
+        }
+
+        Self.assertDateFormatterInvariants(
+            RSSParsingService.hoistedZonelessFormattersForTesting,
+            label: "HoistedDateFormatters.zoneless (post-parse)"
+        )
+    }
+
+    @Test("ISO8601Formatters are not mutated by parseDate")
+    func iso8601FormattersInvariantAfterParse() throws {
+        // `parseDate` tries the standard ISO8601 formatter first, then the fractional
+        // variant. Feeding it both shapes walks through both formatters.
+        let iso8601Inputs = [
+            "2026-04-06T08:30:00Z",         // standard
+            "2026-04-06T08:30:00.123Z",     // fractional
+        ]
+
+        for input in iso8601Inputs {
+            let xml = Self.rssXML(pubDate: input)
+            let feed = try service.parse(Data(xml.utf8))
+            #expect(
+                feed.articles[0].publishedDate != nil,
+                "Expected ISO 8601 input '\(input)' to parse to a non-nil date"
+            )
+        }
+
+        let expectedStandard: ISO8601DateFormatter.Options = [.withInternetDateTime]
+        let expectedFractional: ISO8601DateFormatter.Options = [.withInternetDateTime, .withFractionalSeconds]
+        #expect(
+            RSSParsingService.iso8601StandardFormatterForTesting.formatOptions == expectedStandard,
+            "ISO8601Formatters.standard formatOptions mutated by parseDate"
+        )
+        #expect(
+            RSSParsingService.iso8601FractionalFormatterForTesting.formatOptions == expectedFractional,
+            "ISO8601Formatters.fractional formatOptions mutated by parseDate"
+        )
+    }
 }
