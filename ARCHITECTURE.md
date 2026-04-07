@@ -64,7 +64,7 @@ RSSApp/
 │   ├── ActivityShareView.swift          # UIViewControllerRepresentable wrapping UIActivityViewController
 │   ├── AddFeedView.swift               # Sheet for adding a new feed — URL input + validation
 │   ├── AllArticlesView.swift           # Flat chronological list of all articles across all feeds
-│   ├── CrossFeedArticleRowView.swift   # Article row with feed name label for cross-feed lists
+│   ├── CrossFeedArticleRowView.swift   # Article row with inline feed icon + feed name label for cross-feed lists
 │   ├── EditFeedView.swift              # Sheet for editing a feed URL — pre-populated input + validation
 │   ├── APIKeySettingsView.swift        # Keychain API key entry/removal UI (pushed from SettingsView or presented as sheet)
 │   ├── ArticleDiscussionView.swift     # Chat sheet — message bubbles + streaming input
