@@ -83,6 +83,35 @@ struct ArticleThumbnailServiceTests {
         #expect(service.cachedThumbnailFileURL(for: "ftp-scheme-test") == nil)
     }
 
+    @Test("Rejects relative URL with nil scheme as permanent failure")
+    func cacheThumbnailRejectsNilScheme() async {
+        // A relative path produces a URL with scheme == nil. The guard
+        // explicitly handles this (the logger uses `scheme ?? "nil"`),
+        // so this test locks in the rejection behavior.
+        let relativeURL = URL(string: "/relative/icon.png")!
+        #expect(relativeURL.scheme == nil)
+
+        let result = await service.cacheThumbnail(from: relativeURL, articleID: "nil-scheme-test")
+
+        #expect(result == .permanentFailure)
+        #expect(service.cachedThumbnailFileURL(for: "nil-scheme-test") == nil)
+    }
+
+    @Test("http scheme passes scheme guard but is rejected by SVG gate")
+    func cacheThumbnailHTTPSchemePassesGuard() async {
+        // Positive control for the scheme guard: http:// is an allowed scheme,
+        // so the URL passes the first check and reaches the SVG extension gate,
+        // which rejects it. This proves the scheme guard accepts http (not just
+        // https) without requiring a network stub — the SVG gate short-circuits
+        // before any URLSession call.
+        let httpSVGURL = URL(string: "http://example.com/icon.svg")!
+
+        let result = await service.cacheThumbnail(from: httpSVGURL, articleID: "http-svg-test")
+
+        #expect(result == .permanentFailure)
+        #expect(service.cachedThumbnailFileURL(for: "http-svg-test") == nil)
+    }
+
     @Test("Rejects .svg URL extension as permanent failure")
     func cacheThumbnailRejectsSVGExtension() async {
         let svgURL = URL(string: "https://example.com/icon.svg")!
