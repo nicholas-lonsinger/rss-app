@@ -16,9 +16,10 @@ struct RSSParsingService: Sendable {
     //
     // These accessors expose the private `RSSParserDelegate.HoistedDateFormatters` and
     // `RSSParserDelegate.ISO8601Formatters` enums to `@testable` test code so the
-    // "never mutated after init" invariant that justifies their `nonisolated(unsafe)`
-    // declaration can be pinned down by unit tests. See GitHub issue #242 and the
-    // `RATIONALE:` comments on the underlying enums for why the invariant matters.
+    // "never mutated after init" invariant — which justifies the `nonisolated(unsafe)`
+    // declaration on `ISO8601Formatters` and underpins the safety of the hoisted
+    // `DateFormatter` arrays — can be pinned down by unit tests. See GitHub issue #242
+    // and the `RATIONALE:` comment on `ISO8601Formatters` for why the invariant matters.
     //
     // These are only meant to be consumed by tests. Production code inside
     // `RSSParserDelegate` keeps using the private nested enums directly. Exposing them
@@ -53,8 +54,14 @@ struct RSSParsingService: Sendable {
     func parse(_ data: Data) throws -> RSSFeed {
         Self.logger.debug("parse() called with \(data.count, privacy: .public) bytes")
 
+        // Transcode to UTF-8 if the payload declares a different encoding or carries
+        // a UTF-16/UTF-32 BOM. XMLParser only reliably handles UTF-8 and ASCII, so
+        // CJK publishers (big5, euc-kr, gb2312) and UTF-16-emitting systems would
+        // otherwise fail outright. See `EncodingSniffer` below.
+        let parseData = EncodingSniffer.transcodeToUTF8IfNeeded(data)
+
         let delegate = RSSParserDelegate()
-        let parser = XMLParser(data: data)
+        let parser = XMLParser(data: parseData)
         parser.delegate = delegate
         parser.shouldProcessNamespaces = false
         parser.shouldReportNamespacePrefixes = false
@@ -92,6 +99,289 @@ struct RSSParsingService: Sendable {
 
         Self.logger.notice("Feed parsed: '\(feed.title, privacy: .public)' with \(feed.articles.count, privacy: .public) articles")
         return feed
+    }
+}
+
+// MARK: - Encoding Sniffer
+
+/// Detects the character encoding of a raw feed payload and transcodes it to UTF-8
+/// if needed so the downstream `XMLParser` (which only reliably handles UTF-8 and
+/// ASCII) sees bytes it can consume. Pure logic, no I/O, no mutation — safe to call
+/// concurrently.
+///
+/// Detection rules, in order of precedence:
+///
+/// 1. **Byte-order mark (BOM).** A BOM is authoritative per the XML spec and wins
+///    over any `encoding="..."` attribute in the declaration. We check for
+///    UTF-32 (BE/LE) before UTF-16 (BE/LE) because `FF FE 00 00` begins with the
+///    UTF-16 LE BOM prefix — checking UTF-16 first would misclassify UTF-32 LE.
+///
+/// 2. **Byte pattern of the first four bytes.** UTF-16 and UTF-32 without a BOM
+///    can still be detected unambiguously because a well-formed XML document must
+///    start with `<` (0x3C), which has distinctive zero-padding in wider encodings.
+///    See https://www.w3.org/TR/xml/#sec-guessing.
+///
+/// 3. **`<?xml ... encoding="..."?>` declaration.** For ASCII-compatible encodings
+///    (UTF-8, ISO-8859-*, Big5, EUC-KR, GB2312, Shift-JIS, etc.) the XML prolog
+///    itself is ASCII-safe, so we can scan the first `prologScanWindow` bytes as
+///    ASCII and pull out the declared encoding name. The name is resolved via
+///    `CFStringConvertIANACharSetNameToEncoding`, which handles every IANA charset
+///    the system supports.
+///
+/// 4. **Default to UTF-8.** No BOM, no declaration → assume UTF-8 per XML spec.
+///
+/// When transcoding, the original `<?xml ... ?>` prolog is stripped from the UTF-8
+/// output so XMLParser doesn't see a stale `encoding="big5"` attribute that
+/// contradicts the actual bytes it's about to read. UTF-8 with no prolog is the
+/// spec default, so stripping is safe.
+///
+/// `internal` rather than `fileprivate` so unit tests can pin down the individual
+/// detection helpers directly. The type is stateless and has no invariants beyond
+/// what each function documents locally, so widening access is benign.
+enum EncodingSniffer {
+
+    private static let logger = Logger(category: "EncodingSniffer")
+
+    /// Maximum number of leading bytes scanned when looking for an XML declaration
+    /// or stripping the prolog. 256 bytes comfortably fits any realistic
+    /// `<?xml version="..." encoding="..." standalone="..."?>` plus leading
+    /// whitespace, but is short enough that ASCII decoding is trivial.
+    static let prologScanWindow = 256
+
+    /// Inspects `data` and returns the same bytes if the payload is already UTF-8
+    /// (the 95% case — no allocation), or a freshly-transcoded UTF-8 representation
+    /// otherwise. Never throws: on any detection or transcoding failure the original
+    /// bytes are returned unchanged, letting XMLParser produce its own error for the
+    /// caller to surface.
+    static func transcodeToUTF8IfNeeded(_ data: Data) -> Data {
+        guard !data.isEmpty else { return data }
+
+        // 1. BOM check — authoritative.
+        if let (encoding, bomLength) = detectBOM(data) {
+            if encoding == .utf8 {
+                // UTF-8 BOM: strip it. XMLParser tolerates the BOM in practice but
+                // stripping makes the downstream byte stream canonical.
+                return data.subdata(in: bomLength..<data.count)
+            }
+            return transcode(data.subdata(in: bomLength..<data.count), from: encoding)
+                ?? data
+        }
+
+        // 2. UTF-16 / UTF-32 without BOM — detect from first four bytes.
+        if let encoding = detectWideEncodingWithoutBOM(data) {
+            return transcode(data, from: encoding) ?? data
+        }
+
+        // 3. ASCII-compatible: scan the declaration.
+        if let declaredName = scanEncodingDeclaration(data) {
+            let normalized = declaredName.lowercased()
+            if normalized == "utf-8" || normalized == "utf8" || normalized == "us-ascii" || normalized == "ascii" {
+                // Already UTF-8-compatible; XMLParser handles this natively.
+                return data
+            }
+            if let encoding = encodingFromIANAName(declaredName) {
+                return transcode(data, from: encoding) ?? data
+            }
+            // Unknown encoding name: XMLParser would reject the declaration outright,
+            // wasting any ASCII-compatible content in the body. Strip the prolog at
+            // the byte level (leaving the rest of the bytes unchanged) and let
+            // XMLParser try the default (UTF-8). Best-effort recovery for feeds that
+            // typo their encoding attribute but are actually ASCII/UTF-8 underneath.
+            logger.warning("Unknown encoding name '\(declaredName, privacy: .public)' in XML declaration; stripping prolog and attempting UTF-8 fallback")
+            return stripProlog(data) ?? data
+        }
+
+        // 4. No BOM, no declaration → UTF-8 default.
+        return data
+    }
+
+    // MARK: - BOM detection
+
+    /// Returns the detected encoding and the BOM byte length, or nil if no BOM is
+    /// present. Order matters: UTF-32 LE (`FF FE 00 00`) must be checked before
+    /// UTF-16 LE (`FF FE`) or it would be misclassified.
+    static func detectBOM(_ data: Data) -> (encoding: String.Encoding, bomLength: Int)? {
+        if data.count >= 4 {
+            // UTF-32 BE
+            if data[0] == 0x00 && data[1] == 0x00 && data[2] == 0xFE && data[3] == 0xFF {
+                return (.utf32BigEndian, 4)
+            }
+            // UTF-32 LE
+            if data[0] == 0xFF && data[1] == 0xFE && data[2] == 0x00 && data[3] == 0x00 {
+                return (.utf32LittleEndian, 4)
+            }
+        }
+        if data.count >= 3 {
+            // UTF-8
+            if data[0] == 0xEF && data[1] == 0xBB && data[2] == 0xBF {
+                return (.utf8, 3)
+            }
+        }
+        if data.count >= 2 {
+            // UTF-16 BE
+            if data[0] == 0xFE && data[1] == 0xFF {
+                return (.utf16BigEndian, 2)
+            }
+            // UTF-16 LE
+            if data[0] == 0xFF && data[1] == 0xFE {
+                return (.utf16LittleEndian, 2)
+            }
+        }
+        return nil
+    }
+
+    // MARK: - BOM-less wide detection
+
+    /// Detects UTF-16 / UTF-32 without a BOM by pattern-matching the first four
+    /// bytes against the expected encoding of the leading `<` character (0x3C).
+    static func detectWideEncodingWithoutBOM(_ data: Data) -> String.Encoding? {
+        guard data.count >= 4 else { return nil }
+        let b0 = data[0], b1 = data[1], b2 = data[2], b3 = data[3]
+
+        // UTF-32 BE: 00 00 00 3C
+        if b0 == 0x00 && b1 == 0x00 && b2 == 0x00 && b3 == 0x3C {
+            return .utf32BigEndian
+        }
+        // UTF-32 LE: 3C 00 00 00
+        if b0 == 0x3C && b1 == 0x00 && b2 == 0x00 && b3 == 0x00 {
+            return .utf32LittleEndian
+        }
+        // UTF-16 BE: 00 3C 00 ?? — second byte is 0x3C, first and third are 0x00.
+        if b0 == 0x00 && b1 == 0x3C && b2 == 0x00 {
+            return .utf16BigEndian
+        }
+        // UTF-16 LE: 3C 00 ?? 00 — first byte is 0x3C, second and fourth are 0x00.
+        if b0 == 0x3C && b1 == 0x00 && b3 == 0x00 {
+            return .utf16LittleEndian
+        }
+        return nil
+    }
+
+    // MARK: - XML declaration scanner
+
+    /// Scans the first `prologScanWindow` bytes of `data` as ASCII looking for
+    /// `<?xml ... encoding="name" ... ?>`. Returns the encoding name unquoted, or
+    /// nil if no declaration is present or the encoding attribute is missing.
+    /// Only runs on ASCII-compatible payloads: the caller is expected to have
+    /// ruled out UTF-16/UTF-32 already.
+    static func scanEncodingDeclaration(_ data: Data) -> String? {
+        let sniffLength = min(data.count, prologScanWindow)
+        guard sniffLength >= 6 else { return nil }
+        let prefix = data.prefix(sniffLength)
+
+        // Decode as ASCII (lossy — any non-ASCII byte becomes nil and short-circuits).
+        // We do not need to decode the full document here, just the prolog.
+        guard let prolog = String(data: prefix, encoding: .ascii),
+              let declStart = prolog.range(of: "<?xml"),
+              let declEnd = prolog.range(of: "?>", range: declStart.upperBound..<prolog.endIndex) else {
+            return nil
+        }
+
+        let declaration = prolog[declStart.upperBound..<declEnd.lowerBound]
+        // Find `encoding=` (case-insensitive per XML spec).
+        guard let encRange = declaration.range(of: "encoding", options: .caseInsensitive) else {
+            return nil
+        }
+        var cursor = encRange.upperBound
+        // Skip whitespace and `=`.
+        while cursor < declaration.endIndex, declaration[cursor].isWhitespace {
+            cursor = declaration.index(after: cursor)
+        }
+        guard cursor < declaration.endIndex, declaration[cursor] == "=" else { return nil }
+        cursor = declaration.index(after: cursor)
+        while cursor < declaration.endIndex, declaration[cursor].isWhitespace {
+            cursor = declaration.index(after: cursor)
+        }
+        guard cursor < declaration.endIndex else { return nil }
+        let quote = declaration[cursor]
+        guard quote == "\"" || quote == "'" else { return nil }
+        cursor = declaration.index(after: cursor)
+        guard let closingQuote = declaration[cursor...].firstIndex(of: quote) else { return nil }
+        let name = String(declaration[cursor..<closingQuote])
+        return name.isEmpty ? nil : name
+    }
+
+    // MARK: - IANA name lookup
+
+    /// Maps an IANA charset name (from an XML declaration) to a `String.Encoding`.
+    /// Uses CoreFoundation's registry, which covers every charset the system
+    /// understands. Returns nil for unrecognized names.
+    static func encodingFromIANAName(_ name: String) -> String.Encoding? {
+        let cfEncoding = CFStringConvertIANACharSetNameToEncoding(name as CFString)
+        guard cfEncoding != kCFStringEncodingInvalidId else { return nil }
+        let nsEncoding = CFStringConvertEncodingToNSStringEncoding(cfEncoding)
+        return String.Encoding(rawValue: nsEncoding)
+    }
+
+    // MARK: - Transcoding
+
+    /// Decodes `data` using `encoding` and re-encodes as UTF-8, stripping any
+    /// `<?xml ... ?>` prolog so the downstream parser doesn't see a stale
+    /// `encoding="..."` attribute that contradicts the actual bytes. Returns nil
+    /// if decoding fails.
+    static func transcode(_ data: Data, from encoding: String.Encoding) -> Data? {
+        guard let decoded = String(data: data, encoding: encoding) else {
+            logger.warning("Failed to decode feed payload as \(String(describing: encoding), privacy: .public); passing through unchanged")
+            return nil
+        }
+        let stripped = stripXMLDeclaration(decoded)
+        guard let utf8 = stripped.data(using: .utf8) else { return nil }
+        logger.notice("Transcoded \(data.count, privacy: .public) bytes from \(String(describing: encoding), privacy: .public) to \(utf8.count, privacy: .public) bytes UTF-8")
+        return utf8
+    }
+
+    /// Byte-level strip of the leading `<?xml ... ?>` prolog. Scans for the
+    /// ASCII sequence and removes it without decoding the rest of the payload,
+    /// so multi-byte UTF-8 content in the body is preserved byte-for-byte.
+    /// Returns nil if no prolog is present (caller can fall through).
+    static func stripProlog(_ data: Data) -> Data? {
+        // Scan at most `prologScanWindow` bytes — the prolog, if present, must be first.
+        let scanLength = min(data.count, prologScanWindow)
+        guard scanLength >= 7 else { return nil }  // "<?xml?>" is 7 bytes minimum
+
+        // Skip any leading whitespace bytes (0x20, 0x09, 0x0A, 0x0D).
+        var start = 0
+        while start < scanLength {
+            let b = data[start]
+            if b == 0x20 || b == 0x09 || b == 0x0A || b == 0x0D {
+                start += 1
+            } else {
+                break
+            }
+        }
+        // Check `<?xml` (lowercase — XML spec is strict here).
+        let xmlPrefix: [UInt8] = [0x3C, 0x3F, 0x78, 0x6D, 0x6C]  // <?xml
+        guard start + 5 <= data.count else { return nil }
+        for (i, expected) in xmlPrefix.enumerated() where data[start + i] != expected {
+            return nil
+        }
+        // Find the closing `?>`.
+        var cursor = start + 5
+        while cursor + 1 < data.count && cursor < scanLength {
+            if data[cursor] == 0x3F && data[cursor + 1] == 0x3E {
+                return data.subdata(in: (cursor + 2)..<data.count)
+            }
+            cursor += 1
+        }
+        return nil
+    }
+
+    /// Removes the leading `<?xml ... ?>` prolog from a string if present.
+    /// The spec treats a missing prolog as UTF-8 by default, which is what we
+    /// want after transcoding.
+    static func stripXMLDeclaration(_ text: String) -> String {
+        // Trim leading whitespace and any residual BOM character that might have
+        // survived decoding (the zero-width no-break space U+FEFF).
+        var cursor = text.startIndex
+        while cursor < text.endIndex, text[cursor].isWhitespace || text[cursor] == "\u{FEFF}" {
+            cursor = text.index(after: cursor)
+        }
+        let trimmed = text[cursor...]
+        guard trimmed.hasPrefix("<?xml"),
+              let declEnd = trimmed.range(of: "?>") else {
+            return String(trimmed)
+        }
+        return String(trimmed[declEnd.upperBound...])
     }
 }
 
@@ -809,14 +1099,14 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
         return date
     }
 
-    // RATIONALE: nonisolated(unsafe) is safe because these formatters are initialized
-    // once via static let and never mutated after initialization — only date(from:) is
-    // called. Hoisting avoids allocating a fresh `DateFormatter` and mutating its
-    // `dateFormat` on every `parseDate` call (~one allocation per article per refresh).
-    // Pre-building one formatter per format also eliminates the shared-mutable-state
-    // hazard of a single formatter with an in-loop `dateFormat` assignment, so the
-    // parser is safe to invoke concurrently from multiple feed refreshes. See GitHub
-    // issue #217. The invariant is pinned down by `RSSParsingServiceTests` via the
+    // The pre-built formatters below are initialized once via `static let` and never
+    // mutated after initialization — only `date(from:)` is called. Hoisting avoids
+    // allocating a fresh `DateFormatter` and mutating its `dateFormat` on every
+    // `parseDate` call (~one allocation per article per refresh). Pre-building one
+    // formatter per format also eliminates the shared-mutable-state hazard of a
+    // single formatter with an in-loop `dateFormat` assignment, so the parser is
+    // safe to invoke concurrently from multiple feed refreshes. See GitHub issue
+    // #217. The invariant is pinned down by `RSSParsingServiceTests` via the
     // `hoistedZonedFormattersForTesting` / `hoistedZonelessFormattersForTesting`
     // accessors on `RSSParsingService` — see GitHub issue #242.
     fileprivate enum HoistedDateFormatters {
@@ -830,7 +1120,7 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
         /// any format that fails to read a zone from the input (rather than falling
         /// through to the zoneless block) won't silently inherit the device's local
         /// zone.
-        nonisolated(unsafe) static let zoned: [(format: String, formatter: DateFormatter)] =
+        static let zoned: [(format: String, formatter: DateFormatter)] =
             makeFormatters(for: [
                 // RFC 822 / RFC 2822 with numeric offset (most common in RSS)
                 "EEE, dd MMM yyyy HH:mm:ss Z",
@@ -871,7 +1161,7 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
         /// pre-configured `DateFormatter` whose `timeZone` is forced to UTC. These are
         /// attempted last. A debug log is emitted whenever one of these matches because
         /// the resulting `Date` is necessarily an educated guess.
-        nonisolated(unsafe) static let zoneless: [(format: String, formatter: DateFormatter)] =
+        static let zoneless: [(format: String, formatter: DateFormatter)] =
             makeFormatters(for: [
                 "EEE, dd MMM yyyy HH:mm:ss",
                 "EEE, dd MMM yyyy HH:mm",

@@ -60,7 +60,7 @@ final class MockSSEURLProtocol: URLProtocol {
     // RATIONALE: nonisolated(unsafe) is acceptable here because all access goes
     // through the synchronized `storeQueue` dispatch queue below.
     nonisolated(unsafe) private static var requestStore: [String: RequestData] = [:]
-    nonisolated(unsafe) private static let storeQueue = DispatchQueue(label: "MockSSEURLProtocol.storeQueue")
+    private static let storeQueue = DispatchQueue(label: "MockSSEURLProtocol.storeQueue")
 
     static func store(requestID: String, payload: Data, statusCode: Int) {
         storeQueue.sync {

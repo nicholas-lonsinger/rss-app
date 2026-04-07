@@ -49,7 +49,7 @@ RSSApp/
 │   ├── ModelConfigurationValidator.swift # ModelValidation + MaxTokensValidation enums — input validation for model ID and max tokens
 │   ├── NetworkMonitorService.swift      # NetworkMonitoring protocol + NWPathMonitor implementation — detects WiFi vs cellular/constrained for background download gating; accepts injectable `wifiOnlyProvider` and `pathProvider` closures so tests can control the preference and supply synthetic `NetworkPathSnapshot` values without touching `UserDefaults` or starting a real `NWPathMonitor`. Also defines the `NetworkPathSnapshot` protocol (minimal view of `NWPath.status`, `usesInterfaceType(_:)`, `isConstrained`) and the `NWPathSnapshot` production adapter that wraps a live `NWPath`
 │   ├── OPMLService.swift               # OPMLServing protocol + XMLParser-based OPML parser + XML generator
-│   ├── RSSParsingService.swift         # XMLParser-based RSS 2.0 + Atom parser with XHTML content reconstruction
+│   ├── RSSParsingService.swift         # XMLParser-based RSS 2.0 + Atom parser with XHTML content reconstruction; leading `EncodingSniffer` transcodes UTF-16/UTF-32/named-charset payloads (Big5, EUC-KR, GB2312, ISO-8859-*) to UTF-8 before handing bytes to XMLParser
 │   ├── SiteSpecificExtracting.swift    # Protocol for per-hostname content extractors
 │   └── ThumbnailPrefetchService.swift  # ThumbnailPrefetching protocol + bulk thumbnail download with bounded concurrency, transient retry, and cross-cycle retry cap
 ├── ViewModels/                         # View state management
@@ -144,6 +144,7 @@ RSSAppTests/
 │   ├── MockNetworkMonitorServiceTests.swift # Mock conformance and default behavior
 │   ├── NetworkMonitorServiceTests.swift # Real NetworkMonitorService: verifies `wifiOnlyProvider` and `pathProvider` closures are invoked on each check, and exercises every branch of `isBackgroundDownloadAllowed()` (nil path, unsatisfied/requiresConnection, wifiOnly with WiFi/non-WiFi and constrained/unconstrained combinations, wifiOnly-off satisfied path) via synthetic `NetworkPathSnapshot` stubs
 │   ├── RSSParsingServiceTests.swift    # Channel parsing, thumbnails, IDs, edge cases
+│   ├── RSSParsingEncodingTests.swift   # EncodingSniffer unit tests (BOM detection, declaration scanning, IANA lookup) + end-to-end parse() tests for UTF-16/UTF-32/ISO-8859-1/Windows-1252 payloads
 │   └── ThumbnailPrefetchServiceTests.swift # Bulk prefetch, skip cached/maxed, retry count, permanent failure skip, mixed results, error handling
 ├── ViewModels/
 │   ├── AddFeedViewModelTests.swift         # URL validation, duplicate detection, success/failure
@@ -222,6 +223,7 @@ RSSAppApp (@main)
 | `@Observable` over `ObservableObject` | Modern observation API; less boilerplate (no `@Published`); better performance |
 | Protocol DI for all services | Enables mock injection for ViewModel tests without network/keychain/WebView access |
 | `XMLParser` with `@unchecked Sendable` delegate | Synchronous parsing within a single method call; delegate never escapes scope |
+| `EncodingSniffer` transcoding pass before `XMLParser` | `XMLParser` only reliably handles UTF-8 and ASCII, so feeds from CJK publishers (Big5, EUC-KR, GB2312) and UTF-16-emitting systems would otherwise fail outright. The sniffer checks BOMs first (authoritative per the XML spec, UTF-32 checked before UTF-16 to avoid `FF FE 00 00` being misclassified as UTF-16 LE), then byte-pattern-detects BOM-less UTF-16/UTF-32 via the distinctive zero-padding of the leading `<` character, then scans the first ~256 bytes as ASCII for an `encoding="..."` attribute, resolving names via `CFStringConvertIANACharSetNameToEncoding`. When transcoding, the original `<?xml ... ?>` prolog is stripped from the UTF-8 output so `XMLParser` doesn't see a stale `encoding="big5"` attribute that contradicts the actual bytes. Unknown encoding names fall back to byte-level prolog strip + UTF-8 default (best-effort recovery for feeds that typo their encoding declaration). The sniffer is pure logic with no I/O or mutation and is safe to call concurrently. The 95% UTF-8 case is a zero-allocation fast path |
 | `@MainActor` for `ArticleExtractionService` | `WKWebView` requires main-thread access; `@MainActor` enforces this at compile time |
 | `@unchecked Sendable` on `ExtractionCoordinator` | Coordinator is only accessed on MainActor; lifecycle is bounded by a single extraction call |
 | Keychain for API key storage | Encrypted by OS, sandboxed to app, never touches any file tracked by git |
