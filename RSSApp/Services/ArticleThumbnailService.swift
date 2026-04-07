@@ -216,7 +216,6 @@ struct ArticleThumbnailService: ArticleThumbnailCaching {
                 let code = (response as? HTTPURLResponse)?.statusCode ?? -1
                 Self.logger.warning("Article page fetch returned HTTP \(code, privacy: .public) for \(articleLink.absoluteString, privacy: .public)")
                 // Non-2xx HTTP responses are treated as transient — the server may recover.
-                // 429 (rate limited) and 408 (request timeout) are transient despite being 4xx.
                 return .fetchFailed
             }
 
@@ -230,12 +229,13 @@ struct ArticleThumbnailService: ArticleThumbnailCaching {
 
             guard let html = String(data: collected, encoding: .utf8) else {
                 Self.logger.warning("Article page response is not valid UTF-8 from \(articleLink.absoluteString, privacy: .public)")
-                return .notFound
+                return .fetchFailed
             }
 
             if let ogURL = HTMLUtilities.extractOGImageURL(from: html, baseURL: articleLink) {
                 return .found(ogURL)
             }
+            Self.logger.debug("No og:image meta tag found in page from \(articleLink.absoluteString, privacy: .public)")
             return .notFound
         } catch {
             Self.logger.warning("Failed to fetch article page for og:image: \(error, privacy: .public)")
