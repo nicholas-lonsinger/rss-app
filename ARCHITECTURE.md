@@ -37,7 +37,7 @@ RSSApp/
 │   ├── DOMSerializerConstants.swift    # Shared JS bridge constants (message handler name, serializer call)
 │   ├── FeedFetchingService.swift       # FeedFetching protocol + URLSession implementation
 │   ├── ArticleThumbnailService.swift   # ThumbnailCacheResult enum + ArticleThumbnailCaching protocol + thumbnail download with transient/permanent error classification, URL scheme validation, resize-to-120px, JPEG disk caching
-│   ├── FeedIconService.swift           # FeedIconResolving protocol + icon URL resolution (feed XML → site HTML → /favicon.ico), size-limited HTML fetch, and file-system caching
+│   ├── FeedIconService.swift           # FeedIconResolving protocol + icon URL resolution (feed XML → site HTML → /favicon.ico), size-limited HTML fetch, file-system caching, and loadValidatedIcon (decode + visible-content gate + delete-on-corrupt for UI consumers)
 │   ├── URLRequest+UserAgent.swift      # URLRequest extension with shared mobile Safari User-Agent header for CDN compatibility
 │   ├── FeedPersistenceService.swift    # FeedPersisting protocol + SwiftData implementation (feeds, articles, content cache, read/unread, saved/unsaved, bulk mark all read, sort order, article count + bulk delete for retention cleanup with saved-article exemption)
 │   ├── FeedStorageService.swift        # FeedStoring protocol + UserDefaults persistence — retained for migration only

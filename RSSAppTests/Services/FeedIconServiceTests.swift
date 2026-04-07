@@ -213,6 +213,83 @@ struct FeedIconServiceTests {
         service.deleteCachedIcon(for: UUID())
     }
 
+    // MARK: - loadValidatedIcon
+
+    @Test("Returns nil when no cached icon exists")
+    func loadValidatedIconReturnsNilWhenUncached() async {
+        let result = await service.loadValidatedIcon(for: UUID())
+
+        #expect(result == nil)
+    }
+
+    @Test("Returns decoded image when cached file is valid and visible")
+    @MainActor
+    func loadValidatedIconReturnsImageForValidCache() async throws {
+        let feedID = UUID()
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let pngData = UIGraphicsImageRenderer(size: CGSize(width: 16, height: 16), format: format)
+            .pngData { ctx in
+                UIColor.red.setFill()
+                ctx.fill(CGRect(x: 0, y: 0, width: 16, height: 16))
+            }
+        let fileURL = try writeCacheFile(feedID: feedID, data: pngData)
+        defer { try? FileManager.default.removeItem(at: fileURL) }
+
+        let image = await service.loadValidatedIcon(for: feedID)
+
+        #expect(image != nil)
+        // Valid icons must remain on disk after a successful load
+        #expect(FileManager.default.fileExists(atPath: fileURL.path(percentEncoded: false)))
+    }
+
+    @Test("Deletes cached file and returns nil when data is not a decodable image")
+    func loadValidatedIconDeletesUndecodableFile() async throws {
+        let feedID = UUID()
+        let garbage = Data("not a real image".utf8)
+        let fileURL = try writeCacheFile(feedID: feedID, data: garbage)
+        defer { try? FileManager.default.removeItem(at: fileURL) }
+
+        let image = await service.loadValidatedIcon(for: feedID)
+
+        #expect(image == nil)
+        #expect(!FileManager.default.fileExists(atPath: fileURL.path(percentEncoded: false)))
+    }
+
+    @Test("Deletes cached file and returns nil when image is fully transparent")
+    @MainActor
+    func loadValidatedIconDeletesTransparentImage() async throws {
+        let feedID = UUID()
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let pngData = UIGraphicsImageRenderer(size: CGSize(width: 16, height: 16), format: format)
+            .pngData { ctx in
+                UIColor.clear.setFill()
+                ctx.fill(CGRect(x: 0, y: 0, width: 16, height: 16))
+            }
+        let fileURL = try writeCacheFile(feedID: feedID, data: pngData)
+        defer { try? FileManager.default.removeItem(at: fileURL) }
+
+        let image = await service.loadValidatedIcon(for: feedID)
+
+        #expect(image == nil)
+        #expect(!FileManager.default.fileExists(atPath: fileURL.path(percentEncoded: false)))
+    }
+
+    // MARK: - Test helpers
+
+    /// Writes `data` to the path that `FeedIconService` expects for `feedID`'s cached
+    /// icon. This mirrors the service's private `iconFileURL(for:)` so tests can prime
+    /// the cache without going through the network-backed caching path.
+    private func writeCacheFile(feedID: UUID, data: Data) throws -> URL {
+        let cacheDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("feed-icons")
+        try FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
+        let fileURL = cacheDir.appendingPathComponent("\(feedID.uuidString).png")
+        try data.write(to: fileURL, options: .atomic)
+        return fileURL
+    }
+
     // MARK: - hasVisibleContent
 
     @Test("Rejects fully transparent image")

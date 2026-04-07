@@ -19,6 +19,16 @@ protocol FeedIconResolving: Sendable {
     /// Returns the local file URL for a cached icon, or `nil` if not cached.
     func cachedIconFileURL(for feedID: UUID) -> URL?
 
+    /// Loads the cached icon for `feedID` off the main actor, decoding the PNG on disk,
+    /// verifying it has visible content, and deleting the file (with a warning log)
+    /// if it is unreadable or fully transparent. Returns `nil` when no cached icon
+    /// exists, or when the cached file failed validation and was removed.
+    ///
+    /// This is the preferred entry point for UI layers that need to display a cached
+    /// icon — it centralizes the decode + validity gate + delete-on-corrupt pipeline
+    /// so the invariant is enforced once, at the service boundary.
+    func loadValidatedIcon(for feedID: UUID) async -> UIImage?
+
     /// Resolves candidate icon URLs and caches the first one that downloads successfully.
     /// Returns the remote URL of the cached icon, or `nil` if no candidate could be cached.
     func resolveAndCacheIcon(feedSiteURL: URL?, feedImageURL: URL?, feedID: UUID) async -> URL?
@@ -111,6 +121,26 @@ struct FeedIconService: FeedIconResolving {
     func cachedIconFileURL(for feedID: UUID) -> URL? {
         let fileURL = iconFileURL(for: feedID)
         return FileManager.default.fileExists(atPath: fileURL.path(percentEncoded: false)) ? fileURL : nil
+    }
+
+    func loadValidatedIcon(for feedID: UUID) async -> UIImage? {
+        guard let fileURL = cachedIconFileURL(for: feedID) else {
+            Self.logger.debug("No cached icon for feed \(feedID.uuidString, privacy: .public) — awaiting next refresh")
+            return nil
+        }
+        return await Task.detached(priority: .userInitiated) { () -> UIImage? in
+            guard let image = UIImage(contentsOfFile: fileURL.path(percentEncoded: false)) else {
+                Self.logger.warning("Cached icon file unreadable for feed \(feedID.uuidString, privacy: .public) at \(fileURL.path, privacy: .public) — deleting")
+                self.deleteCachedIcon(for: feedID)
+                return nil
+            }
+            guard Self.hasVisibleContent(image) else {
+                Self.logger.warning("Cached icon for feed \(feedID.uuidString, privacy: .public) has no visible content — deleting")
+                self.deleteCachedIcon(for: feedID)
+                return nil
+            }
+            return image
+        }.value
     }
 
     func resolveAndCacheIcon(feedSiteURL: URL?, feedImageURL: URL?, feedID: UUID) async -> URL? {
