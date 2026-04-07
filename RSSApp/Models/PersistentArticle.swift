@@ -26,12 +26,24 @@ final class PersistentArticle {
     /// Set to `true` by `FeedPersistenceService.upsertArticles` when a re-fetch detects
     /// a strictly newer Atom `<updated>` (or namespaced equivalent) on an existing row,
     /// alongside the cache invalidation, `isRead` reset, and `sortDate` bump that mark
-    /// the article as resurfaced (issue #74). A follow-up PR will clear it when the user
-    /// opens the article (the read transition), so list rows can distinguish "newly
-    /// resurfaced because content changed" from "brand new unread."
+    /// the article as resurfaced (issue #74).
+    ///
+    /// **Invariant:** when `true`, `updatedDate` is guaranteed non-nil — the mutation
+    /// site in `upsertArticles` guards on `article.updatedDate != nil` before flipping
+    /// the flag.
+    ///
+    /// **Destructive transition:** the update path resets `isRead = false` and
+    /// `readDate = nil`. The original "first read" timestamp is NOT preserved across
+    /// detection. If a future feature needs "read-before-update" history, this decision
+    /// must be revisited. The `wasUpdated == true && isRead == false` combination
+    /// transiently encodes "resurfaced because the publisher revised it" — until the
+    /// user reads the article, at which point the flag is cleared (see TODO below).
     ///
     /// Existing rows persisted before this field was added deserialize as `false` via
     /// SwiftData's implicit schema migration, matching the default for fresh inserts.
+    // TODO(issue #74): clear `wasUpdated` on the read transition in `markArticleRead`
+    // so list rows can distinguish "newly resurfaced because content changed" from
+    // "brand new unread" via a UI badge.
     var wasUpdated: Bool
     var thumbnailURL: URL?
     var author: String?
@@ -62,12 +74,12 @@ final class PersistentArticle {
     // default is `Date()`) and is never mutated by `FeedPersistenceService.upsertArticles`
     // or anywhere else in production code. This post-insert immutability is load-bearing
     // for the `displayedPublishedDate` computed property below, which uses `fetchedDate`
-    // as the clamp ceiling so the row view shows a stable original publication time even
-    // after a follow-up to issue #74 starts mutating `sortDate` on update detection. Any
-    // future code path that mutates `fetchedDate` on an already-persisted article would
-    // silently retroactively change `displayedPublishedDate` for every article inserted
-    // before that change. SwiftData requires `var` here, so this invariant cannot be
-    // enforced at the type level.
+    // as the clamp ceiling so the row view shows a stable original publication time
+    // even though `upsertArticles` mutates `sortDate` on content-update detection
+    // (issue #74). Any future code path that mutates `fetchedDate` on an already-
+    // persisted article would silently retroactively change `displayedPublishedDate`
+    // for every article inserted before that change. SwiftData requires `var` here, so
+    // this invariant cannot be enforced at the type level.
     var fetchedDate: Date
 
     // MARK: - Sort Key
@@ -104,6 +116,14 @@ final class PersistentArticle {
 
     var feed: PersistentFeed?
 
+    // RATIONALE: `deleteRule: .cascade` is load-bearing for content-update detection in
+    // `FeedPersistenceService.upsertArticles`, which drops `existing.content` on a
+    // publisher revision (issue #74) so the next visit re-extracts. The upsert path
+    // explicitly deletes the orphan via `modelContext.delete(staleContent)` before
+    // nilling the relationship — see the comment in `upsertArticles` — but the cascade
+    // rule remains the safety net for the more common case of deleting the parent row
+    // (article retention cleanup, feed deletion). Changing this to `.nullify` would
+    // orphan rows in both paths.
     @Relationship(deleteRule: .cascade, inverse: \PersistentArticleContent.article)
     var content: PersistentArticleContent?
 
@@ -155,17 +175,18 @@ final class PersistentArticle {
 
     // MARK: - Display Helpers
 
-    /// Stable display value for the article's original publication time. Added in advance
-    /// of the row-view changes planned for issue #74; not yet consumed by any production
-    /// view in this PR.
+    /// Stable display value for the article's original publication time. Added in
+    /// advance of the row-view changes planned for issue #74; not yet consumed by any
+    /// production view in this PR.
     ///
-    /// Distinct from `sortDate` because a follow-up to issue #74 is expected to mutate
-    /// `sortDate` to the current time when content-update detection fires (see the
-    /// stability invariant block on `sortDate` above for the constraints any such change
-    /// must satisfy). Once that lands, the row view will need *both* an "Updated [N]
-    /// minutes ago" label using the bumped `sortDate`/`updatedDate` *and* a stable
-    /// "Published [N] days ago" label that reflects the original publication moment —
-    /// this property is the source for the latter.
+    /// Distinct from `sortDate` because `FeedPersistenceService.upsertArticles` mutates
+    /// `sortDate` to the current time when content-update detection fires on a re-fetch
+    /// (issue #74; see the stability rule block on `sortDate` above for the single
+    /// sanctioned mutation path and its constraints). The row-view changes that
+    /// consume this property will need *both* an "Updated [N] minutes ago" label using
+    /// the bumped `sortDate`/`updatedDate` *and* a stable "Published [N] days ago"
+    /// label that reflects the original publication moment — this property is the
+    /// source for the latter.
     ///
     /// Formula: `min(publishedDate ?? fetchedDate, fetchedDate)`.
     ///

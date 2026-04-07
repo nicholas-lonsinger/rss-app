@@ -38,9 +38,9 @@ extension PersistentArticle {
         // which preserves `publishedDate` verbatim and computes the sort key as
         // `min(publishedDate ?? now, now)`. See `PersistentArticle.clampedSortDate(...)`
         // and the `RATIONALE:` comment on `PersistentArticle.sortDate` for the rationale.
-        // `wasUpdated` defaults to `false` for fresh inserts; `FeedPersistenceService`
-        // .upsertArticles flips it to `true` only when a re-fetch detects a strictly
-        // newer Atom `<updated>` on an existing row (issue #74).
+        // `wasUpdated` defaults to `false` for fresh inserts;
+        // `FeedPersistenceService.upsertArticles` flips it to `true` only when a re-fetch
+        // detects a strictly newer Atom `<updated>` on an existing row (issue #74).
         self.init(
             articleID: article.id,
             title: article.title,

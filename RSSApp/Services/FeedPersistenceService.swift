@@ -297,20 +297,56 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
     }
 
     // RATIONALE: Existing rows are mutated only when the feed XML carries a strictly newer
-    // Atom <updated> timestamp than what we already stored (issue #74). All other metadata
-    // edits from the publisher (title rewording, category tweaks, snippet rewordings without
-    // a corresponding <updated> bump) are still ignored to preserve user-generated state
-    // (read status, saved status, manually-cached content). On a real update, the cached
-    // PersistentArticleContent is dropped (cascade-deletes) so the next visit re-extracts;
-    // sortDate is bumped to "now" so the article re-surfaces at the top of newest-first
-    // lists; isRead is reset so it shows up unread again. The detection compares against
-    // (existing.updatedDate ?? existing.publishedDate) so articles persisted before the
-    // updatedDate column existed still participate in detection via their publishedDate.
+    // Atom <updated> timestamp than what we already stored (issue #74). The detection
+    // compares against `(existing.updatedDate ?? existing.publishedDate)` so articles
+    // persisted before the `updatedDate` column existed still participate via their
+    // `publishedDate`. When BOTH baselines are nil (the parser previously rejected every
+    // date format on the row), detection is skipped — see the explicit guard in the
+    // function body for the policy and rationale.
+    //
+    // **Field-mutation policy on detection** — exhaustive list of how each persisted
+    // property is treated when the update path fires:
+    //
+    //   Mutated (publisher-visible body content):
+    //     • `updatedDate`           ← incoming
+    //     • `articleDescription`    ← incoming
+    //     • `snippet`               ← incoming
+    //     • `wasUpdated`            ← `true`
+    //     • `sortDate`              ← `clampedSortDate(publishedDate: now, now: now)`
+    //                                 (the single sanctioned post-insert mutation; see
+    //                                 the stability rule on `PersistentArticle.sortDate`)
+    //     • `content`               ← `nil` (the PersistentArticleContent row is
+    //                                 explicitly deleted from the store, not just
+    //                                 nilled — see the explicit `modelContext.delete`
+    //                                 call below)
+    //
+    //   Reset (so the article re-surfaces as unread for the user):
+    //     • `isRead`                ← `false`
+    //     • `readDate`              ← `nil`
+    //
+    //   Preserved (user-generated state and identity that the publisher does not own):
+    //     • `title`                 — publisher revisions to the title are intentionally
+    //                                 dropped. Re-fetching titles would require a UX
+    //                                 surface for "title has changed" that isn't scoped
+    //                                 for this PR. Revisit if users report stale titles.
+    //     • `link`, `author`, `categories`, `thumbnailURL` — same rationale as `title`
+    //     • `publishedDate`         — verbatim publisher value, never mutated post-insert
+    //     • `fetchedDate`           — load-bearing for `displayedPublishedDate`'s clamp
+    //                                 ceiling; see the RATIONALE on `fetchedDate`
+    //     • `isSaved`, `savedDate`  — user-generated state
+    //     • `isThumbnailCached`, `thumbnailRetryCount` — system-managed cache state;
+    //                                 the cached JPEG file is unaffected by a body
+    //                                 revision unless the publisher also re-points
+    //                                 `thumbnailURL`, which we don't currently detect.
+    //
+    // The original read timestamp (the moment the user first read the article) is NOT
+    // preserved across detection. If a future feature needs "read-before-update"
+    // history, this decision must be revisited.
     func upsertArticles(_ articles: [Article], for feed: PersistentFeed) throws {
         // Fetch existing rows by ID. We need the full objects (not just the IDs) so we
         // can compare timestamps and mutate in place when an update bump is detected —
-        // the existing query already loaded these, so building a dictionary off the
-        // result adds no extra DB cost.
+        // the existing query already loaded these, so reusing the objects in a lookup
+        // dictionary adds no extra fetch (just an in-memory hash table allocation).
         let feedID = feed.persistentModelID
         let incomingIDs = articles.map(\.id)
         let descriptor = FetchDescriptor<PersistentArticle>(
@@ -320,7 +356,28 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
             }
         )
         let existingArticles = try modelContext.fetch(descriptor)
-        let existingByID = Dictionary(uniqueKeysWithValues: existingArticles.map { ($0.articleID, $0) })
+
+        // Build the lookup defensively. `Dictionary(uniqueKeysWithValues:)` would TRAP
+        // on duplicate `articleID`s, and the schema does not enforce per-feed `articleID`
+        // uniqueness at the SwiftData level (no `@Attribute(.unique)` on
+        // `PersistentArticle.articleID`). Real-world feeds can produce duplicate IDs via
+        // the parser's `guid → link → hash(title+description)` derivation chain when
+        // guids are missing or shared across items, so a duplicate row in the store is
+        // plausible (legacy data, malformed feeds, future migration glitches). Crashing
+        // the entire refresh path is the wrong failure mode — keep the first row, log a
+        // `.warning` so the data inconsistency is discoverable in post-mortem, and
+        // proceed.
+        var existingByID: [String: PersistentArticle] = [:]
+        existingByID.reserveCapacity(existingArticles.count)
+        for row in existingArticles {
+            if existingByID[row.articleID] != nil {
+                Self.logger.warning(
+                    "Duplicate PersistentArticle rows for articleID '\(row.articleID, privacy: .public)' in feed '\(feed.title, privacy: .public)' — using the first encountered; investigate the data inconsistency"
+                )
+                continue
+            }
+            existingByID[row.articleID] = row
+        }
 
         var insertedCount = 0
         var updatedCount = 0
@@ -335,8 +392,28 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
                 // expose <updated> at all.
                 guard let incomingUpdated = article.updatedDate else { continue }
                 let baseline = existing.updatedDate ?? existing.publishedDate
-                let isNewer = baseline.map { incomingUpdated > $0 } ?? true
-                guard isNewer else { continue }
+                guard let baseline else {
+                    // The existing row has neither `updatedDate` nor `publishedDate`,
+                    // which only happens when the parser rejected every date format on
+                    // the original ingest. We cannot establish "strictly newer" against
+                    // an unknown baseline, and firing detection unconditionally on every
+                    // refresh would oscillate this article between read and unread
+                    // forever (the user could never make it stop). Skip and log once so
+                    // the condition is discoverable in post-mortem.
+                    Self.logger.warning(
+                        "Skipping update detection for '\(existing.title, privacy: .public)' (id \(existing.articleID, privacy: .public)) in feed '\(feed.title, privacy: .public)': existing row has no baseline date — detection requires a non-nil publishedDate or updatedDate"
+                    )
+                    continue
+                }
+                guard incomingUpdated > baseline else { continue }
+
+                // Capture pre-mutation state for the per-article audit log below. The
+                // `previousReadDate != nil` case is the user-visible "this article I
+                // already read came back" event and deserves a `.notice` so post-mortem
+                // analysis can answer "which article? when was it originally read? what
+                // was the baseline-vs-incoming delta?" without spelunking the DB.
+                let previousReadDate = existing.readDate
+                let previousSortDate = existing.sortDate
 
                 // Mutate in place. The sortDate bump is the single justified mutation
                 // permitted by the stability rule on `PersistentArticle.sortDate` —
@@ -349,9 +426,25 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
                 existing.snippet = article.snippet
                 existing.sortDate = PersistentArticle.clampedSortDate(publishedDate: now, now: now)
                 // Drop the cached extracted content so ArticleSummaryViewModel.loadContent()
-                // re-extracts on next visit. The relationship's cascade delete rule removes
-                // the PersistentArticleContent row automatically.
+                // re-extracts on next visit. The `@Relationship(deleteRule: .cascade)` on
+                // `PersistentArticle.content` cascades on parent-row delete, NOT on
+                // relationship-nullify, so we delete the content row explicitly here to
+                // guarantee the orphan is removed from the store regardless of how
+                // SwiftData treats nullification across releases.
+                if let staleContent = existing.content {
+                    modelContext.delete(staleContent)
+                }
                 existing.content = nil
+
+                if let previousReadDate {
+                    Self.logger.notice(
+                        "Resurfaced read article '\(existing.title, privacy: .public)' (id \(existing.articleID, privacy: .public)) in feed '\(feed.title, privacy: .public)': baseline \(baseline, privacy: .public), incoming updated \(incomingUpdated, privacy: .public), previously read at \(previousReadDate, privacy: .public), previous sortDate \(previousSortDate, privacy: .public)"
+                    )
+                } else {
+                    Self.logger.debug(
+                        "Updated unread article '\(existing.title, privacy: .public)' (id \(existing.articleID, privacy: .public)) in feed '\(feed.title, privacy: .public)': baseline \(baseline, privacy: .public), incoming updated \(incomingUpdated, privacy: .public)"
+                    )
+                }
 
                 updatedCount += 1
             } else {
@@ -363,7 +456,15 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
         }
 
         let unchangedCount = articles.count - insertedCount - updatedCount
-        Self.logger.notice("Upserted articles for '\(feed.title, privacy: .public)': \(insertedCount, privacy: .public) new, \(updatedCount, privacy: .public) updated, \(unchangedCount, privacy: .public) unchanged")
+        // Split the summary log by outcome: routine no-op refreshes go to `.debug` (in
+        // memory only) so they don't drown the persisted log buffer for power users
+        // with many feeds. Refreshes that actually mutated the store go to `.notice`
+        // for post-mortem analysis.
+        if insertedCount > 0 || updatedCount > 0 {
+            Self.logger.notice("Upserted articles for '\(feed.title, privacy: .public)': \(insertedCount, privacy: .public) new, \(updatedCount, privacy: .public) updated, \(unchangedCount, privacy: .public) unchanged")
+        } else {
+            Self.logger.debug("Upsert no-op for '\(feed.title, privacy: .public)': \(unchangedCount, privacy: .public) unchanged")
+        }
     }
 
     func markArticleRead(_ article: PersistentArticle, isRead: Bool) throws {

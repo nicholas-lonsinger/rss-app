@@ -4,9 +4,10 @@ import Foundation
 
 /// Verifies the `PersistentArticle.init(from: Article)` convenience initializer's
 /// `sortDate` computation. The init must:
-///   1. Preserve `publishedDate` exactly as the publisher provided it (used by a
-///      planned content-update detection feature that compares pubDate values
-///      across refreshes — clamping would destroy that signal).
+///   1. Preserve `publishedDate` exactly as the publisher provided it (the
+///      content-update detection feature in `FeedPersistenceService.upsertArticles`
+///      compares pubDate / updatedDate values across refreshes — clamping would
+///      destroy that signal).
 ///   2. Compute `sortDate` as `min(publishedDate ?? now, now)` so future-dated
 ///      articles sort as fresh (not pinned to the top of newest-first lists by
 ///      an inflated future timestamp).
@@ -114,7 +115,7 @@ struct PersistentArticleConversionTests {
         // Future publishedDate (Cloudflare-style scheduled post) is clamped to fetchedDate
         // for display purposes — same guarantee that clampedSortDate provides at insert
         // time, but recomputed inline so the row view never shows a future date even
-        // when a follow-up to issue #74 starts mutating sortDate on update detection.
+        // though `upsertArticles` mutates `sortDate` on content-update detection (issue #74).
         let future = Date().addingTimeInterval(4 * 60 * 60)
         let article = TestFixtures.makeArticle(publishedDate: future)
         let persistent = PersistentArticle(from: article)
