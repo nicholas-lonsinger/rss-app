@@ -67,6 +67,5 @@ struct CrossFeedArticleRowView: View {
                 .padding(.top, 2)
             }
         }
-        .padding(.vertical, 4)
     }
 }

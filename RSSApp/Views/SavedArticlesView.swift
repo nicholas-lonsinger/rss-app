@@ -36,6 +36,7 @@ struct SavedArticlesView: View {
                     }
                     .buttonStyle(.plain)
                     .disabled(article.link == nil)
+                    .listRowInsets(EdgeInsets(top: 10, leading: 20, bottom: 10, trailing: 20))
                     .swipeActions(edge: .leading) {
                         Button {
                             homeViewModel.toggleReadStatus(article)
