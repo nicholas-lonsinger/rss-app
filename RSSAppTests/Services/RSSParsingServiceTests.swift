@@ -867,13 +867,13 @@ struct RSSParsingServiceTests {
 
     // MARK: - Date Parsing (Per-Format Coverage)
 
-    // The tests below exercise each individual entry in `zonedDateFormats` and
-    // `zonelessDateFormats` that was added in PR #212 but not yet covered by a
-    // dedicated assertion. Every input is crafted so that earlier formats in the
-    // parse chain (including `ISO8601DateFormatter`) fail to match, forcing the
-    // parser to reach the specific entry under test. Deleting the corresponding
-    // entry from the formats list must cause the matching test here to fail.
-    // See GitHub issue #215.
+    // The tests below exercise each individual entry in `HoistedDateFormatters.zoned`
+    // and `HoistedDateFormatters.zoneless` that was added in PR #212 but not yet
+    // covered by a dedicated assertion. Every input is crafted so that earlier
+    // formats in the parse chain (including `ISO8601DateFormatter`) fail to match,
+    // forcing the parser to reach the specific entry under test. Deleting the
+    // corresponding entry from the formats list must cause the matching test here
+    // to fail. See GitHub issue #215.
 
     @Test("Zoned format 'EEE, dd MMM yyyy HH:mm zzz' is reachable (no seconds, named zone)")
     func zonedEEEDDMMMYYYYHHmmNamedZone() throws {
@@ -1183,6 +1183,66 @@ struct RSSParsingServiceTests {
         let date = try #require(feed.articles[0].publishedDate)
         let expected = try Self.utcDate(year: 2026, month: 4, day: 6, hour: 8, minute: 30)
         #expect(date == expected)
+    }
+
+    // MARK: - Date Parsing (Hoisted Formatter Stability)
+
+    // The two tests below pin down the contract that motivated PR #241: hoisting the
+    // per-call `DateFormatter` allocations into static `HoistedDateFormatters` entries
+    // must not introduce any cross-call state leakage. They exercise the contract
+    // behaviorally, without reaching into the private enum.
+
+    @Test("Repeated parses of the same input return identical dates")
+    func repeatedParsesAreStable() throws {
+        // A "first call configures, second call sees stale state" regression in the
+        // hoisted formatters would manifest as the second parse returning a different
+        // (or nil) date. Two back-to-back parses are the cheapest way to catch that.
+        let xml = Self.rssXML(pubDate: "Mon, 06 Apr 2026 08:30:00 PDT")
+        let first = try service.parse(Data(xml.utf8)).articles[0].publishedDate
+        let second = try service.parse(Data(xml.utf8)).articles[0].publishedDate
+
+        #expect(first != nil)
+        #expect(first == second)
+    }
+
+    @Test("parseDate is safe to call concurrently from multiple feeds")
+    func parseDateConcurrentCallsAreThreadSafe() async throws {
+        // PR #241 claims the hoisted formatters are safe to use from concurrent feed
+        // refreshes without locking. This test makes that claim executable: it parses
+        // a mix of formats from many concurrent Tasks and asserts every Task observed
+        // the same dates. A regression that re-introduced mid-parse mutation would
+        // typically surface here as a nil entry, a mismatched vector, or a TSan report.
+        let inputs = [
+            "Mon, 06 Apr 2026 08:30:00 -0700",
+            "Mon, 06 Apr 2026 08:30:00 PDT",
+            "Mon, 06 Apr 2026 08:30 EST",
+            "2026-04-06 08:30:00",
+            "2026-04-06T08:30:00.123Z",
+        ]
+        // RATIONALE: capture as a local `let` so the closure does not capture `self`,
+        // which simplifies Sendable checking under Swift 6 strict concurrency.
+        // `RSSParsingService` is a `Sendable` struct, so this copy is cheap and safe.
+        let service = self.service
+        let results = await withTaskGroup(of: [Date?].self) { group in
+            for _ in 0..<32 {
+                group.addTask {
+                    inputs.map { input in
+                        let xml = Self.rssXML(pubDate: input)
+                        return (try? service.parse(Data(xml.utf8)))?.articles.first?.publishedDate
+                    }
+                }
+            }
+            return await group.reduce(into: [[Date?]]()) { $0.append($1) }
+        }
+
+        let reference = try #require(results.first)
+        #expect(reference.count == inputs.count)
+        for date in reference {
+            #expect(date != nil)
+        }
+        for vector in results {
+            #expect(vector == reference)
+        }
     }
 
     // MARK: - XHTML Content

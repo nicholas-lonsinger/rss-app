@@ -537,14 +537,10 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
         // 2. Explicit-zone DateFormatter patterns (RFC 822 / RFC 2822 and common variants).
         //    Every format here must end in a zone specifier; zone-less formats are handled
         //    in the fallback block below with clearly documented UTC assumption and logging.
-        //    The formatter's `timeZone` is pinned to UTC as defense-in-depth so that any
-        //    format that fails to read a zone from the input (rather than falling through
-        //    to the zoneless block) won't silently inherit the device's local zone.
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone(identifier: "UTC")
-
-        if let date = parseUsingZonedFormats(trimmed, formatter: formatter) {
+        //    Each formatter is pre-built once in `HoistedDateFormatters` with its
+        //    `dateFormat` fixed at initialization — we never mutate shared state here, so
+        //    concurrent calls from multiple feed refreshes are safe without locking.
+        if let date = parseUsingZonedFormats(trimmed) {
             return date
         }
 
@@ -557,7 +553,7 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
         //     token to its numeric offset so the standard numeric-offset formatters can
         //     consume it. See GitHub issue #213.
         if let substituted = substituteNamedZone(in: trimmed),
-           let date = parseUsingZonedFormats(substituted, formatter: formatter) {
+           let date = parseUsingZonedFormats(substituted) {
             return date
         }
 
@@ -569,8 +565,7 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
         //    timestamps would otherwise produce ~one persisted warning per article per
         //    refresh cycle, masking other warnings during post-mortem analysis. See
         //    GitHub issue #214.
-        for format in Self.zonelessDateFormats {
-            formatter.dateFormat = format
+        for (format, formatter) in HoistedDateFormatters.zoneless {
             if let date = formatter.date(from: trimmed) {
                 Self.logger.debug(
                     "Feed date '\(trimmed, privacy: .public)' had no timezone; interpreted as UTC (format '\(format, privacy: .public)')"
@@ -588,10 +583,9 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
     /// Tries every explicit-zone `DateFormatter` pattern against `input`, returning the
     /// first sanity-checked match. Extracted so the named-zone preprocessing pass can
     /// re-run the same loop against a rewritten input without duplicating the formatter
-    /// configuration.
-    private static func parseUsingZonedFormats(_ input: String, formatter: DateFormatter) -> Date? {
-        for format in Self.zonedDateFormats {
-            formatter.dateFormat = format
+    /// lookup.
+    private static func parseUsingZonedFormats(_ input: String) -> Date? {
+        for (format, formatter) in HoistedDateFormatters.zoned {
             if let date = formatter.date(from: input) {
                 return sanityChecked(date, input: input, source: "zoned '\(format)'")
             }
@@ -626,7 +620,7 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
 
     /// Lookup table mapping non-US named timezone abbreviations to their RFC 822 numeric
     /// offsets. The values intentionally use the `±HHMM` form so the substituted output
-    /// is consumed by the standard `Z` specifier in `zonedDateFormats`.
+    /// is consumed by the standard `Z` specifier in `HoistedDateFormatters.zoned`.
     ///
     /// Some abbreviations are genuinely ambiguous; the chosen interpretations below are
     /// the most common worldwide usage and match what mainstream Python/Ruby/Java date
@@ -698,8 +692,8 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
 
         // Universal aliases not always recognized by DateFormatter. Bare "Z" is
         // intentionally omitted: any input ending in `" Z"` is consumed by the
-        // first numeric-zone format (`...HH:mm:ss Z`) in `zonedDateFormats`, since
-        // `DateFormatter`'s `Z` specifier with `en_US_POSIX` accepts the literal
+        // first numeric-zone format (`...HH:mm:ss Z`) in `HoistedDateFormatters.zoned`,
+        // since `DateFormatter`'s `Z` specifier with `en_US_POSIX` accepts the literal
         // `Z`. The substitution pass would never see it.
         "UT": "+0000",      // Universal Time (RFC 822 alias for UTC)
         "UTC": "+0000",     // Coordinated Universal Time (defense-in-depth)
@@ -734,55 +728,87 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
         return date
     }
 
-    /// Date formats that include an explicit timezone specifier. Ordered roughly by
-    /// expected frequency (RFC 822 numeric-offset forms first). The loop tries each format
-    /// in order and stops on the first match, so ordering affects parse cost for
-    /// non-matching inputs but not correctness.
-    private static let zonedDateFormats: [String] = [
-        // RFC 822 / RFC 2822 with numeric offset (most common in RSS)
-        "EEE, dd MMM yyyy HH:mm:ss Z",
-        // RFC 822 with named timezone (e.g., "GMT", "EST", "PDT")
-        "EEE, dd MMM yyyy HH:mm:ss zzz",
-        // Single-digit day variant (appears in real RFC 822 feeds)
-        "EEE, d MMM yyyy HH:mm:ss Z",
-        "EEE, d MMM yyyy HH:mm:ss zzz",
-        // Without weekday (seen in the wild). Only the single-digit-day (`d`) variants
-        // are listed: `DateFormatter`'s `d` specifier with `en_US_POSIX` accepts both
-        // one- and two-digit days, so a separate `dd`-prefixed entry would be dead
-        // code (the `d` variant immediately below would already match every input
-        // the `dd` variant could).
-        "d MMM yyyy HH:mm:ss Z",
-        "d MMM yyyy HH:mm:ss zzz",
-        // Without seconds (RFC 2822/5322 permits this; rare but appears in some wire formats)
-        "EEE, dd MMM yyyy HH:mm Z",
-        "EEE, dd MMM yyyy HH:mm zzz",
-        // ISO 8601 with 'T' separator and numeric zone. These are defense-in-depth safety
-        // nets for ISO 8601-ish inputs that ISO8601DateFormatter rejects (e.g., unusual
-        // fractional-seconds precision or minor whitespace quirks).
-        "yyyy-MM-dd'T'HH:mm:ssZ",
-        "yyyy-MM-dd'T'HH:mm:ss.SSSZ",
-        // ISO 8601 with space separator instead of 'T' (common in SQL-flavored feeds).
-        // RATIONALE: there is no separate `"yyyy-MM-dd HH:mm:ss Z"` entry (with a
-        // space before `Z`) because `DateFormatter`'s `Z` specifier with
-        // `en_US_POSIX` tolerates leading whitespace before the offset token, so the
-        // no-space form below already absorbs `"2026-04-06 08:30:00 -0700"` and a
-        // separate spaced variant would be dead code.
-        "yyyy-MM-dd HH:mm:ssZ",
-        "yyyy-MM-dd HH:mm:ss zzz",
-    ]
+    // RATIONALE: nonisolated(unsafe) is safe because these formatters are initialized
+    // once via static let and never mutated after initialization — only date(from:) is
+    // called. Hoisting avoids allocating a fresh `DateFormatter` and mutating its
+    // `dateFormat` on every `parseDate` call (~one allocation per article per refresh).
+    // Pre-building one formatter per format also eliminates the shared-mutable-state
+    // hazard of a single formatter with an in-loop `dateFormat` assignment, so the
+    // parser is safe to invoke concurrently from multiple feed refreshes. See GitHub
+    // issue #217.
+    private enum HoistedDateFormatters {
+        /// Date formats that include an explicit timezone specifier, each paired with a
+        /// pre-configured `DateFormatter`. Ordered roughly by expected frequency (RFC
+        /// 822 numeric-offset forms first). `parseUsingZonedFormats` tries each entry in
+        /// order and stops on the first match, so ordering affects parse cost for
+        /// non-matching inputs but not correctness.
+        ///
+        /// Every formatter's `timeZone` is pinned to UTC as defense-in-depth so that
+        /// any format that fails to read a zone from the input (rather than falling
+        /// through to the zoneless block) won't silently inherit the device's local
+        /// zone.
+        nonisolated(unsafe) static let zoned: [(format: String, formatter: DateFormatter)] =
+            makeFormatters(for: [
+                // RFC 822 / RFC 2822 with numeric offset (most common in RSS)
+                "EEE, dd MMM yyyy HH:mm:ss Z",
+                // RFC 822 with named timezone (e.g., "GMT", "EST", "PDT")
+                "EEE, dd MMM yyyy HH:mm:ss zzz",
+                // Single-digit day variant (appears in real RFC 822 feeds)
+                "EEE, d MMM yyyy HH:mm:ss Z",
+                "EEE, d MMM yyyy HH:mm:ss zzz",
+                // Without weekday (seen in the wild). Only the single-digit-day (`d`)
+                // variants are listed: `DateFormatter`'s `d` specifier with
+                // `en_US_POSIX` accepts both one- and two-digit days, so a separate
+                // `dd`-prefixed entry would be dead code (the `d` variant immediately
+                // below would already match every input the `dd` variant could).
+                "d MMM yyyy HH:mm:ss Z",
+                "d MMM yyyy HH:mm:ss zzz",
+                // Without seconds (RFC 2822/5322 permits this; rare but appears in some wire formats)
+                "EEE, dd MMM yyyy HH:mm Z",
+                "EEE, dd MMM yyyy HH:mm zzz",
+                // ISO 8601 with 'T' separator and numeric zone. These are
+                // defense-in-depth safety nets for ISO 8601-ish inputs that
+                // ISO8601DateFormatter rejects (e.g., unusual fractional-seconds
+                // precision or minor whitespace quirks).
+                "yyyy-MM-dd'T'HH:mm:ssZ",
+                "yyyy-MM-dd'T'HH:mm:ss.SSSZ",
+                // ISO 8601 with space separator instead of 'T' (common in
+                // SQL-flavored feeds).
+                // RATIONALE: there is no separate `"yyyy-MM-dd HH:mm:ss Z"` entry
+                // (with a space before `Z`) because `DateFormatter`'s `Z` specifier
+                // with `en_US_POSIX` tolerates leading whitespace before the offset
+                // token, so the no-space form below already absorbs
+                // `"2026-04-06 08:30:00 -0700"` and a separate spaced variant would be
+                // dead code.
+                "yyyy-MM-dd HH:mm:ssZ",
+                "yyyy-MM-dd HH:mm:ss zzz",
+            ])
 
-    /// Date formats *without* a timezone specifier. These are attempted last, with the
-    /// formatter's `timeZone` forced to UTC. A warning is logged whenever one of these
-    /// matches because the resulting `Date` is necessarily an educated guess.
-    private static let zonelessDateFormats: [String] = [
-        "EEE, dd MMM yyyy HH:mm:ss",
-        "EEE, dd MMM yyyy HH:mm",
-        "dd MMM yyyy HH:mm:ss",
-        "yyyy-MM-dd'T'HH:mm:ss.SSS",
-        "yyyy-MM-dd'T'HH:mm:ss",
-        "yyyy-MM-dd HH:mm:ss",
-        "yyyy-MM-dd",
-    ]
+        /// Date formats *without* a timezone specifier, each paired with a
+        /// pre-configured `DateFormatter` whose `timeZone` is forced to UTC. These are
+        /// attempted last. A debug log is emitted whenever one of these matches because
+        /// the resulting `Date` is necessarily an educated guess.
+        nonisolated(unsafe) static let zoneless: [(format: String, formatter: DateFormatter)] =
+            makeFormatters(for: [
+                "EEE, dd MMM yyyy HH:mm:ss",
+                "EEE, dd MMM yyyy HH:mm",
+                "dd MMM yyyy HH:mm:ss",
+                "yyyy-MM-dd'T'HH:mm:ss.SSS",
+                "yyyy-MM-dd'T'HH:mm:ss",
+                "yyyy-MM-dd HH:mm:ss",
+                "yyyy-MM-dd",
+            ])
+
+        private static func makeFormatters(for formats: [String]) -> [(format: String, formatter: DateFormatter)] {
+            formats.map { format in
+                let formatter = DateFormatter()
+                formatter.locale = Locale(identifier: "en_US_POSIX")
+                formatter.timeZone = TimeZone(identifier: "UTC")
+                formatter.dateFormat = format
+                return (format, formatter)
+            }
+        }
+    }
 
     // RATIONALE: nonisolated(unsafe) is safe because these formatters are initialized
     // once via static let and never mutated after initialization — only date(from:) is called.
