@@ -7,6 +7,9 @@ final class MockArticleThumbnailService: ArticleThumbnailCaching, @unchecked Sen
 
     var cacheResult: ThumbnailCacheResult = .cached
     var resolveResult: ThumbnailCacheResult = .cached
+    /// When `true`, `cacheThumbnail` and `resolveAndCacheThumbnail` throw `CancellationError`
+    /// instead of returning. Used to exercise cancellation propagation paths.
+    var throwCancellation = false
     var cachedFileURL: URL?
     var cacheCallCount = 0
     var resolveCallCount = 0
@@ -14,15 +17,21 @@ final class MockArticleThumbnailService: ArticleThumbnailCaching, @unchecked Sen
     var cachedArticleIDs: [String] = []
     var deletedArticleIDs: [String] = []
 
-    func cacheThumbnail(from remoteURL: URL, articleID: String) async -> ThumbnailCacheResult {
+    func cacheThumbnail(from remoteURL: URL, articleID: String) async throws -> ThumbnailCacheResult {
         cacheCallCount += 1
         cachedArticleIDs.append(articleID)
+        if throwCancellation {
+            throw CancellationError()
+        }
         return cacheResult
     }
 
-    func resolveAndCacheThumbnail(thumbnailURL: URL?, articleLink: URL?, articleID: String) async -> ThumbnailCacheResult {
+    func resolveAndCacheThumbnail(thumbnailURL: URL?, articleLink: URL?, articleID: String) async throws -> ThumbnailCacheResult {
         resolveCallCount += 1
         cachedArticleIDs.append(articleID)
+        if throwCancellation {
+            throw CancellationError()
+        }
         return resolveResult
     }
 

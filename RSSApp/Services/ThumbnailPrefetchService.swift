@@ -201,11 +201,23 @@ private func downloadWithRetry(
             }
         }
 
-        let result = await thumbnailService.resolveAndCacheThumbnail(
-            thumbnailURL: thumbnailURL,
-            articleLink: articleLink,
-            articleID: articleID
-        )
+        let result: ThumbnailCacheResult
+        do {
+            result = try await thumbnailService.resolveAndCacheThumbnail(
+                thumbnailURL: thumbnailURL,
+                articleLink: articleLink,
+                articleID: articleID
+            )
+        } catch is CancellationError {
+            // Task was cancelled — stop retrying immediately without incrementing retry counters.
+            return ThumbnailDownloadResult(articleID: articleID, outcome: .failed)
+        } catch {
+            // RATIONALE: `resolveAndCacheThumbnail` only throws `CancellationError`; any other
+            // thrown error is an unexpected invariant violation. Log at fault and stop retrying.
+            downloadRetryLogger.fault("Unexpected error from resolveAndCacheThumbnail for article \(articleID, privacy: .public): \(error, privacy: .public)")
+            assertionFailure("Unexpected error from resolveAndCacheThumbnail: \(error)")
+            return ThumbnailDownloadResult(articleID: articleID, outcome: .failed)
+        }
 
         switch result {
         case .cached:

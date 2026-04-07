@@ -58,11 +58,24 @@ struct ArticleThumbnailView: View {
             return
         }
 
-        let result = await thumbnailService.resolveAndCacheThumbnail(
-            thumbnailURL: thumbnailURL,
-            articleLink: articleLink,
-            articleID: articleID
-        )
+        let result: ThumbnailCacheResult
+        do {
+            result = try await thumbnailService.resolveAndCacheThumbnail(
+                thumbnailURL: thumbnailURL,
+                articleLink: articleLink,
+                articleID: articleID
+            )
+        } catch is CancellationError {
+            // View task was cancelled (e.g., row scrolled off-screen) — bail out quietly.
+            return
+        } catch {
+            // RATIONALE: `resolveAndCacheThumbnail` only throws `CancellationError`; any other
+            // thrown error is an unexpected invariant violation. Log at fault and fall back to placeholder.
+            Self.logger.fault("Unexpected error resolving thumbnail for article \(articleID, privacy: .public): \(error, privacy: .public)")
+            assertionFailure("Unexpected error resolving thumbnail: \(error)")
+            thumbnailImage = nil
+            return
+        }
         guard result == .cached, let fileURL = thumbnailService.cachedThumbnailFileURL(for: articleID) else {
             thumbnailImage = nil
             return
