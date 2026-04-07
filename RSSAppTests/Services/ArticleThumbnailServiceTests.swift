@@ -176,6 +176,63 @@ struct ArticleThumbnailServiceTests {
         #expect(thrown is CancellationError, "Expected CancellationError, got \(String(describing: thrown))")
     }
 
+    @Test("resolveOGImage normalizes mid-stream URLError(.cancelled) to CancellationError")
+    func resolveOGImageNormalizesMidStreamURLErrorCancelled() async {
+        // Regression coverage for issue #248: the
+        // `catch let urlError as URLError where urlError.code == .cancelled`
+        // rung in `resolveOGImage(from:)` is load-bearing. The pre-existing
+        // `resolveAndCacheThumbnailPropagatesCancellation` test cancels the
+        // surrounding Task before URLSession starts, so it exercises the
+        // pre-flight `CancellationError` path — not the mid-stream
+        // `URLError(.cancelled)` path that PR #247 added the rung for.
+        //
+        // Driving the URLError(.cancelled) path via `Task.cancel()` is not
+        // viable: cooperative Swift cancellation surfaces from
+        // `URLSession.AsyncBytes.next()` as `CancellationError` directly,
+        // hitting the *other* catch arm. The only way to provoke a real
+        // `URLError(.cancelled)` from inside the byte loop is for URLSession
+        // (or in tests, a stub `URLProtocol`) to fail the request with that
+        // error after the iterator has begun pulling bytes. The mock below
+        // does exactly that: it delivers a 200 OK response, a small initial
+        // chunk, and then surfaces `URLError(.cancelled)` to the client. The
+        // service must catch that error and rethrow `CancellationError`.
+        // Without the rung, the error falls through to the generic
+        // `catch let urlError as URLError` arm and the call returns
+        // `.fetchFailed`, regressing issue #228.
+        let mockSession = MockSlowHTMLURLSessionProvider()
+        mockSession.midStreamError = URLError(.cancelled)
+        let service = ArticleThumbnailService(session: mockSession)
+        let articleLink = URL(string: "https://example.com/cancelled-mid-stream")!
+
+        do {
+            _ = try await service.resolveOGImage(from: articleLink)
+            Issue.record("Expected resolveOGImage to throw CancellationError, but it returned normally")
+        } catch is CancellationError {
+            // Expected: the URLError(.cancelled) rung normalized the error.
+        } catch {
+            Issue.record("Expected CancellationError, got \(String(describing: error))")
+        }
+    }
+
+    @Test("resolveOGImage maps non-cancelled mid-stream URLError to .fetchFailed")
+    func resolveOGImageMapsNonCancelledMidStreamErrorToFetchFailed() async throws {
+        // Positive control for the test above: a non-cancellation URLError
+        // delivered mid-stream (e.g. `.networkConnectionLost`) must NOT be
+        // normalized to `CancellationError`. It should fall through the
+        // cancellation rung and hit the generic `catch let urlError as URLError`
+        // arm, which returns `.fetchFailed` so the prefetcher can retry.
+        // This locks in the rung's predicate (`urlError.code == .cancelled`)
+        // so a future refactor can't accidentally widen it.
+        let mockSession = MockSlowHTMLURLSessionProvider()
+        mockSession.midStreamError = URLError(.networkConnectionLost)
+        let service = ArticleThumbnailService(session: mockSession)
+        let articleLink = URL(string: "https://example.com/connection-lost-mid-stream")!
+
+        let result = try await service.resolveOGImage(from: articleLink)
+
+        #expect(result == .fetchFailed)
+    }
+
     // MARK: - isPermanentHTTPFailure
     //
     // Direct unit tests for the pure HTTP status classification helper used by both
