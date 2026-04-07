@@ -209,6 +209,10 @@ private func downloadWithRetry(
             }
         }
 
+        // RATIONALE: `resolveAndCacheThumbnail` is `throws(CancellationError)`, so the only
+        // catch arm we need handles task cancellation. The compiler enforces that no other
+        // error type can escape, eliminating the need for a `catch { assertionFailure(...) }`
+        // safety net.
         let result: ThumbnailCacheResult
         do {
             result = try await thumbnailService.resolveAndCacheThumbnail(
@@ -219,12 +223,6 @@ private func downloadWithRetry(
         } catch is CancellationError {
             // Task was cancelled — stop retrying immediately without incrementing retry counters.
             return ThumbnailDownloadResult(articleID: articleID, outcome: .cancelled)
-        } catch {
-            // RATIONALE: `resolveAndCacheThumbnail` only throws `CancellationError`; any other
-            // thrown error is an unexpected invariant violation. Log at fault and stop retrying.
-            downloadRetryLogger.fault("Unexpected error from resolveAndCacheThumbnail for article \(articleID, privacy: .public): \(error, privacy: .public)")
-            assertionFailure("Unexpected error from resolveAndCacheThumbnail: \(error)")
-            return ThumbnailDownloadResult(articleID: articleID, outcome: .failed)
         }
 
         switch result {

@@ -17,7 +17,7 @@ final class MockArticleThumbnailService: ArticleThumbnailCaching, @unchecked Sen
     var cachedArticleIDs: [String] = []
     var deletedArticleIDs: [String] = []
 
-    func cacheThumbnail(from remoteURL: URL, articleID: String) async throws -> ThumbnailCacheResult {
+    func cacheThumbnail(from remoteURL: URL, articleID: String) async throws(CancellationError) -> ThumbnailCacheResult {
         cacheCallCount += 1
         cachedArticleIDs.append(articleID)
         if throwCancellation {
@@ -26,7 +26,7 @@ final class MockArticleThumbnailService: ArticleThumbnailCaching, @unchecked Sen
         return cacheResult
     }
 
-    func resolveAndCacheThumbnail(thumbnailURL: URL?, articleLink: URL?, articleID: String) async throws -> ThumbnailCacheResult {
+    func resolveAndCacheThumbnail(thumbnailURL: URL?, articleLink: URL?, articleID: String) async throws(CancellationError) -> ThumbnailCacheResult {
         resolveCallCount += 1
         cachedArticleIDs.append(articleID)
         if throwCancellation {
