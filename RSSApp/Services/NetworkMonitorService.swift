@@ -39,7 +39,11 @@ protocol NetworkPathSnapshot: Sendable {
 /// `NetworkPathSnapshot` contract.
 struct NWPathSnapshot: NetworkPathSnapshot {
 
-    let path: NWPath
+    private let path: NWPath
+
+    init(path: NWPath) {
+        self.path = path
+    }
 
     var status: NWPath.Status { path.status }
 

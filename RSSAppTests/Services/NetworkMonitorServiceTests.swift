@@ -59,6 +59,20 @@ struct NetworkMonitorServiceTests {
         #expect(callCount.value == 2)
     }
 
+    // MARK: - production-mode smoke test
+
+    /// Exercises the default initializer path where no `pathProvider` is
+    /// supplied, so the service constructs a real `NWPathMonitor`, wires up
+    /// `pathUpdateHandler`, and starts monitoring. The assertion is incidental;
+    /// the value of this test is catching future regressions in the production
+    /// init branch (which every other test in this suite bypasses via an
+    /// injected `pathProvider`).
+    @Test("default initializer starts NWPathMonitor without crashing")
+    func defaultInitializerLifecycle() {
+        let service = NetworkMonitorService(wifiOnlyProvider: { false })
+        _ = service.isBackgroundDownloadAllowed()
+    }
+
     // MARK: - nil-path branch
 
     @Test("nil path with wifiOnly=false returns true")
