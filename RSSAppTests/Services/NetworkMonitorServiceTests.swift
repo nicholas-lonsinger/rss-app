@@ -1,18 +1,20 @@
 import Testing
 import Foundation
+import Network
 @testable import RSSApp
 
 /// Tests for the real `NetworkMonitorService` (as opposed to the
 /// `MockNetworkMonitorService` used by view-model tests).
 ///
-/// These tests focus on the injected `wifiOnlyProvider` contract. The actual
-/// network path is supplied by `NWPathMonitor` and is not deterministic in test
-/// environments, so assertions on the boolean result of
-/// `isBackgroundDownloadAllowed()` would be racy — the nil-path window is only
-/// a few milliseconds wide on a Mac with active networking. Verifying the
-/// closure is invoked per-call is sufficient to prove the injection seam works;
-/// the path-dependent branches are intentionally left to future tests that add
-/// a second injection seam for `NWPath`.
+/// The service exposes two injection seams so tests can exercise every branch
+/// of `isBackgroundDownloadAllowed()` deterministically:
+///
+/// - `wifiOnlyProvider` — controls the WiFi-only preference without touching
+///   `UserDefaults.standard`.
+/// - `pathProvider` — supplies a synthetic `NetworkPathSnapshot` (or `nil`) so
+///   tests can drive the path-status, interface-type, and constrained-mode
+///   branches without starting a real `NWPathMonitor`, whose timing is
+///   non-deterministic and whose `NWPath` type cannot be constructed directly.
 ///
 /// The suite is `.serialized` as a precaution even though it no longer mutates
 /// `UserDefaults.standard`, matching the convention used by other service
@@ -20,13 +22,18 @@ import Foundation
 @Suite("NetworkMonitorService Tests", .serialized)
 struct NetworkMonitorServiceTests {
 
+    // MARK: - wifiOnlyProvider contract
+
     @Test("wifiOnlyProvider closure is invoked on each check")
     func wifiOnlyProviderInvokedOnEachCheck() {
         let callCount = LockedCounter()
-        let service = NetworkMonitorService { @Sendable in
-            callCount.increment()
-            return false
-        }
+        let service = NetworkMonitorService(
+            wifiOnlyProvider: { @Sendable in
+                callCount.increment()
+                return false
+            },
+            pathProvider: { nil }
+        )
 
         _ = service.isBackgroundDownloadAllowed()
         _ = service.isBackgroundDownloadAllowed()
@@ -34,9 +41,155 @@ struct NetworkMonitorServiceTests {
 
         #expect(callCount.value == 3)
     }
+
+    @Test("pathProvider closure is invoked on each check")
+    func pathProviderInvokedOnEachCheck() {
+        let callCount = LockedCounter()
+        let service = NetworkMonitorService(
+            wifiOnlyProvider: { false },
+            pathProvider: { @Sendable in
+                callCount.increment()
+                return nil
+            }
+        )
+
+        _ = service.isBackgroundDownloadAllowed()
+        _ = service.isBackgroundDownloadAllowed()
+
+        #expect(callCount.value == 2)
+    }
+
+    // MARK: - nil-path branch
+
+    @Test("nil path with wifiOnly=false returns true")
+    func nilPathWifiOnlyOffAllowsDownload() {
+        let service = NetworkMonitorService(
+            wifiOnlyProvider: { false },
+            pathProvider: { nil }
+        )
+
+        #expect(service.isBackgroundDownloadAllowed() == true)
+    }
+
+    @Test("nil path with wifiOnly=true returns false")
+    func nilPathWifiOnlyOnDisallowsDownload() {
+        let service = NetworkMonitorService(
+            wifiOnlyProvider: { true },
+            pathProvider: { nil }
+        )
+
+        #expect(service.isBackgroundDownloadAllowed() == false)
+    }
+
+    // MARK: - unsatisfied-path branch
+
+    @Test("unsatisfied path returns false regardless of wifiOnly")
+    func unsatisfiedPathDisallowsDownload() {
+        let unsatisfied = StubNetworkPathSnapshot(status: .unsatisfied, usesWiFi: true, isConstrained: false)
+
+        let wifiOnlyOff = NetworkMonitorService(
+            wifiOnlyProvider: { false },
+            pathProvider: { unsatisfied }
+        )
+        let wifiOnlyOn = NetworkMonitorService(
+            wifiOnlyProvider: { true },
+            pathProvider: { unsatisfied }
+        )
+
+        #expect(wifiOnlyOff.isBackgroundDownloadAllowed() == false)
+        #expect(wifiOnlyOn.isBackgroundDownloadAllowed() == false)
+    }
+
+    @Test("requiresConnection path returns false")
+    func requiresConnectionPathDisallowsDownload() {
+        let requiresConnection = StubNetworkPathSnapshot(status: .requiresConnection, usesWiFi: true, isConstrained: false)
+        let service = NetworkMonitorService(
+            wifiOnlyProvider: { false },
+            pathProvider: { requiresConnection }
+        )
+
+        #expect(service.isBackgroundDownloadAllowed() == false)
+    }
+
+    // MARK: - wifiOnly=true satisfied-path branches
+
+    @Test("wifiOnly=true with WiFi and unconstrained path returns true")
+    func wifiOnlySatisfiedWiFiUnconstrainedAllowsDownload() {
+        let snapshot = StubNetworkPathSnapshot(status: .satisfied, usesWiFi: true, isConstrained: false)
+        let service = NetworkMonitorService(
+            wifiOnlyProvider: { true },
+            pathProvider: { snapshot }
+        )
+
+        #expect(service.isBackgroundDownloadAllowed() == true)
+    }
+
+    @Test("wifiOnly=true with non-WiFi path returns false")
+    func wifiOnlySatisfiedNonWiFiDisallowsDownload() {
+        let snapshot = StubNetworkPathSnapshot(status: .satisfied, usesWiFi: false, isConstrained: false)
+        let service = NetworkMonitorService(
+            wifiOnlyProvider: { true },
+            pathProvider: { snapshot }
+        )
+
+        #expect(service.isBackgroundDownloadAllowed() == false)
+    }
+
+    @Test("wifiOnly=true with WiFi but constrained (Low Data Mode) returns false")
+    func wifiOnlySatisfiedWiFiConstrainedDisallowsDownload() {
+        let snapshot = StubNetworkPathSnapshot(status: .satisfied, usesWiFi: true, isConstrained: true)
+        let service = NetworkMonitorService(
+            wifiOnlyProvider: { true },
+            pathProvider: { snapshot }
+        )
+
+        #expect(service.isBackgroundDownloadAllowed() == false)
+    }
+
+    @Test("wifiOnly=true with non-WiFi and constrained path returns false")
+    func wifiOnlySatisfiedNonWiFiConstrainedDisallowsDownload() {
+        let snapshot = StubNetworkPathSnapshot(status: .satisfied, usesWiFi: false, isConstrained: true)
+        let service = NetworkMonitorService(
+            wifiOnlyProvider: { true },
+            pathProvider: { snapshot }
+        )
+
+        #expect(service.isBackgroundDownloadAllowed() == false)
+    }
+
+    // MARK: - wifiOnly=false satisfied-path branch
+
+    @Test("wifiOnly=false with satisfied path always returns true")
+    func wifiOnlyOffSatisfiedAllowsDownloadAcrossInterfaces() {
+        let wifiUnconstrained = StubNetworkPathSnapshot(status: .satisfied, usesWiFi: true, isConstrained: false)
+        let wifiConstrained = StubNetworkPathSnapshot(status: .satisfied, usesWiFi: true, isConstrained: true)
+        let cellularUnconstrained = StubNetworkPathSnapshot(status: .satisfied, usesWiFi: false, isConstrained: false)
+        let cellularConstrained = StubNetworkPathSnapshot(status: .satisfied, usesWiFi: false, isConstrained: true)
+
+        for snapshot in [wifiUnconstrained, wifiConstrained, cellularUnconstrained, cellularConstrained] {
+            let service = NetworkMonitorService(
+                wifiOnlyProvider: { false },
+                pathProvider: { snapshot }
+            )
+            #expect(service.isBackgroundDownloadAllowed() == true)
+        }
+    }
 }
 
 // MARK: - Test helpers
+
+/// Synthetic `NetworkPathSnapshot` used to drive the path-status, interface,
+/// and constrained-mode branches of `NetworkMonitorService` without relying on
+/// a real `NWPath`.
+private struct StubNetworkPathSnapshot: NetworkPathSnapshot {
+    let status: NWPath.Status
+    let usesWiFi: Bool
+    let isConstrained: Bool
+
+    func usesInterfaceType(_ type: NWInterface.InterfaceType) -> Bool {
+        type == .wifi ? usesWiFi : false
+    }
+}
 
 /// Thread-safe counter used to verify a `@Sendable` closure was invoked the
 /// expected number of times across the closure's isolation domain.
