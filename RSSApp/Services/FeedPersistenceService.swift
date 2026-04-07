@@ -296,11 +296,21 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
         return articles
     }
 
-    // RATIONALE: Insert-only by design — existing articles are never updated because preserving
-    // user-generated state (read status, saved status, cached content) is more important than
-    // reflecting minor metadata edits (title rewording) from the feed source.
+    // RATIONALE: Existing rows are mutated only when the feed XML carries a strictly newer
+    // Atom <updated> timestamp than what we already stored (issue #74). All other metadata
+    // edits from the publisher (title rewording, category tweaks, snippet rewordings without
+    // a corresponding <updated> bump) are still ignored to preserve user-generated state
+    // (read status, saved status, manually-cached content). On a real update, the cached
+    // PersistentArticleContent is dropped (cascade-deletes) so the next visit re-extracts;
+    // sortDate is bumped to "now" so the article re-surfaces at the top of newest-first
+    // lists; isRead is reset so it shows up unread again. The detection compares against
+    // (existing.updatedDate ?? existing.publishedDate) so articles persisted before the
+    // updatedDate column existed still participate in detection via their publishedDate.
     func upsertArticles(_ articles: [Article], for feed: PersistentFeed) throws {
-        // Query only the articleIDs we need to check, avoiding loading full article objects
+        // Fetch existing rows by ID. We need the full objects (not just the IDs) so we
+        // can compare timestamps and mutate in place when an update bump is detected —
+        // the existing query already loaded these, so building a dictionary off the
+        // result adds no extra DB cost.
         let feedID = feed.persistentModelID
         let incomingIDs = articles.map(\.id)
         let descriptor = FetchDescriptor<PersistentArticle>(
@@ -310,18 +320,50 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
             }
         )
         let existingArticles = try modelContext.fetch(descriptor)
-        let existingIDs = Set(existingArticles.map(\.articleID))
+        let existingByID = Dictionary(uniqueKeysWithValues: existingArticles.map { ($0.articleID, $0) })
+
         var insertedCount = 0
+        var updatedCount = 0
+        let now = Date()
 
         for article in articles {
-            guard !existingIDs.contains(article.id) else { continue }
-            let persistent = PersistentArticle(from: article)
-            persistent.feed = feed
-            modelContext.insert(persistent)
-            insertedCount += 1
+            if let existing = existingByID[article.id] {
+                // Update detection: only act when the incoming feed actually carries an
+                // updatedDate AND it's strictly newer than our baseline. If the incoming
+                // article has no updatedDate, OR the incoming value isn't newer, skip —
+                // preserving the historical insert-only semantics for feeds that don't
+                // expose <updated> at all.
+                guard let incomingUpdated = article.updatedDate else { continue }
+                let baseline = existing.updatedDate ?? existing.publishedDate
+                let isNewer = baseline.map { incomingUpdated > $0 } ?? true
+                guard isNewer else { continue }
+
+                // Mutate in place. The sortDate bump is the single justified mutation
+                // permitted by the stability rule on `PersistentArticle.sortDate` —
+                // re-read that comment for the rationale.
+                existing.updatedDate = incomingUpdated
+                existing.wasUpdated = true
+                existing.isRead = false
+                existing.readDate = nil
+                existing.articleDescription = article.articleDescription
+                existing.snippet = article.snippet
+                existing.sortDate = PersistentArticle.clampedSortDate(publishedDate: now, now: now)
+                // Drop the cached extracted content so ArticleSummaryViewModel.loadContent()
+                // re-extracts on next visit. The relationship's cascade delete rule removes
+                // the PersistentArticleContent row automatically.
+                existing.content = nil
+
+                updatedCount += 1
+            } else {
+                let persistent = PersistentArticle(from: article)
+                persistent.feed = feed
+                modelContext.insert(persistent)
+                insertedCount += 1
+            }
         }
 
-        Self.logger.debug("Upserted articles for '\(feed.title, privacy: .public)': \(insertedCount, privacy: .public) new, \(articles.count - insertedCount, privacy: .public) existing")
+        let unchangedCount = articles.count - insertedCount - updatedCount
+        Self.logger.notice("Upserted articles for '\(feed.title, privacy: .public)': \(insertedCount, privacy: .public) new, \(updatedCount, privacy: .public) updated, \(unchangedCount, privacy: .public) unchanged")
     }
 
     func markArticleRead(_ article: PersistentArticle, isRead: Bool) throws {

@@ -72,10 +72,9 @@ struct PersistentArticleConversionTests {
         let persistent = PersistentArticle(from: article)
         #expect(persistent.publishedDate == published)
         #expect(persistent.updatedDate == updated)
-        // Fresh inserts must default wasUpdated to false. PR 1 only pins the false-side
-        // of the contract; the true-side (set by the upsert path on update detection)
-        // is owned by a follow-up to issue #74.
-        // TODO(issue #74): pin the upsert-detection true-side once that landing.
+        // Fresh inserts must default wasUpdated to false. The true-side of the contract
+        // (set by `FeedPersistenceService.upsertArticles` when an update bump is detected)
+        // is pinned by the upsert tests in `FeedPersistenceServiceTests` — see issue #74.
         #expect(persistent.wasUpdated == false)
 
         let roundTripped = persistent.toArticle()

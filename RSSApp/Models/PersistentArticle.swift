@@ -23,11 +23,12 @@ final class PersistentArticle {
     /// SwiftData's implicit schema migration initializes the new optional column to
     /// `nil` for existing rows on the first launch after the schema bump.
     var updatedDate: Date?
-    /// Reserved flag for the upsert path to mark when a publisher revision is detected
-    /// against an existing row (issue #74). **Currently always `false`**: no production
-    /// code in this PR reads or writes this field beyond the default initializer. A
-    /// follow-up to issue #74 is expected to wire `FeedPersistenceService.upsertArticles`
-    /// to set it on detection and clear it on the read transition.
+    /// Set to `true` by `FeedPersistenceService.upsertArticles` when a re-fetch detects
+    /// a strictly newer Atom `<updated>` (or namespaced equivalent) on an existing row,
+    /// alongside the cache invalidation, `isRead` reset, and `sortDate` bump that mark
+    /// the article as resurfaced (issue #74). A follow-up PR will clear it when the user
+    /// opens the article (the read transition), so list rows can distinguish "newly
+    /// resurfaced because content changed" from "brand new unread."
     ///
     /// Existing rows persisted before this field was added deserialize as `false` via
     /// SwiftData's implicit schema migration, matching the default for fresh inserts.
@@ -78,18 +79,25 @@ final class PersistentArticle {
     // the top of newest-first lists and let them shield genuinely-old articles from
     // retention. `sortDate` is computed at insert via `clampedSortDate(publishedDate:)`,
     // clamping any future date to ingestion time, while `publishedDate` is preserved
-    // verbatim for a planned content-update detection feature that compares pubDate
-    // values across refreshes.
+    // verbatim for the content-update detection feature that compares dates across
+    // refreshes (issue #74).
     //
-    // **Stability invariant: do not mutate `sortDate` after insert.** The "computed
-    // once" property is enforced *behaviorally* by `FeedPersistenceService.upsertArticles`,
-    // which skips existing rows on re-fetch — so `sortDate` is set exactly once per row
-    // in production. Any future code path that touches `sortDate` on an already-persisted
-    // article (most likely candidate: the planned content-update detection feature, when
-    // it starts mutating articles in place rather than skipping them) must justify the
-    // drift, because reshuffling articles after the user has seen them is a UX regression
-    // and breaks the "fresh from when we ingested it" guarantee. SwiftData requires
-    // `var` here, so this invariant cannot be enforced at the type level.
+    // **Stability rule: `sortDate` is set once per row at insert and only ever changes
+    // when `FeedPersistenceService.upsertArticles` detects a strictly newer Atom
+    // `<updated>` (or namespaced equivalent) on a re-fetch.** That is the single
+    // justified mutation: a genuine publisher revision is meaningfully different from
+    // a stale-but-untouched article, and the user has explicitly opted into surfacing
+    // updated articles at the top of newest-first lists (issue #74) so they can find
+    // the new content. The bump uses `clampedSortDate(publishedDate: now, now: now)`
+    // — i.e., set to the current wall clock — and is paired with `wasUpdated = true`,
+    // `isRead = false`, and a cache invalidation in the same transaction so the row
+    // resurfaces as unread with fresh content. Any *other* code path that touches
+    // `sortDate` on an already-persisted article (e.g., a tempting "fix" that resorts
+    // by recomputing from a mutated `publishedDate`) must justify the drift in writing,
+    // because reshuffling articles for non-update reasons is a UX regression and breaks
+    // the "fresh from when we ingested it" guarantee. SwiftData requires `var` here,
+    // so this rule cannot be enforced at the type level — `upsertArticles` is the only
+    // production writer.
     var sortDate: Date
 
     // MARK: - Relationships
