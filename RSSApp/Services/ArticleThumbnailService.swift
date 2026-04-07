@@ -53,6 +53,15 @@ struct ArticleThumbnailService: ArticleThumbnailCaching {
     private static let thumbnailDimension: CGFloat = 120 // 2× retina for 60pt display
     private static let jpegQuality: CGFloat = 0.8
 
+    /// Session used to fetch article HTML for og:image resolution. Injectable so tests
+    /// can drive the HTTP classification paths in `resolveOGImage` with a URLProtocol mock
+    /// without hitting the network. Production defaults to `URLSession.shared`.
+    private let session: any URLSessionBytesProviding
+
+    init(session: any URLSessionBytesProviding = URLSession.shared) {
+        self.session = session
+    }
+
     // MARK: - ArticleThumbnailCaching
 
     func cacheThumbnail(from remoteURL: URL, articleID: String) async throws -> ThumbnailCacheResult {
@@ -199,7 +208,9 @@ struct ArticleThumbnailService: ArticleThumbnailCaching {
     // MARK: - OG Image Resolution
 
     /// Distinguishes successful og:image extraction from "no tag present" vs "fetch failed."
-    private enum OGImageResult {
+    // RATIONALE: Internal (not private) so `@testable` unit tests can drive
+    // `resolveOGImage` directly and assert the HTTP classification outcomes.
+    enum OGImageResult: Equatable {
         /// An og:image URL was found in the page's `<head>`.
         case found(URL)
         /// The page loaded successfully but contained no og:image meta tag, or the
@@ -219,13 +230,15 @@ struct ArticleThumbnailService: ArticleThumbnailCaching {
     ///
     /// Throws `CancellationError` if the task is cancelled during the fetch. Non-cancellation
     /// errors (network, HTTP, decode) are surfaced via `OGImageResult`.
-    private func resolveOGImage(from articleLink: URL) async throws -> OGImageResult {
+    // RATIONALE: Internal (not private) so `@testable` unit tests can exercise the
+    // HTTP status classification paths with an injected URLProtocol-backed session.
+    func resolveOGImage(from articleLink: URL) async throws -> OGImageResult {
         Self.logger.debug("Resolving og:image from \(articleLink.absoluteString, privacy: .public)")
 
         do {
             var request = URLRequest(url: articleLink, timeoutInterval: Self.htmlFetchTimeout)
             request.setBrowserUserAgent()
-            let (bytes, response) = try await URLSession.shared.bytes(for: request)
+            let (bytes, response) = try await session.bytes(for: request)
 
             guard let httpResponse = response as? HTTPURLResponse,
                   (200...299).contains(httpResponse.statusCode) else {
@@ -278,7 +291,9 @@ struct ArticleThumbnailService: ArticleThumbnailCaching {
     /// permanent, but 429 (rate limited) and 408 (request timeout) are transient
     /// despite being 4xx. Everything else (5xx, code == -1 for non-HTTPURLResponse,
     /// unknown) is treated as transient.
-    private static func isPermanentHTTPFailure(code: Int) -> Bool {
+    // RATIONALE: Internal (not private) so `@testable` unit tests can assert the
+    // boundary values directly without needing to drive a URLSession mock.
+    static func isPermanentHTTPFailure(code: Int) -> Bool {
         (400...499).contains(code) && code != 429 && code != 408
     }
 

@@ -36,7 +36,7 @@ RSSApp/
 │   ├── ContentExtractor.swift          # ContentExtracting protocol + extraction pipeline orchestrator
 │   ├── DOMSerializerConstants.swift    # Shared JS bridge constants (message handler name, serializer call)
 │   ├── FeedFetchingService.swift       # FeedFetching protocol + URLSession implementation
-│   ├── ArticleThumbnailService.swift   # ThumbnailCacheResult enum + ArticleThumbnailCaching protocol + thumbnail download with transient/permanent error classification, URL scheme validation, resize-to-120px, JPEG disk caching
+│   ├── ArticleThumbnailService.swift   # ThumbnailCacheResult enum + ArticleThumbnailCaching protocol + thumbnail download with transient/permanent error classification, URL scheme validation, resize-to-120px, JPEG disk caching; og:image HTML fetch uses an injectable URLSessionBytesProviding session (defaults to URLSession.shared) so HTTP classification can be unit tested
 │   ├── FeedIconService.swift           # FeedIconResolving protocol + icon URL resolution (feed XML → site HTML → /favicon.ico), size-limited HTML fetch, file-system caching, and loadValidatedIcon (decode + visible-content gate + delete-on-corrupt for UI consumers)
 │   ├── URLRequest+UserAgent.swift      # URLRequest extension with shared mobile Safari User-Agent header for CDN compatibility
 │   ├── FeedPersistenceService.swift    # FeedPersisting protocol + SwiftData implementation (feeds, articles, content cache, read/unread, saved/unsaved, bulk mark all read, sort order, article count + bulk delete for retention cleanup with saved-article exemption)
@@ -111,6 +111,7 @@ RSSAppTests/
 │   ├── MockFeedStorageService.swift        # FeedStoring mock with in-memory store (for migration tests)
 │   ├── MockKeychainService.swift           # KeychainServicing mock with in-memory store
 │   ├── MockOPMLService.swift               # OPMLServing mock with injectable entries/data/errors
+│   ├── MockHTMLURLSessionProvider.swift    # URLSessionBytesProviding mock with URLProtocol-backed controlled HTML body and HTTP status code (used by ArticleThumbnailService og:image classification tests)
 │   ├── MockThumbnailPrefetchService.swift  # ThumbnailPrefetching mock with call count tracking
 │   └── MockURLSessionBytesProvider.swift   # URLSessionBytesProviding mock with URLProtocol-backed controlled SSE lines
 ├── Models/
@@ -121,7 +122,7 @@ RSSAppTests/
 │   └── SubscribedFeedTests.swift       # updatingMetadata preserves identity, does not mutate
 ├── Services/
 │   ├── ArticleRetentionServiceTests.swift # ArticleLimit enum validation, retention enforcement, thumbnail cleanup, cross-feed global cleanup, error propagation
-│   ├── ArticleThumbnailServiceTests.swift # Thumbnail cache miss, delete safety, filename hashing
+│   ├── ArticleThumbnailServiceTests.swift # Thumbnail cache miss, delete safety, filename hashing, scheme/SVG rejection, cancellation propagation, isPermanentHTTPFailure boundary classification, resolveOGImage HTTP classification (404/403/410/400 → notFound; 408/429/5xx → fetchFailed; 200 + og:image → found)
 │   ├── CandidateScorerTests.swift      # Content node identification, scoring, pruning
 │   ├── ClaudeAPIServiceSendMessageTests.swift # sendMessage integration — consecutive decode failure counter, stream completion, SSE routing
 │   ├── ClaudeAPIServiceTests.swift     # Request encoding, SSE parsing, error handling
@@ -267,7 +268,7 @@ RSSAppApp (@main)
 
 **60 test files: 41 test suites, 15 mock implementations, 4 shared helpers, 1 HTML fixture.**
 
-**Patterns:** Swift Testing (`@Suite`, `@Test`, `#expect`). Protocol-based dependency injection with 15 mocks (`MockFeedPersistenceService`, `MockFeedFetchingService`, `MockFeedIconService`, `MockArticleThumbnailService`, `MockThumbnailPrefetchService`, `MockOPMLService`, `MockClaudeAPIService`, `MockKeychainService`, `MockArticleExtractionService`, `MockContentExtractor`, `MockFeedStorageService`, `MockURLSessionBytesProvider`, `MockArticleRetentionService`, `MockAppBadgeService`, `MockNetworkMonitorService`). In-memory `ModelContainer` via `SwiftDataTestHelpers` for SwiftData integration tests. `WKWebView` integration tests via `WebViewTestHelpers` for DOM serialization and extraction pipeline. `MockURLSessionBytesProvider` with `URLProtocol` interception for `ClaudeAPIService.sendMessage` integration tests. Shared `TestFixtures` factory methods for `Article`, `RSSFeed`, `PersistentFeed`, `PersistentArticle`, and sample RSS XML.
+**Patterns:** Swift Testing (`@Suite`, `@Test`, `#expect`). Protocol-based dependency injection with 16 mocks (`MockFeedPersistenceService`, `MockFeedFetchingService`, `MockFeedIconService`, `MockArticleThumbnailService`, `MockThumbnailPrefetchService`, `MockOPMLService`, `MockClaudeAPIService`, `MockKeychainService`, `MockArticleExtractionService`, `MockContentExtractor`, `MockFeedStorageService`, `MockURLSessionBytesProvider`, `MockHTMLURLSessionProvider`, `MockArticleRetentionService`, `MockAppBadgeService`, `MockNetworkMonitorService`). In-memory `ModelContainer` via `SwiftDataTestHelpers` for SwiftData integration tests. `WKWebView` integration tests via `WebViewTestHelpers` for DOM serialization and extraction pipeline. `MockURLSessionBytesProvider` with `URLProtocol` interception for `ClaudeAPIService.sendMessage` integration tests; `MockHTMLURLSessionProvider` with `URLProtocol` interception for `ArticleThumbnailService.resolveOGImage` HTTP-classification tests. Shared `TestFixtures` factory methods for `Article`, `RSSFeed`, `PersistentFeed`, `PersistentArticle`, and sample RSS XML.
 
 **Well-covered:** All models, services, and view models have test suites with mock injection — including happy paths, error paths, edge cases, and state transitions.
 
