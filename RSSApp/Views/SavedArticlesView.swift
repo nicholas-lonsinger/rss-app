@@ -84,7 +84,7 @@ struct SavedArticlesView: View {
                 homeViewModel.markAllAsRead()
             }
         }
-        .fullScreenCover(item: $selectedArticleIndex.identifiableIndex) { _ in
+        .navigationDestination(isPresented: $selectedArticleIndex.isNotNil) {
             ArticleReaderView(
                 persistence: persistence,
                 articles: homeViewModel.savedArticlesList,
