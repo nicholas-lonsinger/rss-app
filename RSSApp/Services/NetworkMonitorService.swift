@@ -17,6 +17,43 @@ protocol NetworkMonitoring: Sendable {
     func isBackgroundDownloadAllowed() -> Bool
 }
 
+// MARK: - Path snapshot abstraction
+
+/// Minimal view of an `NWPath` snapshot, exposing only the fields
+/// `NetworkMonitorService` reads. Abstracting these three properties into a
+/// protocol lets tests supply a synthetic snapshot because `NWPath` itself
+/// cannot be constructed directly.
+protocol NetworkPathSnapshot: Sendable {
+
+    /// Whether the path is currently satisfied, unsatisfied, or awaiting a connection.
+    var status: NWPath.Status { get }
+
+    /// Whether the path runs over the given interface type (e.g. `.wifi`).
+    func usesInterfaceType(_ type: NWInterface.InterfaceType) -> Bool
+
+    /// Whether the path is constrained (Low Data Mode).
+    var isConstrained: Bool { get }
+}
+
+/// Production adapter that wraps a real `NWPath` and satisfies the
+/// `NetworkPathSnapshot` contract.
+struct NWPathSnapshot: NetworkPathSnapshot {
+
+    private let path: NWPath
+
+    init(path: NWPath) {
+        self.path = path
+    }
+
+    var status: NWPath.Status { path.status }
+
+    func usesInterfaceType(_ type: NWInterface.InterfaceType) -> Bool {
+        path.usesInterfaceType(type)
+    }
+
+    var isConstrained: Bool { path.isConstrained }
+}
+
 // MARK: - Implementation
 
 /// Monitors the device's network path via `NWPathMonitor` and exposes a simple
@@ -32,7 +69,7 @@ final class NetworkMonitorService: NetworkMonitoring, @unchecked Sendable {
 
     private static let logger = Logger(category: "NetworkMonitorService")
 
-    private let monitor: NWPathMonitor
+    private let monitor: NWPathMonitor?
     private let queue: DispatchQueue
 
     /// The latest network path snapshot. Guarded by `lock` for thread safety.
@@ -43,36 +80,74 @@ final class NetworkMonitorService: NetworkMonitoring, @unchecked Sendable {
     /// control the preference value without touching `UserDefaults.standard`.
     private let wifiOnlyProvider: @Sendable () -> Bool
 
+    /// Optional test-only override that returns a synthetic network path snapshot.
+    /// When set, `isBackgroundDownloadAllowed()` uses this closure instead of
+    /// reading from the real `NWPathMonitor`. Abstracting `NWPath`'s fields
+    /// behind `NetworkPathSnapshot` lets tests drive the path-status,
+    /// interface-type, and constrained-mode branches without relying on
+    /// `NWPathMonitor`, whose delivery timing is non-deterministic and whose
+    /// `NWPath` type cannot be constructed directly.
+    private let pathProviderOverride: (@Sendable () -> NetworkPathSnapshot?)?
+
     /// Creates a network monitor that reads the WiFi-only preference from the supplied
     /// provider closure. Defaults to `BackgroundImageDownloadSettings.wifiOnly` for
     /// production use; tests can inject a fixed-value closure to exercise the
     /// preference branches independently of `UserDefaults`.
-    init(wifiOnlyProvider: @escaping @Sendable () -> Bool = { BackgroundImageDownloadSettings.wifiOnly }) {
-        self.monitor = NWPathMonitor()
+    ///
+    /// In production, `pathProvider` is left unset and the service starts an
+    /// internal `NWPathMonitor` that tracks the device's real network path.
+    /// Tests supply their own `pathProvider` closure to bypass `NWPathMonitor`
+    /// entirely and deliver deterministic `NetworkPathSnapshot` values.
+    init(
+        wifiOnlyProvider: @escaping @Sendable () -> Bool = { BackgroundImageDownloadSettings.wifiOnly },
+        pathProvider: (@Sendable () -> NetworkPathSnapshot?)? = nil
+    ) {
         self.queue = DispatchQueue(label: "com.nicholas-lonsinger.rss-app.network-monitor", qos: .utility)
         self.wifiOnlyProvider = wifiOnlyProvider
+        self.pathProviderOverride = pathProvider
 
-        monitor.pathUpdateHandler = { [weak self] path in
-            guard let self else { return }
-            self.lock.lock()
-            self.currentPath = path
-            self.lock.unlock()
-            Self.logger.debug("Network path updated: status=\(path.status.statusLabel, privacy: .public) usesWiFi=\(path.usesInterfaceType(.wifi), privacy: .public) isConstrained=\(path.isConstrained, privacy: .public)")
+        if pathProvider != nil {
+            // Test mode: caller supplies the path snapshot directly. No
+            // NWPathMonitor is started, so nothing mutates `currentPath`.
+            self.monitor = nil
+            Self.logger.debug("NetworkMonitorService started with injected pathProvider")
+        } else {
+            // Production mode: start NWPathMonitor and expose snapshots via
+            // the locked `currentPath` inside `isBackgroundDownloadAllowed()`.
+            let monitor = NWPathMonitor()
+            self.monitor = monitor
+
+            monitor.pathUpdateHandler = { [weak self] path in
+                guard let self else { return }
+                self.lock.lock()
+                self.currentPath = path
+                self.lock.unlock()
+                Self.logger.debug("Network path updated: status=\(path.status.statusLabel, privacy: .public) usesWiFi=\(path.usesInterfaceType(.wifi), privacy: .public) isConstrained=\(path.isConstrained, privacy: .public)")
+            }
+            monitor.start(queue: queue)
+            Self.logger.debug("NetworkMonitorService started")
         }
-        monitor.start(queue: queue)
-        Self.logger.debug("NetworkMonitorService started")
     }
 
     deinit {
-        monitor.cancel()
+        monitor?.cancel()
+    }
+
+    /// Returns the current `NetworkPathSnapshot` from either the injected
+    /// override (test mode) or the monitored `NWPath` (production mode).
+    private func currentSnapshot() -> NetworkPathSnapshot? {
+        if let pathProviderOverride {
+            return pathProviderOverride()
+        }
+        lock.lock()
+        let path = currentPath
+        lock.unlock()
+        return path.map(NWPathSnapshot.init(path:))
     }
 
     func isBackgroundDownloadAllowed() -> Bool {
         let wifiOnly = wifiOnlyProvider()
-
-        lock.lock()
-        let path = currentPath
-        lock.unlock()
+        let path = currentSnapshot()
 
         // RATIONALE: When WiFi-only is off and no path is available yet, returning true
         // is safe because downstream URLSession calls will fail gracefully if the network

@@ -47,7 +47,7 @@ RSSApp/
 │   ├── KeychainService.swift           # Keychain wrapper for secure API key storage
 │   ├── MetadataExtractor.swift         # Extracts article title/byline from meta tags and DOM elements
 │   ├── ModelConfigurationValidator.swift # ModelValidation + MaxTokensValidation enums — input validation for model ID and max tokens
-│   ├── NetworkMonitorService.swift      # NetworkMonitoring protocol + NWPathMonitor implementation — detects WiFi vs cellular/constrained for background download gating; accepts an injectable `wifiOnlyProvider` closure (defaults to `BackgroundImageDownloadSettings.wifiOnly`) so tests can control the preference independently of `UserDefaults`
+│   ├── NetworkMonitorService.swift      # NetworkMonitoring protocol + NWPathMonitor implementation — detects WiFi vs cellular/constrained for background download gating; accepts injectable `wifiOnlyProvider` and `pathProvider` closures so tests can control the preference and supply synthetic `NetworkPathSnapshot` values without touching `UserDefaults` or starting a real `NWPathMonitor`. Also defines the `NetworkPathSnapshot` protocol (minimal view of `NWPath.status`, `usesInterfaceType(_:)`, `isConstrained`) and the `NWPathSnapshot` production adapter that wraps a live `NWPath`
 │   ├── OPMLService.swift               # OPMLServing protocol + XMLParser-based OPML parser + XML generator
 │   ├── RSSParsingService.swift         # XMLParser-based RSS 2.0 + Atom parser with XHTML content reconstruction
 │   ├── SiteSpecificExtracting.swift    # Protocol for per-hostname content extractors
@@ -141,7 +141,7 @@ RSSAppTests/
 │   ├── MetadataExtractorTests.swift    # Title/byline extraction from meta tags and DOM
 │   ├── ModelConfigurationValidationTests.swift # ModelValidation and MaxTokensValidation input validation
 │   ├── MockNetworkMonitorServiceTests.swift # Mock conformance and default behavior
-│   ├── NetworkMonitorServiceTests.swift # Real NetworkMonitorService: verifies the injected wifiOnlyProvider closure is invoked on each `isBackgroundDownloadAllowed()` call
+│   ├── NetworkMonitorServiceTests.swift # Real NetworkMonitorService: verifies `wifiOnlyProvider` and `pathProvider` closures are invoked on each check, and exercises every branch of `isBackgroundDownloadAllowed()` (nil path, unsatisfied/requiresConnection, wifiOnly with WiFi/non-WiFi and constrained/unconstrained combinations, wifiOnly-off satisfied path) via synthetic `NetworkPathSnapshot` stubs
 │   ├── RSSParsingServiceTests.swift    # Channel parsing, thumbnails, IDs, edge cases
 │   └── ThumbnailPrefetchServiceTests.swift # Bulk prefetch, skip cached/maxed, retry count, permanent failure skip, mixed results, error handling
 ├── ViewModels/
