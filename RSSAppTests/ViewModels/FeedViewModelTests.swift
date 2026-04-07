@@ -958,6 +958,53 @@ struct FeedViewModelTests {
         #expect(viewModel.errorMessage == nil)
     }
 
+    @Test("loadMoreAndReport appends new article that can subsequently be marked as read (pagination read-tracking)")
+    @MainActor
+    func loadMoreAndReportFeedsReaderMarkAsRead() async {
+        // Regression for the pagination boundary read-tracking bug: when the reader calls
+        // loadMore at the end of the current page, the newly-appended article must be present
+        // in the view model's articles array so the reader's `.onChange(of: article.articleID)`
+        // → markCurrentArticleAsRead() flow can find and mark it. This test exercises the
+        // view-model side of that contract without routing through SwiftUI.
+        let feed = TestFixtures.makePersistentFeed(feedURL: URL(string: "https://example.com/feed")!)
+        let mock = MockFeedFetchingService()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+
+        // Create pageSize + 1 articles so the second page contains exactly one new article.
+        let totalCount = FeedViewModel.pageSize + 1
+        let articles = (0..<totalCount).map { i in
+            TestFixtures.makeArticle(
+                id: "a\(i)",
+                title: "Article \(i)",
+                publishedDate: Date(timeIntervalSince1970: Double(totalCount - i) * 1_000_000)
+            )
+        }
+        mock.feedToReturn = TestFixtures.makeFeed(articles: articles)
+
+        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence)
+        await viewModel.loadFeed()
+
+        #expect(viewModel.articles.count == FeedViewModel.pageSize)
+        #expect(viewModel.hasMoreArticles == true)
+
+        // Simulate the reader being positioned on the last loaded article and then advancing
+        // past it. The reader increments its currentIndex from pageSize - 1 to pageSize after
+        // loadMore returns .loaded.
+        let indexBeforePagination = viewModel.articles.count - 1
+        let result = viewModel.loadMoreAndReport()
+        #expect(result == .loaded)
+
+        let newIndex = indexBeforePagination + 1
+        #expect(viewModel.articles.indices.contains(newIndex))
+        let newlyVisibleArticle = viewModel.articles[newIndex]
+        #expect(newlyVisibleArticle.isRead == false)
+
+        // Simulate ArticleReaderView.markCurrentArticleAsRead() calling through to persistence.
+        try? mockPersistence.markArticleRead(newlyVisibleArticle, isRead: true)
+        #expect(newlyVisibleArticle.isRead == true)
+    }
+
     @Test("loadMoreArticles succeeds on retry after transient error")
     @MainActor
     func loadMoreArticlesRetryAfterError() async {
