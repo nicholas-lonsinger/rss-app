@@ -259,10 +259,16 @@ struct ArticleThumbnailService: ArticleThumbnailCaching {
                 if collected.count >= Self.htmlHeadMaxBytes { break }
             }
 
-            guard let html = String(data: collected, encoding: .utf8) else {
-                Self.logger.warning("Article page response is not valid UTF-8 from \(articleLink.absoluteString, privacy: .public)")
-                return .fetchFailed
-            }
+            // RATIONALE: Decode tolerantly with `String(decoding:as:)` rather than the
+            // failable `String(data:encoding:.utf8)`. The 50 KB head slice frequently
+            // cuts through a multi-byte UTF-8 character at the boundary, which makes
+            // strict decoding fail on otherwise-valid pages. Substituting replacement
+            // characters for invalid bytes lets the og:image extractor still find the
+            // tag (which is virtually always pure ASCII). If the page is genuinely
+            // non-UTF-8, the regex will simply fail to match and we fall through to
+            // `.notFound` — a permanent classification — so the prefetcher does not
+            // burn retry budget on a request that can never succeed.
+            let html = String(decoding: collected, as: UTF8.self)
 
             if let ogURL = HTMLUtilities.extractOGImageURL(from: html, baseURL: articleLink) {
                 return .found(ogURL)

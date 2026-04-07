@@ -433,6 +433,107 @@ struct ArticleThumbnailServiceTests {
         #expect(result == .found(URL(string: "https://example.com/images/hero.jpg")!))
     }
 
+    // MARK: - resolveOGImage UTF-8 Decoding
+    //
+    // Regression coverage for issue #230: invalid UTF-8 byte sequences (most
+    // commonly caused by the 50 KB head slice cutting through a multi-byte
+    // character at the boundary) must NOT be classified as `.fetchFailed`,
+    // since retrying the same fetch will hit the same problem. The service
+    // now decodes tolerantly via `String(decoding:as:)`, which substitutes
+    // replacement characters for invalid bytes — letting the og:image
+    // extractor still find the (virtually always ASCII) meta tag — and
+    // returns `.notFound` (permanent) when no tag is present so the
+    // prefetcher stops re-fetching.
+
+    @Test("resolveOGImage extracts og:image from page with invalid UTF-8 in unrelated bytes")
+    func resolveOGImageHandlesInvalidUTF8WithValidOGImage() async throws {
+        // Build a payload that contains a valid og:image meta tag followed by
+        // a stray invalid UTF-8 byte (0xFF is never valid in UTF-8). Strict
+        // decoding would return nil and the old code would map this to
+        // `.fetchFailed`; the tolerant decoder substitutes a replacement
+        // character and the regex still matches the og:image tag.
+        var payload = Data("""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta property="og:image" content="https://cdn.example.com/hero.jpg">
+        </head>
+        <body>
+        """.utf8)
+        payload.append(0xFF) // Invalid UTF-8 byte
+        payload.append(contentsOf: Data("</body></html>".utf8))
+
+        let mockSession = MockHTMLURLSessionProvider()
+        mockSession.statusCode = 200
+        mockSession.rawPayload = payload
+        let service = ArticleThumbnailService(session: mockSession)
+        let articleLink = URL(string: "https://example.com/article-invalid-utf8")!
+
+        let result = try await service.resolveOGImage(from: articleLink)
+
+        #expect(result == .found(URL(string: "https://cdn.example.com/hero.jpg")!))
+    }
+
+    @Test("resolveOGImage extracts og:image when payload ends mid multi-byte character")
+    func resolveOGImageHandlesTruncatedMultiByteCharacter() async throws {
+        // Simulate the head slice cutting through a multi-byte UTF-8 character
+        // at the 50 KB boundary. The og:image tag is fully decoded earlier in
+        // the buffer; only the trailing bytes are truncated. The previous
+        // strict-decoding implementation rejected the entire payload as invalid
+        // UTF-8, but the tolerant decoder lets the extractor proceed.
+        var payload = Data("""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta property="og:image" content="https://cdn.example.com/hero.jpg">
+            <title>Café story
+        """.utf8)
+        // The "é" in "Café" above is U+00E9, encoded in UTF-8 as 0xC3 0xA9.
+        // Append a lone leading byte of a multi-byte sequence to simulate
+        // truncation in the middle of a character.
+        payload.append(0xC3)
+
+        let mockSession = MockHTMLURLSessionProvider()
+        mockSession.statusCode = 200
+        mockSession.rawPayload = payload
+        let service = ArticleThumbnailService(session: mockSession)
+        let articleLink = URL(string: "https://example.com/article-truncated")!
+
+        let result = try await service.resolveOGImage(from: articleLink)
+
+        #expect(result == .found(URL(string: "https://cdn.example.com/hero.jpg")!))
+    }
+
+    @Test("resolveOGImage returns .notFound (not .fetchFailed) when invalid UTF-8 page has no og:image")
+    func resolveOGImageReturnsNotFoundForInvalidUTF8WithoutOGImage() async throws {
+        // A page with invalid UTF-8 bytes and no og:image meta tag must map
+        // to `.notFound` (permanent) so the prefetcher does not retry forever.
+        // Pre-fix, this would have hit the strict-decode failure branch and
+        // returned `.fetchFailed`, burning retry budget on a request that
+        // can never succeed.
+        var payload = Data("""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>No og:image here</title>
+        </head>
+        <body>Hello
+        """.utf8)
+        payload.append(0xFF) // Invalid UTF-8 byte
+        payload.append(0xFE)
+        payload.append(contentsOf: Data("</body></html>".utf8))
+
+        let mockSession = MockHTMLURLSessionProvider()
+        mockSession.statusCode = 200
+        mockSession.rawPayload = payload
+        let service = ArticleThumbnailService(session: mockSession)
+        let articleLink = URL(string: "https://example.com/article-invalid-no-og")!
+
+        let result = try await service.resolveOGImage(from: articleLink)
+
+        #expect(result == .notFound)
+    }
+
     @Test("resolveOGImage maps non-HTTPURLResponse to .fetchFailed via -1 sentinel")
     func resolveOGImageNonHTTPResponseReturnsFetchFailed() async throws {
         // Issue #229 explicitly called out the non-HTTPURLResponse → .fetchFailed
