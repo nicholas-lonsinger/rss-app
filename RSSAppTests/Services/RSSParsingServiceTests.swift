@@ -867,13 +867,13 @@ struct RSSParsingServiceTests {
 
     // MARK: - Date Parsing (Per-Format Coverage)
 
-    // The tests below exercise each individual entry in `zonedDateFormats` and
-    // `zonelessDateFormats` that was added in PR #212 but not yet covered by a
-    // dedicated assertion. Every input is crafted so that earlier formats in the
-    // parse chain (including `ISO8601DateFormatter`) fail to match, forcing the
-    // parser to reach the specific entry under test. Deleting the corresponding
-    // entry from the formats list must cause the matching test here to fail.
-    // See GitHub issue #215.
+    // The tests below exercise each individual entry in `HoistedDateFormatters.zoned`
+    // and `HoistedDateFormatters.zoneless` that was added in PR #212 but not yet
+    // covered by a dedicated assertion. Every input is crafted so that earlier
+    // formats in the parse chain (including `ISO8601DateFormatter`) fail to match,
+    // forcing the parser to reach the specific entry under test. Deleting the
+    // corresponding entry from the formats list must cause the matching test here
+    // to fail. See GitHub issue #215.
 
     @Test("Zoned format 'EEE, dd MMM yyyy HH:mm zzz' is reachable (no seconds, named zone)")
     func zonedEEEDDMMMYYYYHHmmNamedZone() throws {
