@@ -661,10 +661,198 @@ struct FeedPersistenceServiceTests {
         try service.markArticleRead(articles[0], isRead: true)
         #expect(articles[0].isRead == true)
         #expect(articles[0].readDate != nil)
+        // Fresh articles default `wasUpdated` to false; marking read keeps it false.
+        #expect(articles[0].wasUpdated == false)
 
         try service.markArticleRead(articles[0], isRead: false)
         #expect(articles[0].isRead == false)
         #expect(articles[0].readDate == nil)
+        #expect(articles[0].wasUpdated == false)
+    }
+
+    @Test("markArticleRead clears wasUpdated when transitioning to read (issue #74)")
+    @MainActor
+    func markArticleReadClearsWasUpdatedOnRead() throws {
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+
+        // Drive the upsert update-detection path to set wasUpdated = true:
+        // seed an article, then re-fetch with a strictly newer updatedDate.
+        let baseline = Date(timeIntervalSince1970: 1_700_000_000)
+        try service.upsertArticles(
+            [TestFixtures.makeArticle(id: "u1", updatedDate: baseline)],
+            for: feed
+        )
+        try service.upsertArticles(
+            [TestFixtures.makeArticle(id: "u1", updatedDate: baseline.addingTimeInterval(3600))],
+            for: feed
+        )
+
+        let updated = try service.articles(for: feed)[0]
+        // Pre-condition: detection set the flag and reset isRead. (Full detection-path
+        // mutation coverage lives in the `upsertArticles` test cluster above; here we
+        // only need the read-clear pre-conditions to be true.)
+        #expect(updated.wasUpdated == true)
+        #expect(updated.isRead == false)
+
+        // Acting on the read transition clears the flag.
+        try service.markArticleRead(updated, isRead: true)
+        #expect(updated.isRead == true)
+        #expect(updated.wasUpdated == false)
+    }
+
+    @Test("markArticleRead does NOT re-set wasUpdated when transitioning read → unread")
+    @MainActor
+    func markArticleReadDoesNotReSetWasUpdatedOnUnread() throws {
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+
+        // Set up a wasUpdated == true article via the upsert detection path.
+        let baseline = Date(timeIntervalSince1970: 1_700_000_000)
+        try service.upsertArticles(
+            [TestFixtures.makeArticle(id: "u1", updatedDate: baseline)],
+            for: feed
+        )
+        try service.upsertArticles(
+            [TestFixtures.makeArticle(id: "u1", updatedDate: baseline.addingTimeInterval(3600))],
+            for: feed
+        )
+
+        let updated = try service.articles(for: feed)[0]
+        // Read it (clears wasUpdated), then mark unread again.
+        try service.markArticleRead(updated, isRead: true)
+        #expect(updated.wasUpdated == false)
+
+        try service.markArticleRead(updated, isRead: false)
+        #expect(updated.isRead == false)
+        // Manual mark-unread must NOT lie about the article having been updated —
+        // the publisher revision is a fact about the content, not a function of
+        // the user's read toggle. Once cleared, wasUpdated stays cleared.
+        #expect(updated.wasUpdated == false)
+    }
+
+    @Test("markArticleRead(isRead: false) on a wasUpdated article preserves the flag")
+    @MainActor
+    func markArticleReadFalseOnUpdatedArticlePreservesFlag() throws {
+        // Round-trip distinct from `markArticleReadDoesNotReSetWasUpdatedOnUnread`:
+        // there, the flag is cleared first via a read, then we verify the unread
+        // transition doesn't re-set it. Here, the user *never reads* the article —
+        // they directly mark unread (e.g., a swipe gesture or a hypothetical
+        // "mark unread" affordance) on a row that is already unread but carries the
+        // orange "Updated" badge. The flag must survive: the user never opened the
+        // article, so the call-to-action is still valid.
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+
+        let baseline = Date(timeIntervalSince1970: 1_700_000_000)
+        try service.upsertArticles(
+            [TestFixtures.makeArticle(id: "u1", updatedDate: baseline)],
+            for: feed
+        )
+        try service.upsertArticles(
+            [TestFixtures.makeArticle(id: "u1", updatedDate: baseline.addingTimeInterval(3600))],
+            for: feed
+        )
+
+        let updated = try service.articles(for: feed)[0]
+        #expect(updated.wasUpdated == true)
+        #expect(updated.isRead == false)
+
+        try service.markArticleRead(updated, isRead: false)
+        #expect(updated.isRead == false)
+        #expect(updated.wasUpdated == true) // preserved — never read
+    }
+
+    @Test("markAllArticlesRead(for:) clears wasUpdated for every article in the feed")
+    @MainActor
+    func markAllArticlesReadForFeedClearsWasUpdated() throws {
+        // Pins the issue #74 invariant for the per-feed bulk read path: tapping
+        // "Mark all as read" on a feed must dismiss the orange "Updated" badge for
+        // every article in that feed, not just the ones the user opens individually.
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+
+        // Drive two articles through the upsert detection path to set wasUpdated.
+        let baseline = Date(timeIntervalSince1970: 1_700_000_000)
+        try service.upsertArticles(
+            [
+                TestFixtures.makeArticle(id: "u1", updatedDate: baseline),
+                TestFixtures.makeArticle(id: "u2", updatedDate: baseline),
+            ],
+            for: feed
+        )
+        try service.upsertArticles(
+            [
+                TestFixtures.makeArticle(id: "u1", updatedDate: baseline.addingTimeInterval(3600)),
+                TestFixtures.makeArticle(id: "u2", updatedDate: baseline.addingTimeInterval(3600)),
+            ],
+            for: feed
+        )
+
+        let beforeBulk = try service.articles(for: feed)
+        #expect(beforeBulk.allSatisfy { $0.wasUpdated == true })
+        #expect(beforeBulk.allSatisfy { $0.isRead == false })
+
+        try service.markAllArticlesRead(for: feed)
+
+        let afterBulk = try service.articles(for: feed)
+        #expect(afterBulk.allSatisfy { $0.isRead == true })
+        #expect(afterBulk.allSatisfy { $0.wasUpdated == false })
+    }
+
+    @Test("markAllArticlesRead() (global) clears wasUpdated across every feed")
+    @MainActor
+    func markAllArticlesReadGlobalClearsWasUpdated() throws {
+        // Same invariant as the per-feed bulk path, but for the global "Mark all as
+        // read" action. Articles across MULTIPLE feeds must all have their badges
+        // dismissed in one call.
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feedA = TestFixtures.makePersistentFeed(title: "Feed A")
+        let feedB = TestFixtures.makePersistentFeed(title: "Feed B")
+        try service.addFeed(feedA)
+        try service.addFeed(feedB)
+
+        let baseline = Date(timeIntervalSince1970: 1_700_000_000)
+        try service.upsertArticles(
+            [TestFixtures.makeArticle(id: "a1", updatedDate: baseline)],
+            for: feedA
+        )
+        try service.upsertArticles(
+            [TestFixtures.makeArticle(id: "a1", updatedDate: baseline.addingTimeInterval(3600))],
+            for: feedA
+        )
+        try service.upsertArticles(
+            [TestFixtures.makeArticle(id: "b1", updatedDate: baseline)],
+            for: feedB
+        )
+        try service.upsertArticles(
+            [TestFixtures.makeArticle(id: "b1", updatedDate: baseline.addingTimeInterval(3600))],
+            for: feedB
+        )
+
+        // Pre-condition: both articles carry the flag.
+        let aBefore = try service.articles(for: feedA)
+        let bBefore = try service.articles(for: feedB)
+        #expect(aBefore[0].wasUpdated == true)
+        #expect(bBefore[0].wasUpdated == true)
+
+        try service.markAllArticlesRead()
+
+        let aAfter = try service.articles(for: feedA)
+        let bAfter = try service.articles(for: feedB)
+        #expect(aAfter[0].isRead == true)
+        #expect(aAfter[0].wasUpdated == false)
+        #expect(bAfter[0].isRead == true)
+        #expect(bAfter[0].wasUpdated == false)
     }
 
     @Test("unreadCount returns correct count")

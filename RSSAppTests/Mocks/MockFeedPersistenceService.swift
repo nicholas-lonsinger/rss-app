@@ -167,6 +167,12 @@ final class MockFeedPersistenceService: FeedPersisting {
         if let error = errorToThrow { throw error }
         article.isRead = isRead
         article.readDate = isRead ? Date() : nil
+        // Mirror SwiftDataFeedPersistenceService.markArticleRead's issue #74 clear so
+        // view-model tests using this mock catch a regression that removes the
+        // production clear. Asymmetric: only on isRead = true.
+        if isRead {
+            article.wasUpdated = false
+        }
     }
 
     func markAllArticlesRead(for feed: PersistentFeed) throws {
@@ -175,6 +181,7 @@ final class MockFeedPersistenceService: FeedPersisting {
         for article in (articlesByFeedID[feed.id] ?? []) where !article.isRead {
             article.isRead = true
             article.readDate = now
+            article.wasUpdated = false
         }
     }
 
@@ -185,6 +192,7 @@ final class MockFeedPersistenceService: FeedPersisting {
             for article in articles where !article.isRead {
                 article.isRead = true
                 article.readDate = now
+                article.wasUpdated = false
             }
         }
     }

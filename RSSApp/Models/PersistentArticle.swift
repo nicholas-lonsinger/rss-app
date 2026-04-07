@@ -23,27 +23,35 @@ final class PersistentArticle {
     /// SwiftData's implicit schema migration initializes the new optional column to
     /// `nil` for existing rows on the first launch after the schema bump.
     var updatedDate: Date?
-    /// Set to `true` by `FeedPersistenceService.upsertArticles` when a re-fetch detects
-    /// a strictly newer Atom `<updated>` (or namespaced equivalent) on an existing row,
-    /// alongside the cache invalidation, `isRead` reset, and `sortDate` bump that mark
-    /// the article as resurfaced (issue #74).
+    /// Set to `true` by `FeedPersistenceService.upsertArticles` when a re-fetch
+    /// detects a strictly newer Atom `<updated>` (or namespaced equivalent) on an
+    /// existing row, alongside the cache invalidation, `isRead` reset, and `sortDate`
+    /// bump that mark the article as resurfaced (issue #74). Cleared on every read
+    /// transition: `markArticleRead(_:isRead: true)`, `markAllArticlesRead(for:)`,
+    /// and `markAllArticlesRead()` all set the flag back to `false` so the orange
+    /// "Updated" badge in the row view disappears the moment the user opens the
+    /// article (or bulk-marks it read).
     ///
-    /// **Invariant:** when `true`, `updatedDate` is guaranteed non-nil — the mutation
-    /// site in `upsertArticles` guards on `article.updatedDate != nil` before flipping
-    /// the flag.
+    /// **Invariant:** when `true`, `updatedDate` is guaranteed non-nil. The
+    /// mutation site in `upsertArticles` guards the incoming `article.updatedDate`
+    /// against nil and assigns it to `existing.updatedDate` immediately before
+    /// flipping the flag, so the post-state always satisfies
+    /// `wasUpdated == true → updatedDate != nil`.
+    ///
+    /// **Asymmetric clear:** `markArticleRead(_:isRead: false)` does NOT re-set
+    /// `wasUpdated`. Manually marking unread should not lie about the article having
+    /// been updated — the publisher revision is a fact about the content, not a
+    /// function of the user's read toggle. The flag has exactly one writer
+    /// (`upsertArticles`); the clear paths above all set it to `false` only on a
+    /// read transition.
     ///
     /// **Destructive transition:** the update path resets `isRead = false` and
     /// `readDate = nil`. The original "first read" timestamp is NOT preserved across
-    /// detection. If a future feature needs "read-before-update" history, this decision
-    /// must be revisited. The `wasUpdated == true && isRead == false` combination
-    /// transiently encodes "resurfaced because the publisher revised it" — until the
-    /// user reads the article, at which point the flag is cleared (see TODO below).
+    /// detection. If a future feature needs "read-before-update" history, this
+    /// decision must be revisited.
     ///
     /// Existing rows persisted before this field was added deserialize as `false` via
     /// SwiftData's implicit schema migration, matching the default for fresh inserts.
-    // TODO(issue #74): clear `wasUpdated` on the read transition in `markArticleRead`
-    // so list rows can distinguish "newly resurfaced because content changed" from
-    // "brand new unread" via a UI badge.
     var wasUpdated: Bool
     var thumbnailURL: URL?
     var author: String?
@@ -175,18 +183,17 @@ final class PersistentArticle {
 
     // MARK: - Display Helpers
 
-    /// Stable display value for the article's original publication time. Added in
-    /// advance of the row-view changes planned for issue #74; not yet consumed by any
-    /// production view in this PR.
+    /// Stable display value for the article's original publication time, consumed by
+    /// `ArticleRowDateLine` (in `ArticleRowView.swift`, shared by both the per-feed
+    /// `ArticleRowView` and `CrossFeedArticleRowView`).
     ///
-    /// Distinct from `sortDate` because `FeedPersistenceService.upsertArticles` mutates
-    /// `sortDate` to the current time when content-update detection fires on a re-fetch
-    /// (issue #74; see the stability rule block on `sortDate` above for the single
-    /// sanctioned mutation path and its constraints). The row-view changes that
-    /// consume this property will need *both* an "Updated [N] minutes ago" label using
-    /// the bumped `sortDate`/`updatedDate` *and* a stable "Published [N] days ago"
-    /// label that reflects the original publication moment — this property is the
-    /// source for the latter.
+    /// Distinct from `sortDate` because `FeedPersistenceService.upsertArticles`
+    /// mutates `sortDate` to the current time when content-update detection fires on
+    /// a re-fetch (issue #74; see the stability rule block on `sortDate` above for
+    /// the single sanctioned mutation path and its constraints). `ArticleRowDateLine`
+    /// uses this property to render the stable "original publication time" label
+    /// alongside an "Updated [date]" suffix sourced from `updatedDate` — both labels
+    /// stay accurate even after `sortDate` is bumped on update detection.
     ///
     /// Formula: `min(publishedDate ?? fetchedDate, fetchedDate)`.
     ///
@@ -210,6 +217,35 @@ final class PersistentArticle {
     var displayedPublishedDate: Date {
         min(publishedDate ?? fetchedDate, fetchedDate)
     }
+
+    /// Whether row UI should display the "Updated [date]" suffix alongside the
+    /// original publication time. True when the publisher has revised the article
+    /// meaningfully — i.e., `updatedDate` exists and differs from
+    /// `displayedPublishedDate` by strictly more than `Self.updateSuffixTolerance`
+    /// seconds.
+    ///
+    /// The 1-second tolerance suppresses noise from feeds that fill `<updated>` with
+    /// the same value as `<published>` on first publish (very common in WordPress
+    /// and stock Atom generators) — without it, every fresh row would carry a
+    /// "Updated [N]s ago" suffix that's identical to its "Published [N]s ago" line.
+    /// Compares against `displayedPublishedDate` (not raw `publishedDate`) so the
+    /// predicate stays consistent with what the row actually renders for the
+    /// original-time label, including the future-date clamp behavior.
+    ///
+    /// Extracted as a computed property (rather than left inline in the row view)
+    /// so the predicate is unit-testable without standing up SwiftUI machinery, and
+    /// so a future refactor that accidentally compares against `publishedDate`
+    /// instead of `displayedPublishedDate` can be caught by a regression test
+    /// rather than slipping into a release.
+    var shouldShowUpdatedSuffix: Bool {
+        guard let updated = updatedDate else { return false }
+        return abs(updated.timeIntervalSince(displayedPublishedDate)) > Self.updateSuffixTolerance
+    }
+
+    /// Tolerance window (seconds) used by `shouldShowUpdatedSuffix` to suppress
+    /// no-op "Updated [date]" suffixes when the publisher emits identical
+    /// `<published>` and `<updated>` timestamps on first publish.
+    static let updateSuffixTolerance: TimeInterval = 1
 
     /// Computes the clamped `sortDate` for an article with the given `publishedDate`.
     ///
