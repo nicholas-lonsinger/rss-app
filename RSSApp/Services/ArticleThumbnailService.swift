@@ -191,9 +191,11 @@ struct ArticleThumbnailService: ArticleThumbnailCaching {
     private enum OGImageResult {
         /// An og:image URL was found in the page's `<head>`.
         case found(URL)
-        /// The page loaded successfully but contained no og:image meta tag.
+        /// The page loaded successfully but contained no og:image meta tag, or the
+        /// server returned a permanent HTTP client error (e.g. 404, 403) that makes
+        /// og:image extraction impossible. Either way, retrying is futile.
         case notFound
-        /// A network or HTTP error prevented loading the page — transient, worth retrying.
+        /// A network or transient HTTP error prevented loading the page — worth retrying.
         case fetchFailed
     }
 
@@ -215,8 +217,12 @@ struct ArticleThumbnailService: ArticleThumbnailCaching {
                   (200...299).contains(httpResponse.statusCode) else {
                 let code = (response as? HTTPURLResponse)?.statusCode ?? -1
                 Self.logger.warning("Article page fetch returned HTTP \(code, privacy: .public) for \(articleLink.absoluteString, privacy: .public)")
-                // Non-2xx HTTP responses are treated as transient — the server may recover.
-                return .fetchFailed
+                // Mirror cacheThumbnail's classification: standard 4xx responses are
+                // permanent client errors where og:image extraction can never succeed,
+                // while 429 (rate limited) and 408 (request timeout) are transient
+                // despite being 4xx. Everything else (5xx, unknown) is transient.
+                let isPermanent = (400...499).contains(code) && code != 429 && code != 408
+                return isPermanent ? .notFound : .fetchFailed
             }
 
             // Read only the first portion — og:image is in <head>, no need for the full body
