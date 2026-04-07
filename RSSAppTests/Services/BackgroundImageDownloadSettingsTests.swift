@@ -2,7 +2,7 @@ import Testing
 import Foundation
 @testable import RSSApp
 
-@Suite("BackgroundImageDownloadSettings Tests")
+@Suite("BackgroundImageDownloadSettings Tests", .serialized)
 struct BackgroundImageDownloadSettingsTests {
 
     private static let wifiOnlyDefaultsKey = "backgroundImageDownloadWiFiOnly"

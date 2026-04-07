@@ -2,8 +2,8 @@ import Testing
 import Foundation
 @testable import RSSApp
 
-@Suite("NetworkMonitorService Tests")
-struct NetworkMonitorServiceTests {
+@Suite("MockNetworkMonitorService Tests")
+struct MockNetworkMonitorServiceTests {
 
     @Test("MockNetworkMonitorService returns configured value")
     func mockReturnsConfiguredValue() {

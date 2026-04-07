@@ -25,6 +25,9 @@ protocol NetworkMonitoring: Sendable {
 /// Starts monitoring on `init`; the path is updated asynchronously. The first
 /// path is typically available within milliseconds, but callers should handle
 /// a briefly-unknown state (defaults to disallowed until the first update).
+// RATIONALE: @unchecked Sendable because NWPathMonitor delivers updates on a private
+// DispatchQueue; NSLock guards the mutable currentPath for thread-safe reads from any
+// isolation domain.
 final class NetworkMonitorService: NetworkMonitoring, @unchecked Sendable {
 
     private static let logger = Logger(category: "NetworkMonitorService")
@@ -45,7 +48,7 @@ final class NetworkMonitorService: NetworkMonitoring, @unchecked Sendable {
             self.lock.lock()
             self.currentPath = path
             self.lock.unlock()
-            Self.logger.debug("Network path updated: status=\(path.status.debugDescription, privacy: .public) usesWiFi=\(path.usesInterfaceType(.wifi), privacy: .public) isConstrained=\(path.isConstrained, privacy: .public)")
+            Self.logger.debug("Network path updated: status=\(path.status.statusLabel, privacy: .public) usesWiFi=\(path.usesInterfaceType(.wifi), privacy: .public) isConstrained=\(path.isConstrained, privacy: .public)")
         }
         monitor.start(queue: queue)
         Self.logger.debug("NetworkMonitorService started")
@@ -62,9 +65,10 @@ final class NetworkMonitorService: NetworkMonitoring, @unchecked Sendable {
         let path = currentPath
         lock.unlock()
 
+        // RATIONALE: When WiFi-only is off and no path is available yet, returning true
+        // is safe because downstream URLSession calls will fail gracefully if the network
+        // is actually unavailable. The nil-path window is milliseconds after init.
         guard let path else {
-            // No path available yet (very early after init) — default to disallowed
-            // when WiFi-only is on, allowed when the user allows any network.
             Self.logger.debug("No network path yet, wifiOnly=\(wifiOnly, privacy: .public) — returning \(!wifiOnly, privacy: .public)")
             return !wifiOnly
         }
@@ -84,10 +88,10 @@ final class NetworkMonitorService: NetworkMonitoring, @unchecked Sendable {
     }
 }
 
-// MARK: - NWPath.Status debug description
+// MARK: - NWPath.Status label
 
 extension NWPath.Status {
-    var debugDescription: String {
+    var statusLabel: String {
         switch self {
         case .satisfied: return "satisfied"
         case .unsatisfied: return "unsatisfied"

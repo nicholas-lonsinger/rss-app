@@ -244,6 +244,7 @@ final class FeedListViewModel {
         let feedFetching = self.feedFetching
         let logger = Self.logger
         let maxConcurrency = 6
+        let isDownloadAllowed = networkMonitor.isBackgroundDownloadAllowed()
 
         let results: [(UUID, Result<FeedFetchResult?, any Error>)]
         do {
@@ -308,7 +309,7 @@ final class FeedListViewModel {
                         failureCount += 1
                         Self.logger.error("Failed to clear error state for '\(feed.title, privacy: .public)': \(error, privacy: .public) — feed will appear to have an error on next launch despite successful 304 response")
                     }
-                    if networkMonitor.isBackgroundDownloadAllowed() {
+                    if isDownloadAllowed {
                         Task {
                             await self.resolveAndCacheIconIfNeeded(
                                 for: feed,
@@ -316,6 +317,8 @@ final class FeedListViewModel {
                                 feedImageURL: feed.iconURL
                             )
                         }
+                    } else {
+                        Self.logger.debug("Skipping icon resolution for '\(feed.title, privacy: .public)' on 304 — background downloads not allowed")
                     }
                     continue
                 }
@@ -366,7 +369,7 @@ final class FeedListViewModel {
                     }
                 }
 
-                if networkMonitor.isBackgroundDownloadAllowed() {
+                if isDownloadAllowed {
                     Task {
                         await self.resolveAndCacheIconIfNeeded(
                             for: feed,
@@ -374,6 +377,8 @@ final class FeedListViewModel {
                             feedImageURL: fetchResult.feed.imageURL
                         )
                     }
+                } else {
+                    Self.logger.debug("Skipping icon resolution for '\(feed.title, privacy: .public)' — background downloads not allowed")
                 }
             case .failure(let fetchError):
                 failureCount += 1
@@ -420,7 +425,7 @@ final class FeedListViewModel {
 
         // Cancel any in-flight prefetch from a previous refresh cycle before starting a new one
         thumbnailPrefetchTask?.cancel()
-        if networkMonitor.isBackgroundDownloadAllowed() {
+        if isDownloadAllowed {
             thumbnailPrefetchTask = Task(priority: .utility) {
                 await self.thumbnailPrefetcher.prefetchThumbnails()
             }
