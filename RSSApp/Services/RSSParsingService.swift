@@ -12,6 +12,44 @@ struct RSSParsingService: Sendable {
 
     static let snippetMaxLength = 200
 
+    // MARK: - Test Accessors
+    //
+    // These accessors expose the private `RSSParserDelegate.HoistedDateFormatters` and
+    // `RSSParserDelegate.ISO8601Formatters` enums to `@testable` test code so the
+    // "never mutated after init" invariant that justifies their `nonisolated(unsafe)`
+    // declaration can be pinned down by unit tests. See GitHub issue #242 and the
+    // `RATIONALE:` comments on the underlying enums for why the invariant matters.
+    //
+    // These are only meant to be consumed by tests. Production code inside
+    // `RSSParserDelegate` keeps using the private nested enums directly. Exposing them
+    // via accessors rather than relaxing the access level on the enums themselves
+    // preserves the invariant that no code outside this file can reach for a raw
+    // `DateFormatter` reference accidentally.
+
+    /// Pre-built zoned `DateFormatter` entries used by `parseDate`. Exposed for
+    /// invariant tests; do not mutate.
+    static var hoistedZonedFormattersForTesting: [(format: String, formatter: DateFormatter)] {
+        RSSParserDelegate.HoistedDateFormatters.zoned
+    }
+
+    /// Pre-built zoneless `DateFormatter` entries used by `parseDate`. Exposed for
+    /// invariant tests; do not mutate.
+    static var hoistedZonelessFormattersForTesting: [(format: String, formatter: DateFormatter)] {
+        RSSParserDelegate.HoistedDateFormatters.zoneless
+    }
+
+    /// The standard (non-fractional) `ISO8601DateFormatter` used by `parseDate`. Exposed
+    /// for invariant tests; do not mutate.
+    static var iso8601StandardFormatterForTesting: ISO8601DateFormatter {
+        RSSParserDelegate.ISO8601Formatters.standard
+    }
+
+    /// The fractional-second `ISO8601DateFormatter` used by `parseDate`. Exposed for
+    /// invariant tests; do not mutate.
+    static var iso8601FractionalFormatterForTesting: ISO8601DateFormatter {
+        RSSParserDelegate.ISO8601Formatters.fractional
+    }
+
     func parse(_ data: Data) throws -> RSSFeed {
         Self.logger.debug("parse() called with \(data.count, privacy: .public) bytes")
 
@@ -735,8 +773,10 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
     // Pre-building one formatter per format also eliminates the shared-mutable-state
     // hazard of a single formatter with an in-loop `dateFormat` assignment, so the
     // parser is safe to invoke concurrently from multiple feed refreshes. See GitHub
-    // issue #217.
-    private enum HoistedDateFormatters {
+    // issue #217. The invariant is pinned down by `RSSParsingServiceTests` via the
+    // `hoistedZonedFormattersForTesting` / `hoistedZonelessFormattersForTesting`
+    // accessors on `RSSParsingService` — see GitHub issue #242.
+    fileprivate enum HoistedDateFormatters {
         /// Date formats that include an explicit timezone specifier, each paired with a
         /// pre-configured `DateFormatter`. Ordered roughly by expected frequency (RFC
         /// 822 numeric-offset forms first). `parseUsingZonedFormats` tries each entry in
@@ -811,8 +851,11 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
     }
 
     // RATIONALE: nonisolated(unsafe) is safe because these formatters are initialized
-    // once via static let and never mutated after initialization — only date(from:) is called.
-    private enum ISO8601Formatters {
+    // once via static let and never mutated after initialization — only date(from:) is
+    // called. The invariant is pinned down by `RSSParsingServiceTests` via the
+    // `iso8601StandardFormatterForTesting` / `iso8601FractionalFormatterForTesting`
+    // accessors on `RSSParsingService` — see GitHub issue #242.
+    fileprivate enum ISO8601Formatters {
         nonisolated(unsafe) static let standard: ISO8601DateFormatter = {
             let formatter = ISO8601DateFormatter()
             formatter.formatOptions = [.withInternetDateTime]
