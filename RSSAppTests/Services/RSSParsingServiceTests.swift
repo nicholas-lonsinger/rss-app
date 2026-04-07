@@ -1493,6 +1493,95 @@ struct RSSParsingServiceTests {
         }
     }
 
+    /// Builds a minimal RSS feed containing one `<item>` per supplied `pubDate` string.
+    /// Each item gets a unique guid so the parser keeps them as distinct articles in
+    /// document order. Used by the multi-format integration test below to drive a
+    /// single `parse(_:)` call across the full date-parser chain.
+    private static func rssXML(pubDates: [String]) -> String {
+        let items = pubDates.enumerated().map { index, pubDate in
+            """
+                <item>
+                    <title>Item \(index)</title>
+                    <link>https://example.com/item-\(index)</link>
+                    <guid>item-\(index)</guid>
+                    <pubDate>\(pubDate)</pubDate>
+                </item>
+            """
+        }.joined(separator: "\n")
+        return """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <rss version="2.0">
+        <channel>
+            <title>Multi-Format Date Test Feed</title>
+            <link>https://example.com</link>
+            <description>Feed</description>
+        \(items)
+        </channel>
+        </rss>
+        """
+    }
+
+    @Test("Single feed with many distinct date formats parses every item to the correct UTC moment")
+    func multiFormatPerFeedParsesAllItems() throws {
+        // Integration-style guard for the realistic refresh path that motivated PR #241:
+        // a single `parse(_:)` call walks dozens of items, and the hoisted-formatter
+        // refactor specifically targeted that hot loop. The single-item helpers used by
+        // the rest of this section never exercise mid-parse iteration through the
+        // formatter list, so a regression that corrupted state for subsequent items in
+        // the same feed (e.g., a future "first call configures" mistake reintroduced at
+        // a different layer) would slip past the existing repeated-parse and concurrent
+        // tests. This test parses one feed whose items deliberately span every distinct
+        // branch of the parser chain — ISO 8601 (with `Z`, with fractional seconds,
+        // numeric offset), explicit-zone RFC 822 (numeric, US named, single-digit day),
+        // named non-US zone via the substitution pass, SQL-style space separator with
+        // numeric zone, and the zoneless RFC 822 / ISO 8601 fallbacks — and asserts
+        // every parsed `publishedDate` matches the expected absolute UTC moment.
+        //
+        // The published dates below all encode the same wall-clock instant in their
+        // respective zones so the assertion vector is uniform: 06 Apr 2026 15:30:00 UTC.
+        // Items are listed in the same order the parser is expected to surface them.
+        let cases: [(pubDate: String, label: String)] = [
+            // ISO 8601 with `Z` literal — first parser in the chain.
+            ("2026-04-06T15:30:00Z", "ISO 8601 Z"),
+            // ISO 8601 with fractional seconds and numeric offset — second parser.
+            ("2026-04-06T08:30:00.000-07:00", "ISO 8601 fractional"),
+            // RFC 822 with numeric offset — most common explicit-zone format.
+            ("Mon, 06 Apr 2026 08:30:00 -0700", "RFC 822 numeric"),
+            // RFC 822 with US named zone — exercises `zzz` with `en_US_POSIX`.
+            ("Mon, 06 Apr 2026 11:30:00 EDT", "RFC 822 named EDT"),
+            // RFC 822 single-digit day variant.
+            ("Mon, 6 Apr 2026 08:30:00 -0700", "RFC 822 single-digit day"),
+            // Non-US named zone — exercises the substituteNamedZone preprocessing pass.
+            ("Mon, 06 Apr 2026 16:30:00 CET", "named CET via substitution"),
+            // Another non-US named zone (different offset) to ensure substitution does
+            // not leak state across items.
+            ("Mon, 06 Apr 2026 17:30:00 CEST", "named CEST via substitution"),
+            // SQL-style space separator with numeric zone.
+            ("2026-04-06 08:30:00-0700", "SQL space separator"),
+            // Zoneless RFC 822 — falls through to the documented UTC fallback.
+            ("Mon, 06 Apr 2026 15:30:00", "zoneless RFC 822"),
+            // Zoneless ISO 8601 — falls through to the documented UTC fallback.
+            ("2026-04-06T15:30:00", "zoneless ISO 8601"),
+        ]
+
+        let xml = Self.rssXML(pubDates: cases.map(\.pubDate))
+        let feed = try service.parse(Data(xml.utf8))
+
+        #expect(feed.articles.count == cases.count)
+
+        let expected = try Self.utcDate(year: 2026, month: 4, day: 6, hour: 15, minute: 30)
+        for (index, testCase) in cases.enumerated() {
+            let date = try #require(
+                feed.articles[index].publishedDate,
+                "publishedDate was nil for item \(index) (\(testCase.label), input '\(testCase.pubDate)')"
+            )
+            #expect(
+                date == expected,
+                "item \(index) (\(testCase.label), input '\(testCase.pubDate)') parsed to \(date), expected \(expected)"
+            )
+        }
+    }
+
     // MARK: - XHTML Content
 
     @Test("Atom XHTML content is reconstructed as HTML")
