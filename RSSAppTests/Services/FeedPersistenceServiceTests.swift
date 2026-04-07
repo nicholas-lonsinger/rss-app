@@ -193,7 +193,10 @@ struct FeedPersistenceServiceTests {
         let persisted = try service.articles(for: feed)
         try service.markArticleRead(persisted[0], isRead: true)
 
-        // Upsert same article again
+        // Re-upsert with no `updatedDate` (the default) — must no-op even though
+        // the title differs. This pins the historical insert-only semantics for
+        // feeds that don't expose `<updated>`. The update-detection mutation path
+        // is exercised separately by `upsertArticlesMutatesOnNewerUpdatedDate`.
         let updatedArticles = [TestFixtures.makeArticle(id: "a1", title: "Updated")]
         try service.upsertArticles(updatedArticles, for: feed)
 
@@ -226,15 +229,421 @@ struct FeedPersistenceServiceTests {
         #expect(persisted[0].isThumbnailCached == true)
         #expect(persisted[0].thumbnailRetryCount == 2)
 
-        // Upsert same article ID again with different title
+        // Re-upsert with no `updatedDate` — must no-op, leaving thumbnail state alone.
+        // Preservation through the UPDATE-MUTATION path is pinned separately in
+        // `upsertArticlesMutatesOnNewerUpdatedDatePreservesUntouchedFields`.
         let updatedArticles = [TestFixtures.makeArticle(id: "thumb1", title: "Updated Title")]
         try service.upsertArticles(updatedArticles, for: feed)
 
-        // Verify thumbnail fields are preserved (article was skipped, not overwritten)
         let afterUpsert = try service.articles(for: feed)
         #expect(afterUpsert.count == 1)
         #expect(afterUpsert[0].isThumbnailCached == true)
         #expect(afterUpsert[0].thumbnailRetryCount == 2)
+    }
+
+    // MARK: - upsertArticles update detection (issue #74)
+
+    @Test("Fresh inserts default wasUpdated to false")
+    @MainActor
+    func upsertArticlesFreshInsertsDefaultWasUpdatedFalse() throws {
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+
+        try service.upsertArticles(
+            [TestFixtures.makeArticle(id: "fresh", updatedDate: Date())],
+            for: feed
+        )
+
+        let persisted = try service.articles(for: feed)
+        #expect(persisted.count == 1)
+        #expect(persisted[0].wasUpdated == false)
+    }
+
+    @Test("Re-fetch with same updatedDate is a no-op")
+    @MainActor
+    func upsertArticlesNoOpForSameUpdatedDate() throws {
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+
+        let updated = Date(timeIntervalSince1970: 1_700_000_000)
+        try service.upsertArticles(
+            [TestFixtures.makeArticle(
+                id: "same",
+                title: "Original",
+                articleDescription: "<p>Original body</p>",
+                snippet: "Original body",
+                updatedDate: updated
+            )],
+            for: feed
+        )
+
+        let beforeRefetch = try service.articles(for: feed)
+        try service.markArticleRead(beforeRefetch[0], isRead: true)
+        let originalSortDate = beforeRefetch[0].sortDate
+
+        // Re-fetch with the SAME updatedDate but a different title AND a different
+        // body — must not mutate any field. Passing different body content here pins
+        // the contract that body content is overwritten ONLY when the update path
+        // fires (which it doesn't here, because the timestamp didn't move).
+        try service.upsertArticles(
+            [TestFixtures.makeArticle(
+                id: "same",
+                title: "Different Title",
+                articleDescription: "<p>Publisher-edited body without &lt;updated&gt; bump</p>",
+                snippet: "Publisher-edited body without <updated> bump",
+                updatedDate: updated
+            )],
+            for: feed
+        )
+
+        let afterRefetch = try service.articles(for: feed)
+        #expect(afterRefetch.count == 1)
+        #expect(afterRefetch[0].isRead == true)
+        #expect(afterRefetch[0].wasUpdated == false)
+        #expect(afterRefetch[0].title == "Original") // not overwritten
+        #expect(afterRefetch[0].articleDescription == "<p>Original body</p>") // not overwritten
+        #expect(afterRefetch[0].snippet == "Original body") // not overwritten
+        #expect(afterRefetch[0].sortDate == originalSortDate) // not bumped
+    }
+
+    @Test("Re-fetch with strictly newer updatedDate mutates the existing row")
+    @MainActor
+    func upsertArticlesMutatesOnNewerUpdatedDate() throws {
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+
+        let originalPublished = Date(timeIntervalSince1970: 1_699_000_000)
+        let originalUpdated = Date(timeIntervalSince1970: 1_700_000_000)
+        let originalArticle = TestFixtures.makeArticle(
+            id: "evolving",
+            title: "Original Title",
+            link: URL(string: "https://example.com/evolving"),
+            articleDescription: "<p>Original body</p>",
+            snippet: "Original body",
+            publishedDate: originalPublished,
+            updatedDate: originalUpdated,
+            thumbnailURL: URL(string: "https://example.com/original-thumb.jpg"),
+            author: "Original Author",
+            categories: ["original-category"]
+        )
+        try service.upsertArticles([originalArticle], for: feed)
+
+        let beforeRefetch = try service.articles(for: feed)
+        // Prime user-generated and system-managed state so we can verify each field
+        // is preserved through the mutation path.
+        try service.markArticleRead(beforeRefetch[0], isRead: true)
+        try service.toggleArticleSaved(beforeRefetch[0])
+        try service.markThumbnailCached(beforeRefetch[0])
+        try service.incrementThumbnailRetryCount(beforeRefetch[0])
+        try service.incrementThumbnailRetryCount(beforeRefetch[0])
+        try service.save()
+
+        let originalSortDate = beforeRefetch[0].sortDate
+        let originalSavedDate = beforeRefetch[0].savedDate
+        let originalFetchedDate = beforeRefetch[0].fetchedDate
+
+        // Re-fetch with a strictly newer updatedDate and revised body content. Pass
+        // *different* values for every preserved-on-update field too — title, link,
+        // author, categories, thumbnailURL — so any future refactor that adds those
+        // to the mutation block will fail this test.
+        let newerUpdated = originalUpdated.addingTimeInterval(3600) // +1 hour
+        let revisedArticle = TestFixtures.makeArticle(
+            id: "evolving",
+            title: "Publisher-Revised Title", // intentionally different
+            link: URL(string: "https://example.com/different-link"),
+            articleDescription: "<p>Revised body with corrections</p>",
+            snippet: "Revised body with corrections",
+            publishedDate: originalPublished.addingTimeInterval(86400), // intentionally different
+            updatedDate: newerUpdated,
+            thumbnailURL: URL(string: "https://example.com/different-thumb.jpg"),
+            author: "Different Author",
+            categories: ["different-category"]
+        )
+        try service.upsertArticles([revisedArticle], for: feed)
+
+        let afterRefetch = try service.articles(for: feed)
+        #expect(afterRefetch.count == 1)
+        let row = afterRefetch[0]
+
+        // ----- Mutated (publisher-visible body content) -----
+        #expect(row.updatedDate == newerUpdated)
+        #expect(row.wasUpdated == true)
+        #expect(row.articleDescription == "<p>Revised body with corrections</p>")
+        #expect(row.snippet == "Revised body with corrections")
+        #expect(row.sortDate > originalSortDate) // bumped to "now"
+
+        // ----- Reset (article re-surfaces as unread) -----
+        #expect(row.isRead == false)
+        #expect(row.readDate == nil)
+
+        // ----- Cross-field invariant: wasUpdated == true → updatedDate != nil -----
+        #expect(row.wasUpdated == false || row.updatedDate != nil)
+
+        // ----- Preserved (user-generated state and identity not owned by publisher) -----
+        // Title / link / author / categories / thumbnailURL — publisher revisions
+        // to these are intentionally dropped; only the body refreshes.
+        #expect(row.title == "Original Title")
+        #expect(row.link?.absoluteString == "https://example.com/evolving")
+        #expect(row.author == "Original Author")
+        #expect(row.categories == ["original-category"])
+        #expect(row.thumbnailURL?.absoluteString == "https://example.com/original-thumb.jpg")
+        // publishedDate — verbatim publisher value, never mutated post-insert
+        #expect(row.publishedDate == originalPublished)
+        // fetchedDate — load-bearing for displayedPublishedDate's clamp ceiling
+        #expect(row.fetchedDate == originalFetchedDate)
+        // User-generated saved state
+        #expect(row.isSaved == true)
+        #expect(row.savedDate == originalSavedDate)
+        // System-managed thumbnail caching state
+        #expect(row.isThumbnailCached == true)
+        #expect(row.thumbnailRetryCount == 2)
+
+        // ----- Idempotency: a second call with the same newerUpdated must be a no-op -----
+        // Catches a careless `>` → `>=` refactor and a refresh-loop double-pull that
+        // would otherwise re-bump sortDate, double-reset isRead, and re-drop content.
+        let afterFirstMutationSort = row.sortDate
+        try service.upsertArticles([revisedArticle], for: feed)
+        let afterIdempotent = try service.articles(for: feed)[0]
+        #expect(afterIdempotent.sortDate == afterFirstMutationSort)
+        #expect(afterIdempotent.wasUpdated == true)
+    }
+
+    @Test("Re-fetch with older updatedDate is a no-op")
+    @MainActor
+    func upsertArticlesNoOpForOlderUpdatedDate() throws {
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+
+        let baseline = Date(timeIntervalSince1970: 1_700_000_000)
+        try service.upsertArticles(
+            [TestFixtures.makeArticle(id: "stable", updatedDate: baseline)],
+            for: feed
+        )
+
+        // Re-fetch with an OLDER updatedDate — possible from clock skew or republishing
+        // an old <atom:updated>. Must not trigger detection.
+        let older = baseline.addingTimeInterval(-3600)
+        try service.upsertArticles(
+            [TestFixtures.makeArticle(id: "stable", updatedDate: older)],
+            for: feed
+        )
+
+        let afterRefetch = try service.articles(for: feed)
+        #expect(afterRefetch.count == 1)
+        #expect(afterRefetch[0].updatedDate == baseline) // not regressed to the older value
+        #expect(afterRefetch[0].wasUpdated == false)
+    }
+
+    @Test("Re-fetch with no updatedDate is a no-op even when existing has one")
+    @MainActor
+    func upsertArticlesNoOpWhenIncomingUpdatedDateNil() throws {
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+
+        let baseline = Date(timeIntervalSince1970: 1_700_000_000)
+        try service.upsertArticles(
+            [TestFixtures.makeArticle(id: "had-updated", updatedDate: baseline)],
+            for: feed
+        )
+
+        // Re-fetch with no updatedDate at all (e.g., the publisher dropped the element).
+        // Must not trigger detection — preserves the historical insert-only semantics
+        // for feeds that don't expose <updated>.
+        try service.upsertArticles(
+            [TestFixtures.makeArticle(id: "had-updated", updatedDate: nil)],
+            for: feed
+        )
+
+        let afterRefetch = try service.articles(for: feed)
+        #expect(afterRefetch.count == 1)
+        #expect(afterRefetch[0].updatedDate == baseline) // not cleared
+        #expect(afterRefetch[0].wasUpdated == false)
+    }
+
+    @Test("Pre-feature row (existing.updatedDate == nil) compares against publishedDate")
+    @MainActor
+    func upsertArticlesFallbackToPublishedDateForPreFeatureRow() throws {
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+
+        // Simulate an article persisted before the updatedDate column existed:
+        // updatedDate is nil but publishedDate is set.
+        let publishedDate = Date(timeIntervalSince1970: 1_700_000_000)
+        try service.upsertArticles(
+            [TestFixtures.makeArticle(
+                id: "pre-feature",
+                publishedDate: publishedDate,
+                updatedDate: nil
+            )],
+            for: feed
+        )
+
+        let beforeRefetch = try service.articles(for: feed)
+        #expect(beforeRefetch[0].updatedDate == nil)
+
+        // Re-fetch with an updatedDate strictly newer than the existing publishedDate.
+        // The fallback chain should kick in and trigger detection.
+        let newerUpdate = publishedDate.addingTimeInterval(3600)
+        try service.upsertArticles(
+            [TestFixtures.makeArticle(
+                id: "pre-feature",
+                publishedDate: publishedDate,
+                updatedDate: newerUpdate
+            )],
+            for: feed
+        )
+
+        let afterRefetch = try service.articles(for: feed)
+        #expect(afterRefetch[0].updatedDate == newerUpdate)
+        #expect(afterRefetch[0].wasUpdated == true)
+    }
+
+    @Test("Update detection deletes the cached PersistentArticleContent row from the store")
+    @MainActor
+    func upsertArticlesDropsCachedContentOnUpdate() throws {
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+
+        let baseline = Date(timeIntervalSince1970: 1_700_000_000)
+        try service.upsertArticles(
+            [TestFixtures.makeArticle(id: "with-content", updatedDate: baseline)],
+            for: feed
+        )
+
+        // Cache extracted content for the article.
+        let inserted = try service.articles(for: feed)[0]
+        let extracted = TestFixtures.makeArticleContent(
+            title: "Extracted Title",
+            htmlContent: "<p>Extracted body</p>",
+            textContent: "Extracted body"
+        )
+        try service.cacheContent(extracted, for: inserted)
+        try service.save()
+
+        // Pre-condition: cached content is present both via the relationship pointer
+        // AND as a row in the underlying store.
+        #expect(try service.cachedContent(for: inserted) != nil)
+        let contentBefore = try container.mainContext.fetch(FetchDescriptor<PersistentArticleContent>())
+        #expect(contentBefore.count == 1)
+
+        // Re-fetch with a strictly newer updatedDate — should drop the cached content.
+        try service.upsertArticles(
+            [TestFixtures.makeArticle(
+                id: "with-content",
+                updatedDate: baseline.addingTimeInterval(3600)
+            )],
+            for: feed
+        )
+        try service.save()
+
+        let afterRefetch = try service.articles(for: feed)[0]
+        #expect(afterRefetch.wasUpdated == true)
+        // Relationship pointer cleared on the article side.
+        #expect(afterRefetch.content == nil)
+        // AND the underlying PersistentArticleContent row is actually gone from the
+        // store — not just orphaned. This is what `cachedContent(for:)` couldn't
+        // distinguish: that helper just reads the relationship, which would return
+        // nil even if the row were leaking. Direct fetch is the only honest check.
+        let contentAfter = try container.mainContext.fetch(FetchDescriptor<PersistentArticleContent>())
+        #expect(contentAfter.isEmpty)
+    }
+
+    @Test("Re-fetch when both existing baselines are nil — skip detection rather than oscillate")
+    @MainActor
+    func upsertArticlesSkipsWhenBothBaselinesNil() throws {
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+
+        // Seed an article with neither publishedDate nor updatedDate — the only way
+        // this happens in production is when the parser rejected every date format.
+        try service.upsertArticles(
+            [TestFixtures.makeArticle(id: "no-baseline", publishedDate: nil, updatedDate: nil)],
+            for: feed
+        )
+
+        let beforeRefetch = try service.articles(for: feed)
+        #expect(beforeRefetch[0].publishedDate == nil)
+        #expect(beforeRefetch[0].updatedDate == nil)
+        let originalSortDate = beforeRefetch[0].sortDate
+
+        // Re-fetch with an incoming updatedDate. Without a baseline date on the
+        // existing row we cannot establish "strictly newer," so detection must be
+        // skipped — otherwise the article would oscillate between read and unread
+        // forever (the user would never be able to make it stop).
+        try service.upsertArticles(
+            [TestFixtures.makeArticle(id: "no-baseline", publishedDate: nil, updatedDate: Date())],
+            for: feed
+        )
+
+        let afterRefetch = try service.articles(for: feed)
+        #expect(afterRefetch.count == 1)
+        // No mutation: the row's updatedDate stays nil and wasUpdated stays false.
+        #expect(afterRefetch[0].updatedDate == nil)
+        #expect(afterRefetch[0].wasUpdated == false)
+        #expect(afterRefetch[0].sortDate == originalSortDate)
+    }
+
+    @Test("upsertArticles handles a mixed insert / update / no-op batch in one call")
+    @MainActor
+    func upsertArticlesMixedBatch() throws {
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+
+        let baseline = Date(timeIntervalSince1970: 1_700_000_000)
+
+        // Seed two existing articles: one will be updated, one will be a no-op.
+        try service.upsertArticles(
+            [
+                TestFixtures.makeArticle(id: "will-update", title: "A", updatedDate: baseline),
+                TestFixtures.makeArticle(id: "will-noop",   title: "B", updatedDate: baseline),
+            ],
+            for: feed
+        )
+
+        let seeded = try service.articles(for: feed)
+        let willUpdateOriginalSort = seeded.first { $0.articleID == "will-update" }!.sortDate
+
+        // Second call: one new insert, one genuine update, one no-op (same updatedDate).
+        // This is the realistic call shape — production passes the entire feed's
+        // worth of articles in one call, often mixing all three categories.
+        try service.upsertArticles(
+            [
+                TestFixtures.makeArticle(id: "will-insert", title: "C", updatedDate: baseline),
+                TestFixtures.makeArticle(id: "will-update", title: "A", updatedDate: baseline.addingTimeInterval(3600)),
+                TestFixtures.makeArticle(id: "will-noop",   title: "B", updatedDate: baseline),
+            ],
+            for: feed
+        )
+
+        let after = try service.articles(for: feed)
+        #expect(after.count == 3)
+
+        let inserted = after.first { $0.articleID == "will-insert" }!
+        let updated  = after.first { $0.articleID == "will-update" }!
+        let noop     = after.first { $0.articleID == "will-noop" }!
+
+        #expect(inserted.wasUpdated == false)
+        #expect(updated.wasUpdated == true)
+        #expect(updated.sortDate > willUpdateOriginalSort)
+        #expect(noop.wasUpdated == false)
     }
 
     @Test("markArticleRead toggles read status")

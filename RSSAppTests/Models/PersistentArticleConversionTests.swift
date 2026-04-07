@@ -4,9 +4,10 @@ import Foundation
 
 /// Verifies the `PersistentArticle.init(from: Article)` convenience initializer's
 /// `sortDate` computation. The init must:
-///   1. Preserve `publishedDate` exactly as the publisher provided it (used by a
-///      planned content-update detection feature that compares pubDate values
-///      across refreshes — clamping would destroy that signal).
+///   1. Preserve `publishedDate` exactly as the publisher provided it (the
+///      content-update detection feature in `FeedPersistenceService.upsertArticles`
+///      compares pubDate / updatedDate values across refreshes — clamping would
+///      destroy that signal).
 ///   2. Compute `sortDate` as `min(publishedDate ?? now, now)` so future-dated
 ///      articles sort as fresh (not pinned to the top of newest-first lists by
 ///      an inflated future timestamp).
@@ -72,10 +73,9 @@ struct PersistentArticleConversionTests {
         let persistent = PersistentArticle(from: article)
         #expect(persistent.publishedDate == published)
         #expect(persistent.updatedDate == updated)
-        // Fresh inserts must default wasUpdated to false. PR 1 only pins the false-side
-        // of the contract; the true-side (set by the upsert path on update detection)
-        // is owned by a follow-up to issue #74.
-        // TODO(issue #74): pin the upsert-detection true-side once that landing.
+        // Fresh inserts must default wasUpdated to false. The true-side of the contract
+        // (set by `FeedPersistenceService.upsertArticles` when an update bump is detected)
+        // is pinned by the upsert tests in `FeedPersistenceServiceTests` — see issue #74.
         #expect(persistent.wasUpdated == false)
 
         let roundTripped = persistent.toArticle()
@@ -115,7 +115,7 @@ struct PersistentArticleConversionTests {
         // Future publishedDate (Cloudflare-style scheduled post) is clamped to fetchedDate
         // for display purposes — same guarantee that clampedSortDate provides at insert
         // time, but recomputed inline so the row view never shows a future date even
-        // when a follow-up to issue #74 starts mutating sortDate on update detection.
+        // though `upsertArticles` mutates `sortDate` on content-update detection (issue #74).
         let future = Date().addingTimeInterval(4 * 60 * 60)
         let article = TestFixtures.makeArticle(publishedDate: future)
         let persistent = PersistentArticle(from: article)
