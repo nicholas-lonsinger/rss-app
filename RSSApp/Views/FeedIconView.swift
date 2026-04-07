@@ -5,28 +5,29 @@ struct FeedIconView: View {
 
     enum Style {
         /// 32pt square with a tertiary-fill background and globe placeholder while loading.
-        /// Used by `FeedListView` feed rows.
+        /// Used by `FeedRowView` (the row used in `FeedListView`).
         case standard
-        /// 14pt square with no background and no placeholder — renders nothing visible when
-        /// no cached icon is available, so surrounding text collapses cleanly next to it.
-        /// Used inline with `.caption`-sized text in cross-feed article rows.
+        /// 14pt square with no background and no placeholder — when no cached icon is available
+        /// the view still occupies its 14pt frame but renders no visible chrome, so surrounding
+        /// text sits flush against an empty slot rather than a globe glyph. Used inline with
+        /// `.caption`-sized text in cross-feed article rows.
         case inline
 
-        var iconSize: CGFloat {
+        fileprivate var iconSize: CGFloat {
             switch self {
             case .standard: return 32
             case .inline: return 14
             }
         }
 
-        var cornerRadius: CGFloat {
+        fileprivate var cornerRadius: CGFloat {
             switch self {
             case .standard: return 6
             case .inline: return 3
             }
         }
 
-        var showsPlaceholder: Bool {
+        fileprivate var showsPlaceholder: Bool {
             switch self {
             case .standard: return true
             case .inline: return false
@@ -48,7 +49,8 @@ struct FeedIconView: View {
             // RATIONALE: Color.clear is an always-present base so the ZStack has concrete
             // content even in the .inline style when no icon is cached. Without it, SwiftUI
             // can resolve the subtree to EmptyView and `.task(id:)` fails to attach to the
-            // view lifecycle, leaving the icon permanently blank.
+            // view lifecycle, leaving the icon permanently blank. Only `.inline` needs this —
+            // `.standard` always renders the RoundedRectangle base so its ZStack is never empty.
             Color.clear
 
             if style.showsPlaceholder {
