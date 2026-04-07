@@ -7,11 +7,8 @@ struct AllArticlesView: View {
     @State private var selectedArticleIndex: Int?
     @State private var showMarkAllReadConfirmation = false
     @State private var hasAppeared = false
-    // RATIONALE: With push navigation via .navigationDestination, popping the reader
-    // re-fires this view's onAppear. Skipping the reload on the post-reader onAppear
-    // preserves pagination depth and scroll position so the user returns to the same
-    // spot they left. The flag is armed when we push the reader and consumed by the
-    // next onAppear (the one triggered by the pop).
+    // RATIONALE: Snapshot preservation across reader push/pop. See
+    // ARCHITECTURE.md → "`returningFromReader` flag suppresses post-pop reload".
     @State private var returningFromReader = false
 
     private let thumbnailService: ArticleThumbnailCaching = ArticleThumbnailService()

@@ -7,13 +7,8 @@ struct ArticleListView: View {
     @State private var selectedArticleIndex: Int?
     @State private var showMarkAllReadConfirmation = false
     @State private var hasAppeared = false
-    // RATIONALE: With push navigation via .navigationDestination, popping the reader
-    // re-fires this view's onAppear. Without this flag, the onAppear reload would
-    // re-query persistence and (with "Show Unread Only" active) drop any article the
-    // user just marked as read in the reader. The flag is armed when we push the
-    // reader and consumed by the next onAppear (the one triggered by the pop) so
-    // read articles remain visible until the user explicitly leaves the screen,
-    // pulls to refresh, or changes a sort/filter.
+    // RATIONALE: Snapshot preservation across reader push/pop. See
+    // ARCHITECTURE.md → "`returningFromReader` flag suppresses post-pop reload".
     @State private var returningFromReader = false
 
     var body: some View {
