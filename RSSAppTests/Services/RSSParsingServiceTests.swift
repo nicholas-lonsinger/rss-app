@@ -415,6 +415,235 @@ struct RSSParsingServiceTests {
         #expect(feed.articles[1].author == "Bob")
     }
 
+    // MARK: - Update Detection Signals (issue #74)
+    //
+    // These tests pin down the parser's handling of `<updated>` and equivalent
+    // namespaced modification timestamps as first-class signals (separate from
+    // the publication date) that the persistence layer uses to detect when a
+    // publisher has revised an article.
+
+    @Test("Atom entry with both <published> and <updated> populates publishedDate from <published> and updatedDate from <updated>")
+    func atomDistinctPublishedAndUpdated() throws {
+        let data = Data(TestFixtures.sampleAtomXML.utf8)
+        let feed = try service.parse(data)
+
+        // sampleAtomXML's first entry has:
+        //   <published>2026-04-01T10:00:00-04:00</published>
+        //   <updated>2026-04-01T11:00:00-04:00</updated>
+        let entry = feed.articles[0]
+        #expect(entry.publishedDate != nil)
+        #expect(entry.updatedDate != nil)
+        #expect(entry.publishedDate != entry.updatedDate)
+        // The updated timestamp should be one hour after published.
+        if let published = entry.publishedDate, let updated = entry.updatedDate {
+            #expect(updated.timeIntervalSince(published) == 3600)
+        }
+    }
+
+    @Test("Atom entry with only <updated> populates both publishedDate and updatedDate from it")
+    func atomUpdatedOnlyFallback() throws {
+        let data = Data(TestFixtures.atomUpdatedOnlyXML.utf8)
+        let feed = try service.parse(data)
+
+        let entry = feed.articles[0]
+        #expect(entry.publishedDate != nil)
+        #expect(entry.updatedDate != nil)
+        // The fallback path should set both fields to the same parsed value.
+        #expect(entry.publishedDate == entry.updatedDate)
+    }
+
+    @Test("RSS item with only <pubDate> has nil updatedDate")
+    func rssPubDateOnlyHasNilUpdatedDate() throws {
+        let data = Data(TestFixtures.sampleRSSXML.utf8)
+        let feed = try service.parse(data)
+
+        // None of the items in sampleRSSXML carry any update signal.
+        for article in feed.articles {
+            #expect(article.publishedDate != nil)
+            #expect(article.updatedDate == nil)
+        }
+    }
+
+    @Test("RSS item with <dc:modified> populates updatedDate distinctly from publishedDate")
+    func rssDcModifiedPopulatesUpdatedDate() throws {
+        let data = Data(TestFixtures.rssWithDcModifiedXML.utf8)
+        let feed = try service.parse(data)
+
+        let item = feed.articles[0]
+        #expect(item.publishedDate != nil)
+        #expect(item.updatedDate != nil)
+        #expect(item.publishedDate != item.updatedDate)
+        // dc:modified is 2026-04-01, pubDate is 2026-03-30, so updated > published.
+        if let published = item.publishedDate, let updated = item.updatedDate {
+            #expect(updated > published)
+        }
+    }
+
+    @Test("RSS item with <dcterms:modified> populates updatedDate")
+    func rssDctermsModifiedPopulatesUpdatedDate() throws {
+        let data = Data(TestFixtures.rssWithDctermsModifiedXML.utf8)
+        let feed = try service.parse(data)
+
+        let item = feed.articles[0]
+        #expect(item.publishedDate != nil)
+        #expect(item.updatedDate != nil)
+        #expect(item.publishedDate != item.updatedDate)
+    }
+
+    @Test("RSS item with <atom:updated> embedded via xmlns:atom populates updatedDate")
+    func rssAtomUpdatedPopulatesUpdatedDate() throws {
+        let data = Data(TestFixtures.rssWithAtomUpdatedXML.utf8)
+        let feed = try service.parse(data)
+
+        let item = feed.articles[0]
+        #expect(item.publishedDate != nil)
+        #expect(item.updatedDate != nil)
+        #expect(item.publishedDate != item.updatedDate)
+    }
+
+    @Test("RSS item with only <dc:date> populates publishedDate but not updatedDate")
+    func rssDcDateIsPublicationFallbackOnly() throws {
+        let data = Data(TestFixtures.rssWithDcDateOnlyXML.utf8)
+        let feed = try service.parse(data)
+
+        let item = feed.articles[0]
+        // dc:date is a publication signal, not an update signal — should populate
+        // publishedDate via the fallback chain and leave updatedDate nil.
+        #expect(item.publishedDate != nil)
+        #expect(item.updatedDate == nil)
+    }
+
+    @Test("RSS <pubDate> takes precedence over <dc:date> for publishedDate")
+    func rssPubDatePrecedesDcDate() throws {
+        let data = Data(TestFixtures.rssWithPubDateAndDcDateXML.utf8)
+        let feed = try service.parse(data)
+
+        let item = feed.articles[0]
+        #expect(item.publishedDate != nil)
+        #expect(item.updatedDate == nil)
+
+        // pubDate is 2026-03-30; dc:date is 2020-01-01. The parsed publishedDate
+        // must be the 2026 value, not the 2020 fallback.
+        let calendar = Calendar(identifier: .gregorian)
+        let year = calendar.component(.year, from: item.publishedDate!)
+        #expect(year == 2026)
+    }
+
+    @Test("RSS <pubDate> wins over <dc:date> regardless of source-document order")
+    func rssPubDatePrecedenceIsOrderIndependent() throws {
+        // Same precedence rule as `rssPubDatePrecedesDcDate`, but with the elements
+        // in the opposite source order: <dc:date> appears BEFORE <pubDate>. The
+        // precedence is enforced by `<pubDate>` setting `itemPubDate` unconditionally,
+        // not by switch-arm ordering, so the order in the XML must not matter.
+        let data = Data(TestFixtures.rssWithDcDateBeforePubDateXML.utf8)
+        let feed = try service.parse(data)
+
+        let item = feed.articles[0]
+        #expect(item.publishedDate != nil)
+        #expect(item.updatedDate == nil)
+
+        let calendar = Calendar(identifier: .gregorian)
+        let year = calendar.component(.year, from: item.publishedDate!)
+        #expect(year == 2026)
+    }
+
+    @Test("RSS item with only <dcterms:created> populates publishedDate but not updatedDate")
+    func rssDctermsCreatedIsPublicationFallbackOnly() throws {
+        // dcterms:created is grouped with dc:date in a single switch case in the parser.
+        // Without this dedicated test, a future refactor that splits the case (e.g., to
+        // give dcterms:created different precedence) would have zero coverage signal.
+        let data = Data(TestFixtures.rssWithDctermsCreatedOnlyXML.utf8)
+        let feed = try service.parse(data)
+
+        let item = feed.articles[0]
+        #expect(item.publishedDate != nil)
+        #expect(item.updatedDate == nil)
+    }
+
+    @Test("Unparseable <dc:modified> yields nil updatedDate without poisoning publishedDate")
+    func malformedUpdatedDateYieldsNil() throws {
+        // Pins the parseDate-returns-nil contract for the new updatedDate code path.
+        // If parseDate ever changed its nil-handling (e.g., started returning
+        // Date.distantPast for unparseable input), every article in every feed would
+        // suddenly look "updated" forever.
+        let data = Data(TestFixtures.rssWithMalformedDcModifiedXML.utf8)
+        let feed = try service.parse(data)
+
+        let item = feed.articles[0]
+        // pubDate must still resolve normally — the failed updatedDate parse must not
+        // contaminate the rest of the item.
+        #expect(item.publishedDate != nil)
+        // Garbage modification timestamp must yield nil, not an unintended fallback.
+        #expect(item.updatedDate == nil)
+    }
+
+    @Test("Implausibly old <dc:modified> is rejected by sanity check and yields nil updatedDate")
+    func implausiblyOldUpdatedDateRejected() throws {
+        // The parser's parseDate rejects pre-1990 dates via sanityChecked. This pins
+        // that the rejection path applies to the new updatedDate code path too — without
+        // it, a refactor that switches sanityChecked to clamp instead of reject would
+        // silently start firing update detection for any feed with a malformed pre-1990
+        // timestamp.
+        let xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <rss version="2.0" xmlns:dc="http://purl.org/dc/elements/1.1/">
+            <channel>
+                <title>Old Modified</title>
+                <link>https://example.com</link>
+                <description>desc</description>
+                <item>
+                    <title>Item</title>
+                    <link>https://example.com/old</link>
+                    <description>d</description>
+                    <guid>old-modified</guid>
+                    <pubDate>Mon, 30 Mar 2026 12:00:00 +0000</pubDate>
+                    <dc:modified>1985-01-01T00:00:00Z</dc:modified>
+                </item>
+            </channel>
+            </rss>
+            """
+        let feed = try service.parse(Data(xml.utf8))
+
+        #expect(feed.articles[0].publishedDate != nil)
+        #expect(feed.articles[0].updatedDate == nil)
+    }
+
+    @Test("itemUpdatedDate accumulator resets between sibling items")
+    func updatedDateAccumulatorResetsBetweenItems() throws {
+        // The parser uses an instance-level accumulator for itemUpdatedDate that must
+        // be reset on each <item>/<entry> start. Without the reset, an item with no
+        // update signal would silently inherit the previous item's value — a textbook
+        // silent-contamination regression hazard for the brittle accumulator pattern.
+        // This test pins the reset by parsing a two-item feed where item 1 has
+        // <dc:modified> and item 2 has only <pubDate>.
+        let data = Data(TestFixtures.rssAccumulatorLeakageProbeXML.utf8)
+        let feed = try service.parse(data)
+
+        #expect(feed.articles.count == 2)
+        // Item 1: has dc:modified
+        #expect(feed.articles[0].updatedDate != nil)
+        #expect(feed.articles[0].publishedDate != nil)
+        // Item 2: must NOT inherit item 1's update value
+        #expect(feed.articles[1].updatedDate == nil)
+        #expect(feed.articles[1].publishedDate != nil)
+        // Sanity: items must have distinct publishedDates from their own <pubDate>
+        // elements, not from cross-contamination
+        #expect(feed.articles[0].publishedDate != feed.articles[1].publishedDate)
+    }
+
+    @Test("Atom entry without <updated> following an entry with <updated> has nil updatedDate")
+    func atomUpdatedAccumulatorResetsBetweenEntries() throws {
+        // sampleAtomXML has the perfect shape: entry[0] has <published> + <updated>,
+        // entry[1] has <published> only. Pins the same accumulator-reset invariant as
+        // `updatedDateAccumulatorResetsBetweenItems`, but for the <entry> code path.
+        let data = Data(TestFixtures.sampleAtomXML.utf8)
+        let feed = try service.parse(data)
+
+        #expect(feed.articles.count == 2)
+        #expect(feed.articles[0].updatedDate != nil)
+        #expect(feed.articles[1].updatedDate == nil)
+    }
+
     // MARK: - Date Parsing (Absolute Moment)
 
     /// Builds a minimal RSS feed with a single item and a configurable pubDate string.

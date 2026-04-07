@@ -122,6 +122,7 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
     private var itemDescription = ""
     private var itemGuid = ""
     private var itemPubDate = ""
+    private var itemUpdatedDate = ""
     private var itemThumbnailURL: String?
     private var itemEnclosureURL: String?
     private var itemAuthor = ""
@@ -212,6 +213,7 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
             itemDescription = ""
             itemGuid = ""
             itemPubDate = ""
+            itemUpdatedDate = ""
             itemThumbnailURL = nil
             itemEnclosureURL = nil
             itemAuthor = ""
@@ -398,12 +400,41 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
                 if itemGuid.isEmpty {
                     itemGuid = textBuffer
                 }
-            case "pubDate":
+            case "pubDate", "published":
+                // RSS <pubDate> and Atom <published> are the format-native publication
+                // timestamps. Both set itemPubDate unconditionally — this is what enforces
+                // the precedence rule that Dublin Core fallbacks (dc:date / dcterms:created
+                // below) cannot clobber a real publication date, regardless of element
+                // order in the source XML.
                 itemPubDate = textBuffer
-            case "published":
-                itemPubDate = textBuffer
-            case "updated":
-                // Atom updated date; fallback when neither RSS <pubDate> nor Atom <published> was found
+            // RATIONALE: namespace processing is disabled on the XMLParser
+            // (`shouldProcessNamespaces = false` at parse(_:)), so namespaced elements
+            // arrive here as their literal qualified names. The cases below match the
+            // standard prefixes — `dc:`, `dcterms:`, and `atom:` — which covers the
+            // overwhelming majority of feeds. A feed declaring its own custom prefix for
+            // the Dublin Core or Atom namespace (e.g., `xmlns:foo="http://purl.org/dc/elements/1.1/"`
+            // and using `foo:modified`) will not be matched. The principled fix would be
+            // enabling namespace processing and reworking every existing namespaced case
+            // in both `didStartElement` (e.g., `media:thumbnail`/`media:content` attribute
+            // extraction) and `didEndElement` (`content:encoded`); that is out of scope
+            // for issue #74. The four cases below — Atom native + the namespaced aliases —
+            // share identical bodies and are folded into a single switch arm.
+            case "updated", "dc:modified", "dcterms:modified", "atom:updated":
+                // First-class update signal. Captured into itemUpdatedDate unconditionally,
+                // and *also* used as a fallback for the publication date when no
+                // <pubDate>/<published> was present (preserves the historical Atom
+                // <updated>-as-published-fallback semantics).
+                itemUpdatedDate = textBuffer
+                if itemPubDate.isEmpty {
+                    itemPubDate = textBuffer
+                }
+            case "dc:date", "dcterms:created":
+                // Dublin Core publication date — a publication signal, NOT an update
+                // signal, so it deliberately does not populate itemUpdatedDate. The
+                // `if itemPubDate.isEmpty` guard is what enforces precedence: if a native
+                // <pubDate> or <published> appears anywhere in the same item, those arms
+                // overwrite itemPubDate unconditionally and the value set here is replaced.
+                // The precedence therefore holds regardless of element order in the XML.
                 if itemPubDate.isEmpty {
                     itemPubDate = textBuffer
                 }
@@ -450,7 +481,7 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
                 if channelDescription.isEmpty { channelDescription = textBuffer }
             case "updated", "lastBuildDate":
                 if channelUpdated == nil {
-                    channelUpdated = Self.parseDate(textBuffer)
+                    channelUpdated = Self.parseDate(textBuffer, field: "channel-updated")
                 }
             case "url":
                 // RSS <image><url>text</url></image>
@@ -530,7 +561,8 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
             link: URL(string: linkString),
             articleDescription: rawDescription,
             snippet: snippet,
-            publishedDate: Self.parseDate(itemPubDate),
+            publishedDate: Self.parseDate(itemPubDate, field: "pubDate"),
+            updatedDate: Self.parseDate(itemUpdatedDate, field: "updated"),
             thumbnailURL: thumbnailURL,
             author: authorTrimmed.isEmpty ? nil : authorTrimmed,
             categories: itemCategories
@@ -559,17 +591,17 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
     /// accepting `"26"` as year 26 AD) are rejected to prevent corrupt timestamps from
     /// poisoning cross-feed sorting and retention. See GitHub issue #208 for the motivating
     /// bug report on incorrect article timestamps.
-    private static func parseDate(_ dateString: String) -> Date? {
+    private static func parseDate(_ dateString: String, field: String = "feed-date") -> Date? {
         let trimmed = dateString.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
 
         // 1. ISO 8601 / RFC 3339 — most modern feeds use this. Handles `...Z`,
         //    `...+0000`, `...-07:00`, and fractional-second variants.
         if let date = ISO8601Formatters.standard.date(from: trimmed) {
-            return sanityChecked(date, input: trimmed, source: "ISO8601")
+            return sanityChecked(date, input: trimmed, source: "ISO8601", field: field)
         }
         if let date = ISO8601Formatters.fractional.date(from: trimmed) {
-            return sanityChecked(date, input: trimmed, source: "ISO8601 fractional")
+            return sanityChecked(date, input: trimmed, source: "ISO8601 fractional", field: field)
         }
 
         // 2. Explicit-zone DateFormatter patterns (RFC 822 / RFC 2822 and common variants).
@@ -578,7 +610,7 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
         //    Each formatter is pre-built once in `HoistedDateFormatters` with its
         //    `dateFormat` fixed at initialization — we never mutate shared state here, so
         //    concurrent calls from multiple feed refreshes are safe without locking.
-        if let date = parseUsingZonedFormats(trimmed) {
+        if let date = parseUsingZonedFormats(trimmed, field: field) {
             return date
         }
 
@@ -591,7 +623,7 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
         //     token to its numeric offset so the standard numeric-offset formatters can
         //     consume it. See GitHub issue #213.
         if let substituted = substituteNamedZone(in: trimmed),
-           let date = parseUsingZonedFormats(substituted) {
+           let date = parseUsingZonedFormats(substituted, field: field) {
             return date
         }
 
@@ -606,14 +638,14 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
         for (format, formatter) in HoistedDateFormatters.zoneless {
             if let date = formatter.date(from: trimmed) {
                 Self.logger.debug(
-                    "Feed date '\(trimmed, privacy: .public)' had no timezone; interpreted as UTC (format '\(format, privacy: .public)')"
+                    "Feed date '\(trimmed, privacy: .public)' (field: \(field, privacy: .public)) had no timezone; interpreted as UTC (format '\(format, privacy: .public)')"
                 )
-                return sanityChecked(date, input: trimmed, source: "zoneless '\(format)'")
+                return sanityChecked(date, input: trimmed, source: "zoneless '\(format)'", field: field)
             }
         }
 
         Self.logger.warning(
-            "Feed date '\(trimmed, privacy: .public)' did not match any known format; returning nil"
+            "Feed date '\(trimmed, privacy: .public)' (field: \(field, privacy: .public)) did not match any known format; returning nil"
         )
         return nil
     }
@@ -622,10 +654,10 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
     /// first sanity-checked match. Extracted so the named-zone preprocessing pass can
     /// re-run the same loop against a rewritten input without duplicating the formatter
     /// lookup.
-    private static func parseUsingZonedFormats(_ input: String) -> Date? {
+    private static func parseUsingZonedFormats(_ input: String, field: String) -> Date? {
         for (format, formatter) in HoistedDateFormatters.zoned {
             if let date = formatter.date(from: input) {
-                return sanityChecked(date, input: input, source: "zoned '\(format)'")
+                return sanityChecked(date, input: input, source: "zoned '\(format)'", field: field)
             }
         }
         return nil
@@ -767,10 +799,10 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
     /// destroy that signal. The sort/retention/display problem caused by future dates is
     /// solved at insert time by `PersistentArticle.init(from:)`, which computes a
     /// separate clamped `sortDate` field — see `RSSApp/Models/ModelConversion.swift`.
-    private static func sanityChecked(_ date: Date, input: String, source: String) -> Date? {
+    private static func sanityChecked(_ date: Date, input: String, source: String, field: String) -> Date? {
         if date < Self.minimumPlausibleDate {
             Self.logger.warning(
-                "Rejected implausibly-old parsed date \(date, privacy: .public) from input '\(input, privacy: .public)' (source: \(source, privacy: .public))"
+                "Rejected implausibly-old parsed date \(date, privacy: .public) from input '\(input, privacy: .public)' (source: \(source, privacy: .public), field: \(field, privacy: .public))"
             )
             return nil
         }
