@@ -267,7 +267,7 @@ RSSAppApp (@main)
 
 ## Test Coverage
 
-**61 test files: 41 test suites, 16 mock implementations, 4 shared helpers, 1 HTML fixture.**
+**61 test files: 41 test suites, 17 mock implementations, 4 shared helpers, 1 HTML fixture.**
 
 **Patterns:** Swift Testing (`@Suite`, `@Test`, `#expect`). Protocol-based dependency injection with 17 mocks (`MockFeedPersistenceService`, `MockFeedFetchingService`, `MockFeedIconService`, `MockArticleThumbnailService`, `MockThumbnailPrefetchService`, `MockOPMLService`, `MockClaudeAPIService`, `MockKeychainService`, `MockArticleExtractionService`, `MockContentExtractor`, `MockFeedStorageService`, `MockURLSessionBytesProvider`, `MockHTMLURLSessionProvider`, `MockSlowHTMLURLSessionProvider`, `MockArticleRetentionService`, `MockAppBadgeService`, `MockNetworkMonitorService`). In-memory `ModelContainer` via `SwiftDataTestHelpers` for SwiftData integration tests. `WKWebView` integration tests via `WebViewTestHelpers` for DOM serialization and extraction pipeline. `MockURLSessionBytesProvider` with `URLProtocol` interception for `ClaudeAPIService.sendMessage` integration tests; `MockHTMLURLSessionProvider` with `URLProtocol` interception for `ArticleThumbnailService.resolveOGImage` HTTP-classification tests; `MockSlowHTMLURLSessionProvider` with `URLProtocol` interception that delivers an initial chunk and then surfaces a configurable mid-stream `URLError` (default `.cancelled`) for `resolveOGImage` cancellation-normalization tests. Shared `TestFixtures` factory methods for `Article`, `RSSFeed`, `PersistentFeed`, `PersistentArticle`, and sample RSS XML.
 
