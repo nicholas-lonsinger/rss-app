@@ -93,8 +93,8 @@ final class MockFeedPersistenceService: FeedPersisting {
         if let error = errorToThrow { throw error }
         let all = (articlesByFeedID[feed.id] ?? [])
             .sorted { ascending
-                ? ($0.publishedDate ?? .distantPast) < ($1.publishedDate ?? .distantPast)
-                : ($0.publishedDate ?? .distantPast) > ($1.publishedDate ?? .distantPast)
+                ? $0.sortDate < $1.sortDate
+                : $0.sortDate > $1.sortDate
             }
         return Array(all.dropFirst(offset).prefix(limit))
     }
@@ -104,8 +104,8 @@ final class MockFeedPersistenceService: FeedPersisting {
         let all = (articlesByFeedID[feed.id] ?? [])
             .filter { !$0.isRead }
             .sorted { ascending
-                ? ($0.publishedDate ?? .distantPast) < ($1.publishedDate ?? .distantPast)
-                : ($0.publishedDate ?? .distantPast) > ($1.publishedDate ?? .distantPast)
+                ? $0.sortDate < $1.sortDate
+                : $0.sortDate > $1.sortDate
             }
         return Array(all.dropFirst(offset).prefix(limit))
     }
@@ -114,7 +114,7 @@ final class MockFeedPersistenceService: FeedPersisting {
         if let error = errorToThrow { throw error }
         return articlesByFeedID.values
             .flatMap { $0 }
-            .sorted { ($0.publishedDate ?? .distantPast) > ($1.publishedDate ?? .distantPast) }
+            .sorted { $0.sortDate > $1.sortDate }
     }
 
     func allArticles(offset: Int, limit: Int, ascending: Bool = false) throws -> [PersistentArticle] {
@@ -122,8 +122,8 @@ final class MockFeedPersistenceService: FeedPersisting {
         let all = articlesByFeedID.values
             .flatMap { $0 }
             .sorted { ascending
-                ? ($0.publishedDate ?? .distantPast) < ($1.publishedDate ?? .distantPast)
-                : ($0.publishedDate ?? .distantPast) > ($1.publishedDate ?? .distantPast)
+                ? $0.sortDate < $1.sortDate
+                : $0.sortDate > $1.sortDate
             }
         return Array(all.dropFirst(offset).prefix(limit))
     }
@@ -133,7 +133,7 @@ final class MockFeedPersistenceService: FeedPersisting {
         return articlesByFeedID.values
             .flatMap { $0 }
             .filter { !$0.isRead }
-            .sorted { ($0.publishedDate ?? .distantPast) > ($1.publishedDate ?? .distantPast) }
+            .sorted { $0.sortDate > $1.sortDate }
     }
 
     func allUnreadArticles(offset: Int, limit: Int, ascending: Bool = false) throws -> [PersistentArticle] {
@@ -142,8 +142,8 @@ final class MockFeedPersistenceService: FeedPersisting {
             .flatMap { $0 }
             .filter { !$0.isRead }
             .sorted { ascending
-                ? ($0.publishedDate ?? .distantPast) < ($1.publishedDate ?? .distantPast)
-                : ($0.publishedDate ?? .distantPast) > ($1.publishedDate ?? .distantPast)
+                ? $0.sortDate < $1.sortDate
+                : $0.sortDate > $1.sortDate
             }
         return Array(all.dropFirst(offset).prefix(limit))
     }
@@ -268,7 +268,13 @@ final class MockFeedPersistenceService: FeedPersisting {
         if let error = errorToThrow { throw error }
         let all = articlesByFeedID.values
             .flatMap { $0 }
-            .sorted { ($0.publishedDate ?? .distantPast) < ($1.publishedDate ?? .distantPast) }
+            .sorted {
+                if $0.sortDate != $1.sortDate {
+                    return $0.sortDate < $1.sortDate
+                }
+                // Tie-breaker by articleID matches production's secondary SortDescriptor
+                return $0.articleID < $1.articleID
+            }
         let totalCount = all.count
         guard totalCount > limit else { return [] }
         let excess = totalCount - limit

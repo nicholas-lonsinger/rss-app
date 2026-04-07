@@ -50,19 +50,20 @@ struct CrossFeedArticleRowView: View {
                         Text(feed.title)
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                    }
 
-                    if article.feed?.title != nil, article.publishedDate != nil {
                         Text("\u{00B7}")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
 
-                    if let date = article.publishedDate {
-                        Text(date, style: .relative)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                    // Display the clamped `sortDate` rather than the raw `publishedDate` so
+                    // future-dated scheduled posts (e.g., the Cloudflare blog) render as
+                    // "just now" instead of a misleading "3 hours ago" — see
+                    // `PersistentArticle.sortDate` for the rationale. `sortDate` is
+                    // non-optional, so no `if let` guard is needed.
+                    Text(article.sortDate, style: .relative)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
                 .padding(.top, 2)
             }

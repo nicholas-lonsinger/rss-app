@@ -1102,17 +1102,6 @@ struct RSSParsingServiceTests {
         #expect(feed.articles[0].publishedDate == nil)
     }
 
-    @Test("Far-future year is rejected by the sanity check")
-    func farFutureDateIsRejected() throws {
-        // A date thousands of years in the future is almost certainly a typo or a
-        // corrupted feed; it should not displace legitimate articles in retention or
-        // sorting. See issue #208.
-        let xml = Self.rssXML(pubDate: "Mon, 06 Apr 9999 08:30:00 +0000")
-        let feed = try service.parse(Data(xml.utf8))
-
-        #expect(feed.articles[0].publishedDate == nil)
-    }
-
     // MARK: - Date Parsing (Per-Format Coverage)
 
     // The tests below exercise each individual entry in `HoistedDateFormatters.zoned`

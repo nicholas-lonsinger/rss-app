@@ -1230,4 +1230,90 @@ struct FeedPersistenceServiceTests {
         #expect(toDelete.count == 1)
         #expect(toDelete[0].articleID == "a2")
     }
+
+    // MARK: - sortDate Behavior
+
+    // The two tests below pin the cross-feed sort and retention behavior against
+    // future-dated articles, the bug that motivated `sortDate`. Real-world feeds
+    // (e.g., the Cloudflare blog) publish scheduled posts whose `pubDate` lies
+    // hours in the future relative to the feed's `lastBuildDate`. Sorting by raw
+    // `publishedDate` would pin those articles to the top of newest-first lists
+    // and shield genuinely-old articles from retention. `sortDate` clamps any
+    // future date to ingestion time at insert.
+
+    @Test("allArticles uses clamped sortDate for future-dated articles, preserving original publishedDate")
+    @MainActor
+    func allArticlesClampsFutureDatedArticleSortDate() throws {
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+
+        // Reproduces the Cloudflare bug: a feed contains an article whose pubDate
+        // is 4 hours in the future (a scheduled post). The bug was that this
+        // article would sort by its 4-hour-future raw pubDate, pinning it to the
+        // top of newest-first lists by an enormous margin. With sortDate, the
+        // article is clamped to ingestion time and sorts as a freshly-ingested
+        // article (its sortDate ≈ now), while the original publishedDate is
+        // preserved verbatim for the planned content-update detection feature.
+        let before = Date()
+        try service.upsertArticles([
+            TestFixtures.makeArticle(id: "cloudflare", publishedDate: Date().addingTimeInterval(4 * 60 * 60)),
+            TestFixtures.makeArticle(id: "verge", publishedDate: Date().addingTimeInterval(-30)),
+        ], for: feed)
+        let after = Date()
+        try service.save()
+
+        let result = try service.allArticles()
+        #expect(result.count == 2)
+
+        let cloudflare = try #require(result.first { $0.articleID == "cloudflare" })
+        let verge = try #require(result.first { $0.articleID == "verge" })
+
+        // Load-bearing: publishedDate is preserved exactly as the publisher provided
+        // it. A planned content-update detection feature compares pubDate values
+        // across refreshes, so any mutation here would destroy that signal.
+        #expect(cloudflare.publishedDate != nil)
+        #expect(cloudflare.publishedDate! > Date()) // still 4 hours in the future, untouched
+
+        // sortDate is clamped to ingestion time (somewhere between `before` and
+        // `after`). It must NOT equal the raw 4-hour-future publishedDate.
+        #expect(cloudflare.sortDate >= before)
+        #expect(cloudflare.sortDate <= after)
+        #expect(cloudflare.sortDate < cloudflare.publishedDate!)
+
+        // verge's past pubDate passes through unchanged (min(past, now) == past).
+        #expect(verge.sortDate == verge.publishedDate)
+    }
+
+    @Test("oldestArticleIDsExceedingLimit uses sortDate so future-dated articles are not deleted prematurely")
+    @MainActor
+    func oldestArticleIDsExceedingLimitUsesSortDate() throws {
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+
+        // Three articles by ingestion-clamped sortDate ordering:
+        //   - "genuinely-old": publishedDate = 1970-epoch+1000 → sortDate = past
+        //   - "recent-real":   publishedDate = -60s → sortDate = -60s
+        //   - "future-claimed": publishedDate = +10h → sortDate ≈ now (clamped)
+        // With limit=1 (excess=2), the two oldest by sortDate should be returned:
+        // "genuinely-old" and "recent-real". "future-claimed" must NOT be returned
+        // because its sortDate ≈ now is the freshest, even though its publishedDate
+        // would otherwise sort it as the newest if we used the raw value.
+        try service.upsertArticles([
+            TestFixtures.makeArticle(id: "genuinely-old", publishedDate: Date(timeIntervalSince1970: 1000)),
+            TestFixtures.makeArticle(id: "future-claimed", publishedDate: Date().addingTimeInterval(10 * 60 * 60)),
+            TestFixtures.makeArticle(id: "recent-real", publishedDate: Date().addingTimeInterval(-60)),
+        ], for: feed)
+        try service.save()
+
+        let result = try service.oldestArticleIDsExceedingLimit(1)
+        #expect(result.count == 2)
+        let ids = Set(result.map(\.articleID))
+        #expect(ids.contains("genuinely-old"))
+        #expect(ids.contains("recent-real"))
+        #expect(!ids.contains("future-claimed"))
+    }
 }

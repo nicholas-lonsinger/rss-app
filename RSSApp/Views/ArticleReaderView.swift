@@ -47,7 +47,7 @@ struct ArticleReaderView: View {
             guard !articles.isEmpty else {
                 Self.logger.fault("articles array is empty — returning sentinel article")
                 assertionFailure("article accessed with empty articles array")
-                return PersistentArticle(articleID: "", title: "")
+                return PersistentArticle(articleID: "", title: "", sortDate: Date())
             }
             // RATIONALE: During pagination, currentIndex may temporarily exceed the local
             // articles snapshot (value-type copy) until SwiftUI re-renders with the updated

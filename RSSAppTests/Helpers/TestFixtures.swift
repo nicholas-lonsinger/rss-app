@@ -582,9 +582,15 @@ enum TestFixtures {
         isSaved: Bool = false,
         savedDate: Date? = nil,
         isThumbnailCached: Bool = false,
-        thumbnailRetryCount: Int = 0
+        thumbnailRetryCount: Int = 0,
+        sortDate: Date? = nil
     ) -> PersistentArticle {
-        PersistentArticle(
+        // Match production semantics: when callers don't override `sortDate`, it
+        // defaults to the supplied `publishedDate` (which itself defaults to a
+        // fixed past timestamp), or to `Date()` if both are nil. This keeps the
+        // ~90 existing call sites that only set `publishedDate` working unchanged.
+        let effectiveSortDate = sortDate ?? publishedDate ?? Date()
+        return PersistentArticle(
             articleID: articleID,
             title: title,
             link: link,
@@ -598,7 +604,8 @@ enum TestFixtures {
             isSaved: isSaved,
             savedDate: savedDate,
             isThumbnailCached: isThumbnailCached,
-            thumbnailRetryCount: thumbnailRetryCount
+            thumbnailRetryCount: thumbnailRetryCount,
+            sortDate: effectiveSortDate
         )
     }
 

@@ -21,31 +21,33 @@ protocol FeedPersisting: Sendable {
 
     // MARK: Article operations
 
-    /// Returns all articles for a feed, sorted by published date descending (newest first).
+    /// Returns all articles for a feed, sorted by `sortDate` descending (newest first).
+    /// `sortDate` is the publisher-supplied `publishedDate` clamped to ingestion time at insert
+    /// — see `PersistentArticle.sortDate` for the rationale.
     func articles(for feed: PersistentFeed) throws -> [PersistentArticle]
-    /// Returns a page of articles for a feed, sorted by published date.
+    /// Returns a page of articles for a feed, sorted by `sortDate`.
     /// - Parameters:
     ///   - offset: Number of articles to skip from the beginning of the sorted result set.
     ///   - limit: Maximum number of articles to return.
     ///   - ascending: When `true`, sorts oldest first; when `false` (default), sorts newest first.
     func articles(for feed: PersistentFeed, offset: Int, limit: Int, ascending: Bool) throws -> [PersistentArticle]
-    /// Returns a page of unread articles for a feed, sorted by published date.
+    /// Returns a page of unread articles for a feed, sorted by `sortDate`.
     /// - Parameters:
     ///   - offset: Number of articles to skip from the beginning of the sorted result set.
     ///   - limit: Maximum number of articles to return.
     ///   - ascending: When `true`, sorts oldest first; when `false` (default), sorts newest first.
     func unreadArticles(for feed: PersistentFeed, offset: Int, limit: Int, ascending: Bool) throws -> [PersistentArticle]
-    /// Returns all articles across all feeds, sorted by published date descending (newest first).
+    /// Returns all articles across all feeds, sorted by `sortDate` descending (newest first).
     func allArticles() throws -> [PersistentArticle]
-    /// Returns a page of all articles across all feeds, sorted by published date.
+    /// Returns a page of all articles across all feeds, sorted by `sortDate`.
     /// - Parameters:
     ///   - offset: Number of articles to skip from the beginning of the sorted result set.
     ///   - limit: Maximum number of articles to return.
     ///   - ascending: When `true`, sorts oldest first; when `false` (default), sorts newest first.
     func allArticles(offset: Int, limit: Int, ascending: Bool) throws -> [PersistentArticle]
-    /// Returns all unread articles across all feeds, sorted by published date descending (newest first).
+    /// Returns all unread articles across all feeds, sorted by `sortDate` descending (newest first).
     func allUnreadArticles() throws -> [PersistentArticle]
-    /// Returns a page of unread articles across all feeds, sorted by published date.
+    /// Returns a page of unread articles across all feeds, sorted by `sortDate`.
     /// - Parameters:
     ///   - offset: Number of articles to skip from the beginning of the sorted result set.
     ///   - limit: Maximum number of articles to return.
@@ -92,8 +94,10 @@ protocol FeedPersisting: Sendable {
     func totalArticleCount() throws -> Int
 
     /// Returns the article IDs of the oldest unsaved articles exceeding the given limit,
-    /// sorted by `publishedDate` ascending (oldest first). Saved articles are exempt from
-    /// retention cleanup and are excluded from the returned results.
+    /// sorted by `sortDate` ascending (oldest first). Saved articles are exempt from
+    /// retention cleanup and are excluded from the returned results. Sorting by `sortDate`
+    /// rather than `publishedDate` prevents future-dated scheduled posts (e.g., the
+    /// Cloudflare blog's upcoming-content feed) from being deleted prematurely.
     /// - Parameter limit: The maximum number of articles to retain.
     /// - Returns: Article IDs that should be deleted, along with their `isThumbnailCached` flag.
     func oldestArticleIDsExceedingLimit(_ limit: Int) throws -> [(articleID: String, isThumbnailCached: Bool)]
@@ -194,7 +198,7 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
         let feedID = feed.persistentModelID
         let descriptor = FetchDescriptor<PersistentArticle>(
             predicate: #Predicate { $0.feed?.persistentModelID == feedID },
-            sortBy: [SortDescriptor(\.publishedDate, order: .reverse)]
+            sortBy: [SortDescriptor(\.sortDate, order: .reverse)]
         )
         return try modelContext.fetch(descriptor)
     }
@@ -204,7 +208,7 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
         let sortOrder: SortOrder = ascending ? .forward : .reverse
         var descriptor = FetchDescriptor<PersistentArticle>(
             predicate: #Predicate { $0.feed?.persistentModelID == feedID },
-            sortBy: [SortDescriptor(\.publishedDate, order: sortOrder)]
+            sortBy: [SortDescriptor(\.sortDate, order: sortOrder)]
         )
         descriptor.fetchOffset = offset
         descriptor.fetchLimit = limit
@@ -218,7 +222,7 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
         let sortOrder: SortOrder = ascending ? .forward : .reverse
         var descriptor = FetchDescriptor<PersistentArticle>(
             predicate: #Predicate { $0.feed?.persistentModelID == feedID && !$0.isRead },
-            sortBy: [SortDescriptor(\.publishedDate, order: sortOrder)]
+            sortBy: [SortDescriptor(\.sortDate, order: sortOrder)]
         )
         descriptor.fetchOffset = offset
         descriptor.fetchLimit = limit
@@ -229,7 +233,7 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
 
     func allArticles() throws -> [PersistentArticle] {
         let descriptor = FetchDescriptor<PersistentArticle>(
-            sortBy: [SortDescriptor(\.publishedDate, order: .reverse)]
+            sortBy: [SortDescriptor(\.sortDate, order: .reverse)]
         )
         let articles = try modelContext.fetch(descriptor)
         Self.logger.debug("Fetched \(articles.count, privacy: .public) total articles")
@@ -239,7 +243,7 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
     func allArticles(offset: Int, limit: Int, ascending: Bool = false) throws -> [PersistentArticle] {
         let sortOrder: SortOrder = ascending ? .forward : .reverse
         var descriptor = FetchDescriptor<PersistentArticle>(
-            sortBy: [SortDescriptor(\.publishedDate, order: sortOrder)]
+            sortBy: [SortDescriptor(\.sortDate, order: sortOrder)]
         )
         descriptor.fetchOffset = offset
         descriptor.fetchLimit = limit
@@ -251,7 +255,7 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
     func allUnreadArticles() throws -> [PersistentArticle] {
         let descriptor = FetchDescriptor<PersistentArticle>(
             predicate: #Predicate { !$0.isRead },
-            sortBy: [SortDescriptor(\.publishedDate, order: .reverse)]
+            sortBy: [SortDescriptor(\.sortDate, order: .reverse)]
         )
         let articles = try modelContext.fetch(descriptor)
         Self.logger.debug("Fetched \(articles.count, privacy: .public) unread articles")
@@ -262,7 +266,7 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
         let sortOrder: SortOrder = ascending ? .forward : .reverse
         var descriptor = FetchDescriptor<PersistentArticle>(
             predicate: #Predicate { !$0.isRead },
-            sortBy: [SortDescriptor(\.publishedDate, order: sortOrder)]
+            sortBy: [SortDescriptor(\.sortDate, order: sortOrder)]
         )
         descriptor.fetchOffset = offset
         descriptor.fetchLimit = limit
@@ -379,7 +383,7 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
             predicate: #Predicate {
                 !$0.isThumbnailCached && $0.thumbnailRetryCount < maxRetryCount
             },
-            sortBy: [SortDescriptor(\.publishedDate, order: .reverse)]
+            sortBy: [SortDescriptor(\.sortDate, order: .reverse)]
         )
         let articles = try modelContext.fetch(descriptor)
         Self.logger.debug("Found \(articles.count, privacy: .public) articles needing thumbnails (max retries: \(maxRetryCount, privacy: .public))")
@@ -453,7 +457,7 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
         var descriptor = FetchDescriptor<PersistentArticle>(
             predicate: #Predicate { !$0.isSaved },
             sortBy: [
-                SortDescriptor(\.publishedDate, order: .forward),
+                SortDescriptor(\.sortDate, order: .forward),
                 SortDescriptor(\.articleID, order: .forward)
             ]
         )

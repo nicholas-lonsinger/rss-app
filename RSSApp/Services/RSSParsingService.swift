@@ -737,10 +737,10 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
         "UTC": "+0000",     // Coordinated Universal Time (defense-in-depth)
     ]
 
-    /// Plausible-date window used to reject obviously-wrong parse results. The lower bound
-    /// predates RSS itself, so any feed date older than this is almost certainly a parser
-    /// artifact (e.g., `DateFormatter`'s `yyyy` accepting `"26"` as year 26 AD). The upper
-    /// bound allows a day of slop for publishers with clock skew or scheduled posts.
+    /// Lower bound used to reject obviously-wrong parse results. Predates RSS itself, so
+    /// any feed date older than this is almost certainly a parser artifact (e.g.,
+    /// `DateFormatter`'s `yyyy` accepting `"26"` as year 26 AD). Upper-bound handling is
+    /// not a fixed value: see `sanityChecked` for the future-date clamp policy.
     private static let minimumPlausibleDate: Date = {
         var components = DateComponents()
         components.year = 1990
@@ -753,13 +753,24 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
         return Calendar(identifier: .gregorian).date(from: components) ?? Date.distantPast
     }()
 
-    /// Validates that a parsed `Date` falls within a plausible window. Returns the date
-    /// if it passes and `nil` (with a `.warning` log) if it does not.
+    /// Validates that a parsed `Date` is plausible enough to preserve as the publisher's
+    /// stated publication moment. Only the lower bound is enforced here: dates older than
+    /// `minimumPlausibleDate` are rejected (returns `nil` with a `.warning` log) because
+    /// they are almost certainly parser artifacts (e.g., `DateFormatter`'s `yyyy` "year of
+    /// era" accepting `"26"` as year 26 AD) and clamping them would invent a fake date.
+    ///
+    /// **Future dates are intentionally allowed through unchanged.** Real-world feeds
+    /// publish scheduled posts whose `pubDate` lies hours ahead of the fetch time (e.g.,
+    /// the Cloudflare blog announces upcoming content). The publisher-supplied
+    /// `publishedDate` is preserved verbatim because a planned content-update detection
+    /// feature compares pubDate values across refreshes, so any mutation here would
+    /// destroy that signal. The sort/retention/display problem caused by future dates is
+    /// solved at insert time by `PersistentArticle.init(from:)`, which computes a
+    /// separate clamped `sortDate` field — see `RSSApp/Models/ModelConversion.swift`.
     private static func sanityChecked(_ date: Date, input: String, source: String) -> Date? {
-        let upperBound = Date().addingTimeInterval(24 * 60 * 60) // now + 1 day of slop
-        if date < Self.minimumPlausibleDate || date > upperBound {
+        if date < Self.minimumPlausibleDate {
             Self.logger.warning(
-                "Rejected out-of-range parsed date \(date, privacy: .public) from input '\(input, privacy: .public)' (source: \(source, privacy: .public))"
+                "Rejected implausibly-old parsed date \(date, privacy: .public) from input '\(input, privacy: .public)' (source: \(source, privacy: .public))"
             )
             return nil
         }
