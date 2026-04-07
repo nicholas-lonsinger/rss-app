@@ -140,7 +140,7 @@ RSSAppTests/
 │   ├── MetadataExtractorTests.swift    # Title/byline extraction from meta tags and DOM
 │   ├── ModelConfigurationValidationTests.swift # ModelValidation and MaxTokensValidation input validation
 │   ├── MockNetworkMonitorServiceTests.swift # Mock conformance and default behavior
-│   ├── NetworkMonitorServiceTests.swift # Real NetworkMonitorService: injected wifiOnlyProvider invoked on each check, nil-path branch honors wifiOnly, default initializer reads from BackgroundImageDownloadSettings
+│   ├── NetworkMonitorServiceTests.swift # Real NetworkMonitorService: verifies the injected wifiOnlyProvider closure is invoked on each `isBackgroundDownloadAllowed()` call
 │   ├── RSSParsingServiceTests.swift    # Channel parsing, thumbnails, IDs, edge cases
 │   └── ThumbnailPrefetchServiceTests.swift # Bulk prefetch, skip cached/maxed, retry count, permanent failure skip, mixed results, error handling
 ├── ViewModels/

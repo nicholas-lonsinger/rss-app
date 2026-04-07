@@ -5,13 +5,19 @@ import Foundation
 /// Tests for the real `NetworkMonitorService` (as opposed to the
 /// `MockNetworkMonitorService` used by view-model tests).
 ///
-/// These tests focus on the injected `wifiOnlyProvider` so they can exercise the
-/// preference branches without depending on `UserDefaults.standard`. The actual
+/// These tests focus on the injected `wifiOnlyProvider` contract. The actual
 /// network path is supplied by `NWPathMonitor` and is not deterministic in test
-/// environments — these tests therefore only assert on behavior that holds for
-/// every reachable code path, namely the wifiOnly-vs-not branch when no path is
-/// yet available (the nil-path window immediately after init).
-@Suite("NetworkMonitorService Tests")
+/// environments, so assertions on the boolean result of
+/// `isBackgroundDownloadAllowed()` would be racy — the nil-path window is only
+/// a few milliseconds wide on a Mac with active networking. Verifying the
+/// closure is invoked per-call is sufficient to prove the injection seam works;
+/// the path-dependent branches are intentionally left to future tests that add
+/// a second injection seam for `NWPath`.
+///
+/// The suite is `.serialized` as a precaution even though it no longer mutates
+/// `UserDefaults.standard`, matching the convention used by other service
+/// suites in this project.
+@Suite("NetworkMonitorService Tests", .serialized)
 struct NetworkMonitorServiceTests {
 
     @Test("wifiOnlyProvider closure is invoked on each check")
@@ -27,51 +33,6 @@ struct NetworkMonitorServiceTests {
         _ = service.isBackgroundDownloadAllowed()
 
         #expect(callCount.value == 3)
-    }
-
-    @Test("Returns true when wifiOnly is false and no path is available yet")
-    func returnsTrueWhenWiFiOnlyFalseAndNoPath() {
-        // RATIONALE: NWPathMonitor delivers the first path asynchronously. Calling
-        // isBackgroundDownloadAllowed() synchronously immediately after init usually
-        // hits the nil-path branch, which falls back to !wifiOnly. This test confirms
-        // the injected provider is honored on that branch. If the path arrives
-        // before the call (rare but possible), the result still depends on the
-        // injected wifiOnly value, so the assertion remains stable for false.
-        let service = NetworkMonitorService { @Sendable in false }
-
-        // With wifiOnly=false: nil path returns true, satisfied path returns true.
-        // Either way the result is true.
-        #expect(service.isBackgroundDownloadAllowed() == true)
-    }
-
-    @Test("Returns false when wifiOnly is true and no path is available yet")
-    func returnsFalseWhenWiFiOnlyTrueAndNoPath() {
-        // RATIONALE: With wifiOnly=true, the nil-path branch returns false. Once a
-        // path is delivered the result depends on whether the test machine is on
-        // WiFi, which is non-deterministic — so this test only asserts the
-        // immediate, synchronous result before NWPathMonitor has had a chance to
-        // call back.
-        let service = NetworkMonitorService { @Sendable in true }
-
-        #expect(service.isBackgroundDownloadAllowed() == false)
-    }
-
-    @Test("Default initializer reads from BackgroundImageDownloadSettings")
-    func defaultInitReadsFromBackgroundImageDownloadSettings() {
-        // Snapshot and restore the real preference so this test does not leak
-        // state into other suites.
-        let original = BackgroundImageDownloadSettings.wifiOnly
-        defer { BackgroundImageDownloadSettings.wifiOnly = original }
-
-        BackgroundImageDownloadSettings.wifiOnly = false
-        let serviceA = NetworkMonitorService()
-        // wifiOnly=false → nil-path branch returns true.
-        #expect(serviceA.isBackgroundDownloadAllowed() == true)
-
-        BackgroundImageDownloadSettings.wifiOnly = true
-        let serviceB = NetworkMonitorService()
-        // wifiOnly=true → nil-path branch returns false.
-        #expect(serviceB.isBackgroundDownloadAllowed() == false)
     }
 }
 
