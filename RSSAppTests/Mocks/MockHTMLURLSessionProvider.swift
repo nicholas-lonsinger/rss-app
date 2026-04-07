@@ -15,8 +15,16 @@ import Foundation
 final class MockHTMLURLSessionProvider: URLSessionBytesProviding, @unchecked Sendable {
 
     /// HTML body returned when the response status is 2xx. Ignored for non-2xx
-    /// codes since the service short-circuits before reading bytes.
+    /// codes since the service short-circuits before reading bytes. Also ignored
+    /// when `rawPayload` is set, which takes precedence to allow raw byte fixtures
+    /// (e.g. invalid UTF-8 sequences) that cannot be expressed as a Swift String.
     var htmlBody: String = ""
+
+    /// Raw payload bytes returned when the response status is 2xx. When set,
+    /// overrides `htmlBody`. Use this to drive the UTF-8 decode paths in
+    /// `resolveOGImage` with byte sequences that contain invalid UTF-8 (e.g. a
+    /// 50 KB head slice that cuts through a multi-byte character at the boundary).
+    var rawPayload: Data?
 
     /// HTTP status code for the mock response (default 200).
     var statusCode: Int = 200
@@ -32,7 +40,7 @@ final class MockHTMLURLSessionProvider: URLSessionBytesProviding, @unchecked Sen
 
         MockHTMLURLProtocol.store(
             requestID: requestID,
-            payload: Data(htmlBody.utf8),
+            payload: rawPayload ?? Data(htmlBody.utf8),
             statusCode: statusCode,
             useNonHTTPResponse: useNonHTTPResponse
         )
