@@ -7,25 +7,35 @@ struct ArticleReaderView: View {
     /// The ordered list of articles from the originating list view.
     let articles: [PersistentArticle]
 
-    /// Index of the currently displayed article within `articles`.
-    @Binding var currentIndex: Int
-
     /// Closure to trigger loading more articles when the user navigates past the last loaded article.
     /// Returns a `LoadMoreResult` indicating whether articles were loaded, the data source is exhausted, or an error occurred.
     let loadMore: (() -> LoadMoreResult)?
 
     private static let logger = Logger(category: "ArticleReaderView")
 
+    /// Index of the currently displayed article within `articles`. Seeded from the
+    /// `initialIndex` parameter at presentation time and then owned by the reader so
+    /// that next/previous navigation does not need to round-trip through the parent.
+    @State private var currentIndex: Int
     @State private var showSummary = false
     @State private var showAPIKeySettings = false
     @State private var extractionState = ReaderExtractionState()
     @State private var hasAPIKey = false
     @State private var errorMessage: String?
 
-    /// Tracks the direction of article navigation for the vertical slide transition.
-    @State private var navigationDirection: NavigationDirection = .forward
-
     private let keychainService = KeychainService()
+
+    init(
+        persistence: FeedPersisting?,
+        articles: [PersistentArticle],
+        initialIndex: Int,
+        loadMore: (() -> LoadMoreResult)?
+    ) {
+        self.persistence = persistence
+        self.articles = articles
+        self.loadMore = loadMore
+        _currentIndex = State(initialValue: initialIndex)
+    }
 
     /// The currently displayed article.
     /// After `loadMore` in `navigateToNext()`, `currentIndex` may temporarily exceed the local
@@ -73,7 +83,6 @@ struct ArticleReaderView: View {
         } else {
             articleContent
                 .id(article.articleID)
-                .transition(navigationDirection.transition)
                 .navigationTitle(article.title)
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
@@ -189,10 +198,7 @@ struct ArticleReaderView: View {
     private func navigateToPrevious() {
         guard canGoBack else { return }
         Self.logger.debug("Navigating to previous article (index \(self.currentIndex - 1, privacy: .public))")
-        navigationDirection = .backward
-        withAnimation {
-            currentIndex -= 1
-        }
+        currentIndex -= 1
         onArticleChanged()
     }
 
@@ -209,18 +215,15 @@ struct ArticleReaderView: View {
             case .loaded:
                 Self.logger.info("Loaded more articles via pagination, advancing to next (index \(self.currentIndex + 1, privacy: .public))")
                 // RATIONALE: After loadMore appends to the view model's array, the local
-                // `articles` snapshot is stale (value-type copy). We update currentIndex via
-                // the binding so SwiftUI re-renders with the updated array, but skip
-                // onArticleChanged() because `articles[currentIndex + 1]` would be out of
-                // bounds in the current snapshot. The extraction state reset and mark-as-read
-                // are deferred to the onChange(of: currentIndex) handler which runs after
-                // the view re-renders with the fresh array.
+                // `articles` snapshot is stale (value-type copy). We advance currentIndex
+                // so SwiftUI re-renders with the updated array, but skip onArticleChanged()
+                // because `articles[currentIndex + 1]` would be out of bounds in the current
+                // snapshot. The extraction state reset and mark-as-read are deferred to the
+                // onChange(of: currentIndex) handler which runs after the view re-renders
+                // with the fresh array.
                 extractionState = ReaderExtractionState()
                 showSummary = false
-                navigationDirection = .forward
-                withAnimation {
-                    currentIndex += 1
-                }
+                currentIndex += 1
             case .exhausted:
                 Self.logger.info("No more articles available at end of list")
             case .failed(let message):
@@ -229,10 +232,7 @@ struct ArticleReaderView: View {
             }
         } else {
             Self.logger.debug("Navigating to next article (index \(self.currentIndex + 1, privacy: .public))")
-            navigationDirection = .forward
-            withAnimation {
-                currentIndex += 1
-            }
+            currentIndex += 1
             onArticleChanged()
         }
     }
@@ -294,31 +294,3 @@ struct ArticleReaderView: View {
     }
 }
 
-// MARK: - Navigation Direction
-
-extension ArticleReaderView {
-    /// Direction of article navigation, used to determine the vertical slide transition.
-    enum NavigationDirection {
-        /// Navigating to the next article (down in the list).
-        /// Current article slides up, new article slides in from the bottom.
-        case forward
-        /// Navigating to the previous article (up in the list).
-        /// Current article slides down, new article slides in from the top.
-        case backward
-
-        var transition: AnyTransition {
-            switch self {
-            case .forward:
-                .asymmetric(
-                    insertion: .move(edge: .bottom),
-                    removal: .move(edge: .top)
-                )
-            case .backward:
-                .asymmetric(
-                    insertion: .move(edge: .top),
-                    removal: .move(edge: .bottom)
-                )
-            }
-        }
-    }
-}
