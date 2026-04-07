@@ -8,7 +8,7 @@ struct UnreadArticlesView: View {
     @State private var showMarkAllReadConfirmation = false
     @State private var hasAppeared = false
     // RATIONALE: Snapshot preservation across reader push/pop. See
-    // ARCHITECTURE.md → "`returningFromReader` flag suppresses post-pop reload".
+    // ARCHITECTURE.md → "Snapshot preservation across reader push/pop (two gates)".
     @State private var returningFromReader = false
 
     private let thumbnailService: ArticleThumbnailCaching = ArticleThumbnailService()
@@ -121,11 +121,9 @@ struct UnreadArticlesView: View {
             homeViewModel.loadUnreadCount()
         }
         .task {
-            // RATIONALE: SwiftUI re-runs `.task` when this view reappears after the
-            // pushed reader pops, which would re-query persistence and drop articles
-            // marked as read during the reader session. Gating on `hasAppeared` makes
-            // the initial load fire exactly once; subsequent reloads are owned by
-            // `.onAppear`, which is itself guarded by `returningFromReader`.
+            // RATIONALE: First half of the two-gate snapshot-preservation mechanism.
+            // See ARCHITECTURE.md → "Snapshot preservation across reader push/pop
+            // (two gates)". Both gates are required — removing either reopens #209.
             guard !hasAppeared else { return }
             homeViewModel.loadUnreadArticles()
             hasAppeared = true
