@@ -121,6 +121,12 @@ struct UnreadArticlesView: View {
             homeViewModel.loadUnreadCount()
         }
         .task {
+            // RATIONALE: SwiftUI re-runs `.task` when this view reappears after the
+            // pushed reader pops, which would re-query persistence and drop articles
+            // marked as read during the reader session. Gating on `hasAppeared` makes
+            // the initial load fire exactly once; subsequent reloads are owned by
+            // `.onAppear`, which is itself guarded by `returningFromReader`.
+            guard !hasAppeared else { return }
             homeViewModel.loadUnreadArticles()
             hasAppeared = true
         }

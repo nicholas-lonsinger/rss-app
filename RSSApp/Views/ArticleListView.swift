@@ -121,6 +121,13 @@ struct ArticleListView: View {
             )
         }
         .task {
+            // RATIONALE: SwiftUI re-runs `.task` when this view reappears after the
+            // pushed reader pops, which would re-fetch the feed from the network and
+            // (with "Show Unread Only" active) drop articles marked as read during
+            // the reader session. Gating on `hasAppeared` makes the initial fetch fire
+            // exactly once; subsequent reloads are owned by `.onAppear`, which is
+            // itself guarded by `returningFromReader`.
+            guard !hasAppeared else { return }
             await viewModel.loadFeed()
             hasAppeared = true
         }
