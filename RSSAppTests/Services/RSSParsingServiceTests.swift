@@ -491,9 +491,10 @@ struct RSSParsingServiceTests {
 
     @Test("RSS pubDate with colon-separated numeric zone parses to correct absolute UTC moment")
     func rssPubDateColonNumericZone() throws {
-        // RFC 3339-style offset with colon ("-07:00") — not accepted by DateFormatter's Z
-        // specifier but accepted by the RFC 822 Z specifier because DateFormatter is lenient
-        // enough to match. This guards against regressions where the colon form is dropped.
+        // RFC 3339 spells offsets with a colon (`-07:00`). The first parser in `parseDate`
+        // is `ISO8601DateFormatter.withInternetDateTime`, which accepts the colon form;
+        // that's what catches this input in practice. This test guards against regressions
+        // where the colon form is silently dropped from the parser chain.
         let xml = Self.rssXML(pubDate: "Mon, 06 Apr 2026 08:30:00 -07:00")
         let feed = try service.parse(Data(xml.utf8))
 
@@ -553,7 +554,8 @@ struct RSSParsingServiceTests {
 
     @Test("Atom published date with colon-separated zone parses to correct absolute UTC moment")
     func atomPublishedColonZone() throws {
-        // This is the format called out in the original parser comment; ensure it still works.
+        // RFC 3339 / Atom-style colon-separated offset (-07:00) — historically a common
+        // failure mode for naive RSS parsers; this test locks in correct parsing.
         let xml = Self.atomXML(published: "2026-04-06T08:30:00-07:00")
         let feed = try service.parse(Data(xml.utf8))
 
@@ -565,12 +567,15 @@ struct RSSParsingServiceTests {
 
     @Test("Atom published date with fractional seconds and numeric zone parses correctly")
     func atomPublishedFractionalSeconds() throws {
-        let xml = Self.atomXML(published: "2026-04-06T08:30:00.123-07:00")
+        // Non-colon numeric offset (`+0000`) specifically exercises the DateFormatter
+        // `yyyy-MM-dd'T'HH:mm:ss.SSSZ` fallback rather than being caught by
+        // ISO8601Formatters.fractional (which requires a colon in the offset).
+        let xml = Self.atomXML(published: "2026-04-06T08:30:00.123+0000")
         let feed = try service.parse(Data(xml.utf8))
 
         let date = try #require(feed.articles[0].publishedDate)
         let (_, _, _, hr, min, _) = Self.utcComponents(date)
-        #expect(hr == 15)
+        #expect(hr == 8)
         #expect(min == 30)
     }
 
@@ -669,6 +674,49 @@ struct RSSParsingServiceTests {
             )
         )
         #expect(date == expected)
+    }
+
+    @Test("Zoneless input is interpreted as UTC, not the device's local timezone")
+    func zonelessInputIsUTCNotLocal() throws {
+        // Regression guard: a zoneless input must be parsed as an absolute UTC moment,
+        // not as a wall-clock time in the device's local zone. This is the single test
+        // that would catch the dropped-`formatter.timeZone` regression on a non-UTC dev
+        // machine. See issue #208.
+        let xml = Self.rssXML(pubDate: "Mon, 06 Apr 2026 08:30:00")
+        let feed = try service.parse(Data(xml.utf8))
+
+        let date = try #require(feed.articles[0].publishedDate)
+        let expected = try #require(
+            Calendar(identifier: .gregorian).date(
+                from: DateComponents(
+                    timeZone: TimeZone(identifier: "UTC"),
+                    year: 2026, month: 4, day: 6, hour: 8, minute: 30, second: 0
+                )
+            )
+        )
+        #expect(date == expected)
+    }
+
+    @Test("Two-digit year is rejected by the sanity check")
+    func twoDigitYearIsRejected() throws {
+        // `DateFormatter`'s `yyyy` is "year of era" and will happily parse `"26"` as
+        // year 26 AD. The sanity check must reject the resulting date before it poisons
+        // cross-feed sorting and article retention. See issue #208.
+        let xml = Self.rssXML(pubDate: "Mon, 06 Apr 26 08:30:00 +0000")
+        let feed = try service.parse(Data(xml.utf8))
+
+        #expect(feed.articles[0].publishedDate == nil)
+    }
+
+    @Test("Far-future year is rejected by the sanity check")
+    func farFutureDateIsRejected() throws {
+        // A date thousands of years in the future is almost certainly a typo or a
+        // corrupted feed; it should not displace legitimate articles in retention or
+        // sorting. See issue #208.
+        let xml = Self.rssXML(pubDate: "Mon, 06 Apr 9999 08:30:00 +0000")
+        let feed = try service.parse(Data(xml.utf8))
+
+        #expect(feed.articles[0].publishedDate == nil)
     }
 
     // MARK: - XHTML Content
