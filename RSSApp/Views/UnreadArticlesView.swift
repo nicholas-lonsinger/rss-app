@@ -7,6 +7,13 @@ struct UnreadArticlesView: View {
     @State private var selectedArticleIndex: Int?
     @State private var showMarkAllReadConfirmation = false
     @State private var hasAppeared = false
+    // RATIONALE: With push navigation via .navigationDestination, popping the reader
+    // re-fires this view's onAppear. Without this flag, the onAppear reload would
+    // re-query persistence and drop any article the user just marked as read in the
+    // reader. The flag is armed when we push the reader and consumed by the next
+    // onAppear (the one triggered by the pop) so read articles remain visible in
+    // their list positions until the user explicitly leaves the screen or refreshes.
+    @State private var returningFromReader = false
 
     private let thumbnailService: ArticleThumbnailCaching = ArticleThumbnailService()
 
@@ -22,6 +29,7 @@ struct UnreadArticlesView: View {
                 List(Array(homeViewModel.unreadArticlesList.enumerated()), id: \.element.articleID) { index, article in
                     Button {
                         if homeViewModel.markAsRead(article) {
+                            returningFromReader = true
                             selectedArticleIndex = index
                         }
                     } label: {
@@ -122,6 +130,10 @@ struct UnreadArticlesView: View {
         }
         .onAppear {
             guard hasAppeared else { return }
+            if returningFromReader {
+                returningFromReader = false
+                return
+            }
             homeViewModel.loadUnreadArticles()
         }
         .onDisappear {

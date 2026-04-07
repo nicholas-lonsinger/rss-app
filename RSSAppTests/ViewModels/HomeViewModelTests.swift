@@ -509,6 +509,73 @@ struct HomeViewModelTests {
         #expect(viewModel.unreadArticlesList.first?.articleID == "u2")
     }
 
+    /// Regression test for #209: when the user opens an article from the unread list,
+    /// reads it (and subsequent articles via previous/next), then returns to the list,
+    /// the read articles must remain visible until the user explicitly leaves and
+    /// returns or pulls to refresh. This test covers the view-model contract that the
+    /// view relies on: `markAsRead` mutates persistence without re-querying the list,
+    /// so as long as the view suppresses its post-reader `onAppear` reload, the
+    /// snapshot stays intact.
+    @Test("mark as read during simulated reader session leaves unread list snapshot intact")
+    @MainActor
+    func readerSessionPreservesUnreadListSnapshot() {
+        let (viewModel, mockPersistence, article1, article2, feed) = Self.makeUnreadSnapshotFixture()
+
+        // Add a third unread article so we can verify ordering is preserved too.
+        let article3 = TestFixtures.makePersistentArticle(
+            articleID: "u3",
+            publishedDate: Date(timeIntervalSince1970: 0),
+            isRead: false
+        )
+        article3.feed = feed
+        mockPersistence.articlesByFeedID[feed.id] = [article1, article2, article3]
+
+        viewModel.loadUnreadArticles()
+        let snapshotIDs = viewModel.unreadArticlesList.map(\.articleID)
+        #expect(snapshotIDs.count == 3)
+
+        // Simulate tapping article 1: view model marks it as read before pushing the reader.
+        let opened = viewModel.markAsRead(article1)
+        #expect(opened == true)
+        #expect(article1.isRead == true)
+
+        // Simulate the reader paging forward and marking article 2 as read via its own
+        // markArticleRead path (bypasses HomeViewModel's snapshot preservation helpers).
+        try? mockPersistence.markArticleRead(article2, isRead: true)
+        #expect(article2.isRead == true)
+
+        // Returning from the reader must NOT drop the now-read articles from the list —
+        // the view suppresses its post-reader onAppear reload so the snapshot is stable.
+        #expect(viewModel.unreadArticlesList.map(\.articleID) == snapshotIDs)
+
+        // And the unread *count* still reflects reality for the badge/home dots.
+        viewModel.loadUnreadCount()
+        #expect(viewModel.unreadCount == 1)
+    }
+
+    /// Complements the test above: once the user genuinely leaves and returns — or
+    /// pulls to refresh — an explicit `loadUnreadArticles()` call must drop the
+    /// read articles. This proves the regression fix did not reintroduce the
+    /// inverse problem of stale snapshots persisting forever.
+    @Test("explicit reload after reader session drops articles marked read in the reader")
+    @MainActor
+    func explicitReloadAfterReaderSessionDropsReadArticles() {
+        let (viewModel, mockPersistence, article1, article2, _) = Self.makeUnreadSnapshotFixture()
+        viewModel.loadUnreadArticles()
+        #expect(viewModel.unreadArticlesList.count == 2)
+
+        // Simulate reader session: mark both articles as read.
+        _ = viewModel.markAsRead(article1)
+        try? mockPersistence.markArticleRead(article2, isRead: true)
+
+        // Post-reader return leaves the snapshot stable (see test above).
+        #expect(viewModel.unreadArticlesList.count == 2)
+
+        // Explicit reload (tab change, pull-to-refresh, sort toggle) drops them.
+        viewModel.loadUnreadArticles()
+        #expect(viewModel.unreadArticlesList.isEmpty)
+    }
+
     // MARK: - Read Status
 
     @Test("markAsRead sets read status and updates unread count")
