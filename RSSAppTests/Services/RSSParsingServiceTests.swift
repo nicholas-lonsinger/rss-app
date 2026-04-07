@@ -516,6 +516,151 @@ struct RSSParsingServiceTests {
         #expect(min == 30)
     }
 
+    // MARK: - DST Boundary Tests for Named US Zones
+    //
+    // These tests pin behavior at the spring-forward and fall-back transitions, which
+    // are exactly the moments where `DateFormatter`'s `zzz` named-zone resolution is
+    // most likely to drift between OS versions or produce off-by-an-hour results.
+    //
+    // The tests intentionally treat `PDT` and `PST` as fixed-offset abbreviations
+    // (UTC-7 and UTC-8 respectively), not as zone identifiers that consult a tz
+    // database to decide whether DST is in effect on a given wall-clock date. This
+    // matches how RSS feeds use these tokens in practice: a publisher who writes
+    // `01:00:00 PST` means "01:00:00 at UTC-8", not "01:00:00 at America/Los_Angeles
+    // resolved against the IANA database, possibly returning a non-existent or
+    // ambiguous local time". The fixed-offset interpretation is also what
+    // `en_US_POSIX` + `zzz` actually delivers, so these tests double as a regression
+    // guard against an OS-level change to that behavior. See GitHub issue #216.
+    //
+    // The 2025 transition dates (rather than 2026) are used so every input is in the
+    // past relative to any plausible test-run clock; otherwise the November fall-back
+    // case would be rejected by `parseDate`'s `now + 1 day` upper-bound sanity check
+    // when the test runs before the 2026 fall transition.
+
+    @Test("RSS pubDate at 2025 spring-forward instant in PDT parses to correct UTC moment")
+    func rssPubDateSpringForwardPDT() throws {
+        // First wall-clock moment in PDT after the 2025 spring-forward transition
+        // (Sun, 09 Mar 2025). 03:00:00 PDT (UTC-7) = 10:00:00 UTC on the same day.
+        let xml = Self.rssXML(pubDate: "Sun, 09 Mar 2025 03:00:00 PDT")
+        let feed = try service.parse(Data(xml.utf8))
+
+        let date = try #require(feed.articles[0].publishedDate)
+        let expected = try #require(
+            Calendar(identifier: .gregorian).date(
+                from: DateComponents(
+                    timeZone: TimeZone(identifier: "UTC"),
+                    year: 2025, month: 3, day: 9, hour: 10, minute: 0, second: 0
+                )
+            )
+        )
+        #expect(date == expected)
+    }
+
+    @Test("RSS pubDate just before 2025 spring-forward in PST parses to correct UTC moment")
+    func rssPubDateJustBeforeSpringForwardPST() throws {
+        // Last wall-clock minute of PST before the 2025 spring-forward transition.
+        // 01:59:00 PST (UTC-8) = 09:59:00 UTC on the same day. Crucially, this
+        // wall-clock time exists in PST and does NOT collide with the skipped
+        // 02:00–03:00 local hour.
+        let xml = Self.rssXML(pubDate: "Sun, 09 Mar 2025 01:59:00 PST")
+        let feed = try service.parse(Data(xml.utf8))
+
+        let date = try #require(feed.articles[0].publishedDate)
+        let expected = try #require(
+            Calendar(identifier: .gregorian).date(
+                from: DateComponents(
+                    timeZone: TimeZone(identifier: "UTC"),
+                    year: 2025, month: 3, day: 9, hour: 9, minute: 59, second: 0
+                )
+            )
+        )
+        #expect(date == expected)
+    }
+
+    @Test("RSS pubDate at 2025 fall-back instant in PST parses to correct UTC moment")
+    func rssPubDateFallBackPST() throws {
+        // First wall-clock moment in PST after the 2025 fall-back transition
+        // (Sun, 02 Nov 2025). 01:00:00 PST (UTC-8) = 09:00:00 UTC on the same day.
+        // The same wall-clock hour 01:00–02:00 occurs twice on this day in
+        // America/Los_Angeles (once in PDT, once in PST); the explicit `PST` token
+        // disambiguates to the second occurrence.
+        let xml = Self.rssXML(pubDate: "Sun, 02 Nov 2025 01:00:00 PST")
+        let feed = try service.parse(Data(xml.utf8))
+
+        let date = try #require(feed.articles[0].publishedDate)
+        let expected = try #require(
+            Calendar(identifier: .gregorian).date(
+                from: DateComponents(
+                    timeZone: TimeZone(identifier: "UTC"),
+                    year: 2025, month: 11, day: 2, hour: 9, minute: 0, second: 0
+                )
+            )
+        )
+        #expect(date == expected)
+    }
+
+    @Test("RSS pubDate at 2025 fall-back instant in PDT parses to correct UTC moment")
+    func rssPubDateAtFallBackInstantPDT() throws {
+        // Wall-clock instant immediately before the fall-back transition completes,
+        // when 02:00 PDT rolls back to 01:00 PST on Sun, 02 Nov 2025. The same
+        // wall-clock string "01:00:00" occurs twice on this date (once in PDT,
+        // once in PST); the explicit `PDT` token disambiguates to the first
+        // (pre-rollback) occurrence. 01:00:00 PDT (UTC-7) = 08:00:00 UTC. Pairs
+        // with `rssPubDateFallBackPST` above to lock in the one-hour gap between
+        // the two occurrences — the same wall-clock string resolves to two
+        // distinct UTC instants depending solely on the trailing zone token.
+        let xml = Self.rssXML(pubDate: "Sun, 02 Nov 2025 01:00:00 PDT")
+        let feed = try service.parse(Data(xml.utf8))
+
+        let date = try #require(feed.articles[0].publishedDate)
+        let expected = try #require(
+            Calendar(identifier: .gregorian).date(
+                from: DateComponents(
+                    timeZone: TimeZone(identifier: "UTC"),
+                    year: 2025, month: 11, day: 2, hour: 8, minute: 0, second: 0
+                )
+            )
+        )
+        #expect(date == expected)
+    }
+
+    @Test("PDT and PST tokens at fall-back disambiguate to different UTC instants")
+    func rssPubDateFallBackTokenDisambiguation() throws {
+        // Single-assertion pair check: the one-hour gap between the two
+        // occurrences of "01:00:00" on the 2025 fall-back date is entirely
+        // determined by the trailing zone token. If a regression broke
+        // PDT/PST disambiguation (e.g. both tokens resolving to the same
+        // offset), this is the most obvious symptom.
+        let pdtFeed = try service.parse(
+            Data(Self.rssXML(pubDate: "Sun, 02 Nov 2025 01:00:00 PDT").utf8)
+        )
+        let pstFeed = try service.parse(
+            Data(Self.rssXML(pubDate: "Sun, 02 Nov 2025 01:00:00 PST").utf8)
+        )
+        let pdtDate = try #require(pdtFeed.articles[0].publishedDate)
+        let pstDate = try #require(pstFeed.articles[0].publishedDate)
+        #expect(pstDate.timeIntervalSince(pdtDate) == 3600)
+    }
+
+    @Test("RSS pubDate in non-existent spring-forward hour parses as fixed offset, not rejected")
+    func rssPubDateInSpringForwardGap() throws {
+        // 02:30:00 on Sun, 09 Mar 2025 does not exist in America/Los_Angeles: the
+        // local clock jumps from 01:59:59 PST straight to 03:00:00 PDT. A parser
+        // that consults the IANA database to validate wall-clock inputs would
+        // reject these as non-existent. The fixed-offset interpretation treats
+        // PDT/PST as UTC-7/UTC-8 abbreviations, so both strings must parse
+        // non-nil. This test pins that behavior against a future "fix" that
+        // might reject skipped-hour inputs as ambiguous.
+        let pstFeed = try service.parse(
+            Data(Self.rssXML(pubDate: "Sun, 09 Mar 2025 02:30:00 PST").utf8)
+        )
+        let pdtFeed = try service.parse(
+            Data(Self.rssXML(pubDate: "Sun, 09 Mar 2025 02:30:00 PDT").utf8)
+        )
+        #expect(pstFeed.articles[0].publishedDate != nil)
+        #expect(pdtFeed.articles[0].publishedDate != nil)
+    }
+
     @Test("RSS pubDate with named GMT zone parses to correct absolute UTC moment")
     func rssPubDateNamedGMT() throws {
         let xml = Self.rssXML(pubDate: "Mon, 06 Apr 2026 08:30:00 GMT")
