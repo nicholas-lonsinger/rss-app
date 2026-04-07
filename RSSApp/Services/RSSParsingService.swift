@@ -563,12 +563,16 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
 
         // 3. Zone-less fallback. The input doesn't match any explicit-zone format; the
         //    publisher almost certainly omitted zone information. Interpreting as UTC is
-        //    a documented fallback — not a silent guess. We log a warning so these feeds
-        //    are visible in diagnostic output.
+        //    a documented fallback — not a silent guess. Logged at `.debug` so the signal
+        //    is available via `log stream` when investigating a specific feed without
+        //    flooding the persisted log buffer: a feed that always emits zoneless
+        //    timestamps would otherwise produce ~one persisted warning per article per
+        //    refresh cycle, masking other warnings during post-mortem analysis. See
+        //    GitHub issue #214.
         for format in Self.zonelessDateFormats {
             formatter.dateFormat = format
             if let date = formatter.date(from: trimmed) {
-                Self.logger.warning(
+                Self.logger.debug(
                     "Feed date '\(trimmed, privacy: .public)' had no timezone; interpreted as UTC (format '\(format, privacy: .public)')"
                 )
                 return sanityChecked(date, input: trimmed, source: "zoneless '\(format)'")
