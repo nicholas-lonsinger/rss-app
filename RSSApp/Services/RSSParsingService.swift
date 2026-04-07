@@ -544,11 +544,21 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = TimeZone(identifier: "UTC")
 
-        for format in Self.zonedDateFormats {
-            formatter.dateFormat = format
-            if let date = formatter.date(from: trimmed) {
-                return sanityChecked(date, input: trimmed, source: "zoned '\(format)'")
-            }
+        if let date = parseUsingZonedFormats(trimmed, formatter: formatter) {
+            return date
+        }
+
+        // 2b. Non-US named-zone preprocessing. `DateFormatter`'s `zzz` specifier with
+        //     `en_US_POSIX` only recognizes a small set of historical North American zone
+        //     abbreviations (`PDT`, `EST`, `GMT`, etc.). Feeds emitting European or Asian
+        //     named zones (`CET`, `CEST`, `BST`, `JST`, ...) fail every explicit-zone
+        //     format above and would otherwise either fall through to the zoneless UTC
+        //     fallback (off by N hours) or return `nil`. We rewrite the trailing zone
+        //     token to its numeric offset so the standard numeric-offset formatters can
+        //     consume it. See GitHub issue #213.
+        if let substituted = substituteNamedZone(in: trimmed),
+           let date = parseUsingZonedFormats(substituted, formatter: formatter) {
+            return date
         }
 
         // 3. Zone-less fallback. The input doesn't match any explicit-zone format; the
@@ -570,6 +580,126 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
         )
         return nil
     }
+
+    /// Tries every explicit-zone `DateFormatter` pattern against `input`, returning the
+    /// first sanity-checked match. Extracted so the named-zone preprocessing pass can
+    /// re-run the same loop against a rewritten input without duplicating the formatter
+    /// configuration.
+    private static func parseUsingZonedFormats(_ input: String, formatter: DateFormatter) -> Date? {
+        for format in Self.zonedDateFormats {
+            formatter.dateFormat = format
+            if let date = formatter.date(from: input) {
+                return sanityChecked(date, input: input, source: "zoned '\(format)'")
+            }
+        }
+        return nil
+    }
+
+    /// If `input` ends with a recognized non-US named timezone abbreviation, returns a
+    /// new string with that token replaced by its numeric offset (e.g.,
+    /// `"...08:30:00 CET"` → `"...08:30:00 +0100"`). Returns `nil` if no recognized
+    /// trailing zone is present, so the caller can short-circuit.
+    ///
+    /// Only the trailing whitespace-delimited token is examined: feed dates almost
+    /// universally place the zone last, and rewriting tokens elsewhere risks corrupting
+    /// month names or weekdays that happen to share letters with a zone abbreviation.
+    ///
+    /// The input is trimmed of leading/trailing whitespace and newlines before token
+    /// extraction so trailing-space inputs (e.g., `"...08:30:00 CET "`) still resolve.
+    /// Without this trim, the trailing token would be empty and the lookup would miss,
+    /// causing the input to fall through to the zoneless UTC fallback (off by N hours).
+    private static func substituteNamedZone(in input: String) -> String? {
+        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let separatorIndex = trimmed.lastIndex(where: { $0 == " " }) else {
+            return nil
+        }
+        let token = trimmed[trimmed.index(after: separatorIndex)...]
+        guard let offset = Self.namedZoneOffsets[String(token).uppercased()] else {
+            return nil
+        }
+        return trimmed[..<separatorIndex] + " " + offset
+    }
+
+    /// Lookup table mapping non-US named timezone abbreviations to their RFC 822 numeric
+    /// offsets. The values intentionally use the `±HHMM` form so the substituted output
+    /// is consumed by the standard `Z` specifier in `zonedDateFormats`.
+    ///
+    /// Some abbreviations are genuinely ambiguous; the chosen interpretations below are
+    /// the most common worldwide usage and match what mainstream Python/Ruby/Java date
+    /// libraries default to:
+    ///
+    /// - `IST` → India Standard Time (UTC+5:30). Could also mean Irish Standard Time
+    ///   (UTC+1) or Israel Standard Time (UTC+2); India is the dominant publishing
+    ///   population, so we default to it.
+    /// - `CST` → China Standard Time (UTC+8). The North American "Central Standard
+    ///   Time" (UTC-6) is parsed by `DateFormatter`'s `zzz` specifier directly and
+    ///   never reaches this table because the prior explicit-zone pass already matched.
+    ///   The substitution pass only runs when every explicit-zone format failed, which
+    ///   in practice means the publisher meant the China zone.
+    /// - `BST` → British Summer Time (UTC+1). Bangladesh Standard Time (UTC+6) is far
+    ///   less common in feed payloads.
+    ///
+    /// Standard time and daylight time abbreviations are listed separately so each
+    /// resolves to its own fixed offset; the parser deliberately does not consult the
+    /// surrounding date to decide which form to apply.
+    private static let namedZoneOffsets: [String: String] = [
+        // Western Europe
+        "WET": "+0000",     // Western European Time
+        "WEST": "+0100",    // Western European Summer Time
+        "BST": "+0100",     // British Summer Time
+        "IST": "+0530",     // India Standard Time (see RATIONALE in doc comment)
+
+        // Central Europe
+        "CET": "+0100",     // Central European Time
+        "CEST": "+0200",    // Central European Summer Time
+        "MET": "+0100",     // Middle European Time (legacy alias for CET)
+        "MEST": "+0200",    // Middle European Summer Time
+
+        // Eastern Europe / Africa / Middle East
+        "EET": "+0200",     // Eastern European Time
+        "EEST": "+0300",    // Eastern European Summer Time
+        "MSK": "+0300",     // Moscow Standard Time
+        "MSD": "+0400",     // Moscow Summer Time (historical, retained for archival feeds)
+        "TRT": "+0300",     // Turkey Time
+        "SAST": "+0200",    // South Africa Standard Time
+        "EAT": "+0300",     // East Africa Time
+
+        // Asia
+        "CST": "+0800",     // China Standard Time (see RATIONALE in doc comment)
+        "HKT": "+0800",     // Hong Kong Time
+        "SGT": "+0800",     // Singapore Time
+        "PHT": "+0800",     // Philippine Time
+        "JST": "+0900",     // Japan Standard Time
+        "KST": "+0900",     // Korea Standard Time
+        "ICT": "+0700",     // Indochina Time
+        "WIB": "+0700",     // Western Indonesian Time
+        "WITA": "+0800",    // Central Indonesian Time
+        "WIT": "+0900",     // Eastern Indonesian Time
+
+        // Oceania
+        "AEST": "+1000",    // Australian Eastern Standard Time
+        "AEDT": "+1100",    // Australian Eastern Daylight Time
+        "ACST": "+0930",    // Australian Central Standard Time
+        "ACDT": "+1030",    // Australian Central Daylight Time
+        "AWST": "+0800",    // Australian Western Standard Time
+        "NZST": "+1200",    // New Zealand Standard Time
+        "NZDT": "+1300",    // New Zealand Daylight Time
+
+        // South America
+        "BRT": "-0300",     // Brasília Time
+        "BRST": "-0200",    // Brasília Summer Time (no longer observed; archival feeds)
+        "ART": "-0300",     // Argentina Time
+        "CLT": "-0400",     // Chile Standard Time
+        "CLST": "-0300",    // Chile Summer Time
+
+        // Universal aliases not always recognized by DateFormatter. Bare "Z" is
+        // intentionally omitted: any input ending in `" Z"` is consumed by the
+        // first numeric-zone format (`...HH:mm:ss Z`) in `zonedDateFormats`, since
+        // `DateFormatter`'s `Z` specifier with `en_US_POSIX` accepts the literal
+        // `Z`. The substitution pass would never see it.
+        "UT": "+0000",      // Universal Time (RFC 822 alias for UTC)
+        "UTC": "+0000",     // Coordinated Universal Time (defense-in-depth)
+    ]
 
     /// Plausible-date window used to reject obviously-wrong parse results. The lower bound
     /// predates RSS itself, so any feed date older than this is almost certainly a parser
