@@ -16,9 +16,10 @@ struct RSSParsingService: Sendable {
     //
     // These accessors expose the private `RSSParserDelegate.HoistedDateFormatters` and
     // `RSSParserDelegate.ISO8601Formatters` enums to `@testable` test code so the
-    // "never mutated after init" invariant that justifies their `nonisolated(unsafe)`
-    // declaration can be pinned down by unit tests. See GitHub issue #242 and the
-    // `RATIONALE:` comments on the underlying enums for why the invariant matters.
+    // "never mutated after init" invariant — which justifies the `nonisolated(unsafe)`
+    // declaration on `ISO8601Formatters` and underpins the safety of the hoisted
+    // `DateFormatter` arrays — can be pinned down by unit tests. See GitHub issue #242
+    // and the `RATIONALE:` comment on `ISO8601Formatters` for why the invariant matters.
     //
     // These are only meant to be consumed by tests. Production code inside
     // `RSSParserDelegate` keeps using the private nested enums directly. Exposing them
@@ -122,8 +123,8 @@ struct RSSParsingService: Sendable {
 ///
 /// 3. **`<?xml ... encoding="..."?>` declaration.** For ASCII-compatible encodings
 ///    (UTF-8, ISO-8859-*, Big5, EUC-KR, GB2312, Shift-JIS, etc.) the XML prolog
-///    itself is ASCII-safe, so we can scan the first ~200 bytes as ASCII and pull
-///    out the declared encoding name. The name is resolved via
+///    itself is ASCII-safe, so we can scan the first `prologScanWindow` bytes as
+///    ASCII and pull out the declared encoding name. The name is resolved via
 ///    `CFStringConvertIANACharSetNameToEncoding`, which handles every IANA charset
 ///    the system supports.
 ///
@@ -140,6 +141,12 @@ struct RSSParsingService: Sendable {
 enum EncodingSniffer {
 
     private static let logger = Logger(category: "EncodingSniffer")
+
+    /// Maximum number of leading bytes scanned when looking for an XML declaration
+    /// or stripping the prolog. 256 bytes comfortably fits any realistic
+    /// `<?xml version="..." encoding="..." standalone="..."?>` plus leading
+    /// whitespace, but is short enough that ASCII decoding is trivial.
+    static let prologScanWindow = 256
 
     /// Inspects `data` and returns the same bytes if the payload is already UTF-8
     /// (the 95% case — no allocation), or a freshly-transcoded UTF-8 representation
@@ -252,13 +259,13 @@ enum EncodingSniffer {
 
     // MARK: - XML declaration scanner
 
-    /// Scans the first ~200 bytes of `data` as ASCII looking for
+    /// Scans the first `prologScanWindow` bytes of `data` as ASCII looking for
     /// `<?xml ... encoding="name" ... ?>`. Returns the encoding name unquoted, or
     /// nil if no declaration is present or the encoding attribute is missing.
     /// Only runs on ASCII-compatible payloads: the caller is expected to have
     /// ruled out UTF-16/UTF-32 already.
     static func scanEncodingDeclaration(_ data: Data) -> String? {
-        let sniffLength = min(data.count, 256)
+        let sniffLength = min(data.count, prologScanWindow)
         guard sniffLength >= 6 else { return nil }
         let prefix = data.prefix(sniffLength)
 
@@ -318,7 +325,9 @@ enum EncodingSniffer {
             return nil
         }
         let stripped = stripXMLDeclaration(decoded)
-        return stripped.data(using: .utf8)
+        guard let utf8 = stripped.data(using: .utf8) else { return nil }
+        logger.notice("Transcoded \(data.count, privacy: .public) bytes from \(String(describing: encoding), privacy: .public) to \(utf8.count, privacy: .public) bytes UTF-8")
+        return utf8
     }
 
     /// Byte-level strip of the leading `<?xml ... ?>` prolog. Scans for the
@@ -326,8 +335,8 @@ enum EncodingSniffer {
     /// so multi-byte UTF-8 content in the body is preserved byte-for-byte.
     /// Returns nil if no prolog is present (caller can fall through).
     static func stripProlog(_ data: Data) -> Data? {
-        // Scan at most the first 256 bytes — the prolog, if present, must be first.
-        let scanLength = min(data.count, 256)
+        // Scan at most `prologScanWindow` bytes — the prolog, if present, must be first.
+        let scanLength = min(data.count, prologScanWindow)
         guard scanLength >= 7 else { return nil }  // "<?xml?>" is 7 bytes minimum
 
         // Skip any leading whitespace bytes (0x20, 0x09, 0x0A, 0x0D).

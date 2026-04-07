@@ -154,18 +154,49 @@ struct RSSParsingEncodingTests {
         #expect(feed.articles.first?.articleDescription == "£50")
     }
 
+    @Test("Big5 declaration round-trips multi-byte CJK content through parse()")
+    func big5CJKRoundTrip() throws {
+        // Big5 is the motivating case for this PR — CJK feeds declared as Big5
+        // are the most common encoding that XMLParser cannot handle natively.
+        // Use the IANA name path the production code uses so a lookup regression
+        // would break this test too.
+        guard let big5 = EncodingSniffer.encodingFromIANAName("Big5") else {
+            Issue.record("Big5 encoding unsupported on this platform")
+            return
+        }
+        let xml = """
+        <?xml version="1.0" encoding="Big5"?>
+        <rss version="2.0"><channel><title>繁體</title><item><title>中文</title><description>台灣</description></item></channel></rss>
+        """
+        guard let data = xml.data(using: big5) else {
+            Issue.record("Could not encode document as Big5")
+            return
+        }
+        let feed = try service.parse(data)
+        #expect(feed.title == "繁體")
+        #expect(feed.articles.count == 1)
+        #expect(feed.articles.first?.title == "中文")
+        #expect(feed.articles.first?.articleDescription == "台灣")
+    }
+
     // MARK: - Graceful degradation
 
-    @Test("Unknown encoding name falls through to raw bytes (no crash)")
+    @Test("Unknown encoding name strips prolog and falls through to UTF-8 body")
     func unknownEncodingNameDoesNotCrash() throws {
-        // Unknown charset name — sniffer should give up and pass bytes through.
-        // Content is actually UTF-8 so XMLParser handles it fine.
+        // Unknown charset name — sniffer should strip the prolog and pass the
+        // remaining bytes through so XMLParser treats them as UTF-8. Content is
+        // actually UTF-8 here, so the parse should succeed with all articles intact.
+        // A regression that over-eats content in `stripProlog` would be caught by
+        // the article-level assertions below.
         let xml = """
         <?xml version="1.0" encoding="x-obviously-fake-encoding"?>
-        <rss version="2.0"><channel><title>fallback</title><item><title>x</title></item></channel></rss>
+        <rss version="2.0"><channel><title>fallback</title><item><title>x</title><description>body text</description></item></channel></rss>
         """
         let feed = try service.parse(Data(xml.utf8))
         #expect(feed.title == "fallback")
+        #expect(feed.articles.count == 1)
+        #expect(feed.articles.first?.title == "x")
+        #expect(feed.articles.first?.articleDescription == "body text")
     }
 
     @Test("Empty data throws parsingFailed, not a crash")
@@ -277,5 +308,30 @@ struct RSSParsingEncodingTests {
         // U+FEFF can sneak in after transcoding if the original BOM was preserved.
         let input = "\u{FEFF}<?xml version=\"1.0\" encoding=\"Big5\"?><rss/>"
         #expect(EncodingSniffer.stripXMLDeclaration(input) == "<rss/>")
+    }
+
+    @Test("stripProlog removes the leading <?xml ... ?> at the byte level")
+    func stripPrologRemovesDeclaration() {
+        let prolog = Data("<?xml version=\"1.0\" encoding=\"x-fake\"?>".utf8)
+        let body = Data("<rss version=\"2.0\"/>".utf8)
+        let stripped = EncodingSniffer.stripProlog(prolog + body)
+        #expect(stripped == body, "stripProlog should return exactly the body bytes")
+    }
+
+    @Test("stripProlog returns nil when no <?xml prefix is present")
+    func stripPrologReturnsNilWithoutPrefix() {
+        let data = Data("<rss version=\"2.0\"/>".utf8)
+        #expect(EncodingSniffer.stripProlog(data) == nil)
+    }
+
+    @Test("stripProlog preserves multi-byte UTF-8 body bytes unchanged")
+    func stripPrologPreservesUTF8Body() {
+        // Hangul encoded as UTF-8 contains 0xED..0xB1 sequences. A byte-level
+        // strip that mistakenly decoded the remainder as ASCII would mangle
+        // these; the function must return the body bytes verbatim.
+        let prolog = Data("<?xml version=\"1.0\" encoding=\"x-fake\"?>".utf8)
+        let body = Data("<rss><title>한글</title></rss>".utf8)
+        let stripped = EncodingSniffer.stripProlog(prolog + body)
+        #expect(stripped == body)
     }
 }
