@@ -51,6 +51,16 @@ struct FeedIconService: FeedIconResolving {
     private static let htmlHeadMaxBytes = 51_200 // 50 KB
     private static let maxIconDimension: CGFloat = 128
 
+    /// Optional override for the on-disk cache directory. When `nil`, the service writes to
+    /// `<Caches>/feed-icons` (production default). Tests can pass a unique temporary directory
+    /// to isolate cache files and avoid leaking fixture data into the real user caches directory
+    /// on crash. See `FeedIconServiceTests` for the test-side helper.
+    private let cacheDirectoryOverride: URL?
+
+    init(cacheDirectoryOverride: URL? = nil) {
+        self.cacheDirectoryOverride = cacheDirectoryOverride
+    }
+
     // MARK: - FeedIconResolving
 
     func resolveIconCandidates(feedSiteURL: URL?, feedImageURL: URL?) async -> [URL] {
@@ -471,7 +481,10 @@ struct FeedIconService: FeedIconResolving {
     }
 
     private var cacheDirectory: URL {
-        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        if let cacheDirectoryOverride {
+            return cacheDirectoryOverride
+        }
+        return FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
             .appendingPathComponent(Self.iconCacheDirectoryName)
     }
 

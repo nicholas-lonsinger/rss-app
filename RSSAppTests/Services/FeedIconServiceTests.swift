@@ -6,7 +6,21 @@ import UIKit
 @Suite("FeedIconService Tests")
 struct FeedIconServiceTests {
 
-    let service = FeedIconService()
+    /// Per-test temporary cache directory. Swift Testing re-instantiates the suite for each
+    /// `@Test`, so each test gets a fresh UUID-named subdirectory under the system temporary
+    /// directory — on-disk fixtures never touch the real user caches directory
+    /// (`<Caches>/feed-icons`), and cross-test isolation is guaranteed. Tests that prime the
+    /// cache via `writeCacheFile` add their own `defer`-based cleanup for deterministic
+    /// teardown within a single test; any files that leak on a hard crash are bounded by
+    /// iOS's periodic purge of the system temp directory.
+    let cacheDirectory: URL
+    let service: FeedIconService
+
+    init() {
+        cacheDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FeedIconServiceTests-\(UUID().uuidString)", isDirectory: true)
+        service = FeedIconService(cacheDirectoryOverride: cacheDirectory)
+    }
 
     // MARK: - resolveIconCandidates
 
@@ -225,6 +239,9 @@ struct FeedIconServiceTests {
     @Test("Returns decoded image when cached file is valid and visible")
     @MainActor
     func loadValidatedIconReturnsImageForValidCache() async throws {
+        let cleanupDir = cacheDirectory
+        defer { try? FileManager.default.removeItem(at: cleanupDir) }
+
         let feedID = UUID()
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1
@@ -234,8 +251,6 @@ struct FeedIconServiceTests {
                 ctx.fill(CGRect(x: 0, y: 0, width: 16, height: 16))
             }
         let fileURL = try writeCacheFile(feedID: feedID, data: pngData)
-        // Safety net if the service didn't delete the file due to a regression.
-        defer { try? FileManager.default.removeItem(at: fileURL) }
 
         let image = await service.loadValidatedIcon(for: feedID)
 
@@ -246,11 +261,12 @@ struct FeedIconServiceTests {
 
     @Test("Deletes cached file and returns nil when data is not a decodable image")
     func loadValidatedIconDeletesUndecodableFile() async throws {
+        let cleanupDir = cacheDirectory
+        defer { try? FileManager.default.removeItem(at: cleanupDir) }
+
         let feedID = UUID()
         let garbage = Data("not a real image".utf8)
         let fileURL = try writeCacheFile(feedID: feedID, data: garbage)
-        // Safety net if the service didn't delete the file due to a regression.
-        defer { try? FileManager.default.removeItem(at: fileURL) }
 
         let image = await service.loadValidatedIcon(for: feedID)
 
@@ -261,6 +277,9 @@ struct FeedIconServiceTests {
     @Test("Deletes cached file and returns nil when image is fully transparent")
     @MainActor
     func loadValidatedIconDeletesTransparentImage() async throws {
+        let cleanupDir = cacheDirectory
+        defer { try? FileManager.default.removeItem(at: cleanupDir) }
+
         let feedID = UUID()
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1
@@ -270,8 +289,6 @@ struct FeedIconServiceTests {
                 ctx.fill(CGRect(x: 0, y: 0, width: 16, height: 16))
             }
         let fileURL = try writeCacheFile(feedID: feedID, data: pngData)
-        // Safety net if the service didn't delete the file due to a regression.
-        defer { try? FileManager.default.removeItem(at: fileURL) }
 
         let image = await service.loadValidatedIcon(for: feedID)
 
@@ -282,6 +299,9 @@ struct FeedIconServiceTests {
     @Test("Deletes cached file and returns nil when image is below visibility threshold")
     @MainActor
     func loadValidatedIconDeletesBelowThresholdImage() async throws {
+        let cleanupDir = cacheDirectory
+        defer { try? FileManager.default.removeItem(at: cleanupDir) }
+
         // 20x20 = 400 pixels; 3 opaque pixels = 0.75%, below the 1% threshold.
         // This exercises the `hasVisibleContent` delegation path for sub-threshold
         // (but non-transparent) icons — e.g. tracking-pixel or 1-px decoration favicons.
@@ -296,8 +316,6 @@ struct FeedIconServiceTests {
                 ctx.fill(CGRect(x: 0, y: 0, width: 3, height: 1))
             }
         let fileURL = try writeCacheFile(feedID: feedID, data: pngData)
-        // Safety net if the service didn't delete the file due to a regression.
-        defer { try? FileManager.default.removeItem(at: fileURL) }
 
         let image = await service.loadValidatedIcon(for: feedID)
 
@@ -307,14 +325,15 @@ struct FeedIconServiceTests {
 
     @Test("Handles concurrent invocations against an undecodable cache file")
     func loadValidatedIconHandlesConcurrentInvocations() async throws {
+        let cleanupDir = cacheDirectory
+        defer { try? FileManager.default.removeItem(at: cleanupDir) }
+
         // Two FeedIconView instances mounted for the same feed could hit
         // loadValidatedIcon simultaneously. The detached delete path must
         // tolerate one deleter racing ahead of the other without crashing.
         let feedID = UUID()
         let garbage = Data("not a real image".utf8)
         let fileURL = try writeCacheFile(feedID: feedID, data: garbage)
-        // Safety net if the service didn't delete the file due to a regression.
-        defer { try? FileManager.default.removeItem(at: fileURL) }
 
         async let first = service.loadValidatedIcon(for: feedID)
         async let second = service.loadValidatedIcon(for: feedID)
@@ -327,14 +346,12 @@ struct FeedIconServiceTests {
 
     // MARK: - Test helpers
 
-    /// Writes `data` to the path that `FeedIconService` expects for `feedID`'s cached
-    /// icon. This mirrors the service's private `iconFileURL(for:)` so tests can prime
-    /// the cache without going through the network-backed caching path.
+    /// Writes `data` to the path the `service` expects for `feedID`'s cached icon. Primes
+    /// the cache without going through the network-backed caching path. The destination is
+    /// the suite's isolated `cacheDirectory`, not the real user caches directory.
     private func writeCacheFile(feedID: UUID, data: Data) throws -> URL {
-        let cacheDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("feed-icons")
-        try FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
-        let fileURL = cacheDir.appendingPathComponent("\(feedID.uuidString).png")
+        try FileManager.default.createDirectory(at: cacheDirectory, withIntermediateDirectories: true)
+        let fileURL = cacheDirectory.appendingPathComponent("\(feedID.uuidString).png")
         try data.write(to: fileURL, options: .atomic)
         return fileURL
     }
