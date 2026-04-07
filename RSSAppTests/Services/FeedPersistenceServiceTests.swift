@@ -1444,4 +1444,81 @@ struct FeedPersistenceServiceTests {
         // The future article must be sorted by clamped sortDate, not raw publishedDate.
         #expect(result[1].sortDate < result[1].publishedDate!)
     }
+
+    // The two tests below pin the secondary sort tie-breaker (`articleID` ascending)
+    // that all article SortDescriptors carry. The tie-breaker is necessary because
+    // `sortDate` clamping makes collisions common: every future-dated and every
+    // nil-pubDate article in a refresh batch lands at ≈ now. Without a deterministic
+    // secondary key, SwiftData / SQLite returns identical-key rows in storage-engine
+    // order, which is unstable across queries — breaking pagination (an item could
+    // shift between pages or be skipped entirely between page 1 and page 2 fetches).
+
+    @Test("Sort order is stable when multiple articles share the same sortDate")
+    @MainActor
+    func sortOrderIsStableForIdenticalSortDates() throws {
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+
+        // Three articles whose publishedDate (and therefore sortDate) is identical.
+        // Inserted in non-alphabetical order so a missing tie-breaker would let the
+        // storage engine return them in insertion order rather than articleID order.
+        let sharedDate = Date(timeIntervalSince1970: 1_700_000_000)
+        try service.upsertArticles([
+            TestFixtures.makeArticle(id: "c-third", publishedDate: sharedDate),
+            TestFixtures.makeArticle(id: "a-first", publishedDate: sharedDate),
+            TestFixtures.makeArticle(id: "b-second", publishedDate: sharedDate),
+        ], for: feed)
+        try service.save()
+
+        let firstFetch = try service.allArticles()
+        let secondFetch = try service.allArticles()
+
+        // Same query run twice must return the same order.
+        #expect(firstFetch.map(\.articleID) == secondFetch.map(\.articleID))
+
+        // The order is determined by the articleID secondary sort (forward), so
+        // the result is alphabetical: a, b, c — regardless of insertion order.
+        #expect(firstFetch.map(\.articleID) == ["a-first", "b-second", "c-third"])
+    }
+
+    @Test("Pagination is stable across pages when sortDates collide")
+    @MainActor
+    func paginationIsStableForIdenticalSortDates() throws {
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+
+        // Five articles with identical sortDates. A missing tie-breaker would let
+        // page 1 (offset=0, limit=2) and page 2 (offset=2, limit=2) overlap or skip
+        // items, depending on storage-engine ordering.
+        let sharedDate = Date(timeIntervalSince1970: 1_700_000_000)
+        try service.upsertArticles([
+            TestFixtures.makeArticle(id: "e", publishedDate: sharedDate),
+            TestFixtures.makeArticle(id: "b", publishedDate: sharedDate),
+            TestFixtures.makeArticle(id: "d", publishedDate: sharedDate),
+            TestFixtures.makeArticle(id: "a", publishedDate: sharedDate),
+            TestFixtures.makeArticle(id: "c", publishedDate: sharedDate),
+        ], for: feed)
+        try service.save()
+
+        let page1 = try service.allArticles(offset: 0, limit: 2, ascending: false)
+        let page2 = try service.allArticles(offset: 2, limit: 2, ascending: false)
+        let page3 = try service.allArticles(offset: 4, limit: 2, ascending: false)
+
+        // No overlap between pages
+        let allReturnedIDs = page1.map(\.articleID) + page2.map(\.articleID) + page3.map(\.articleID)
+        #expect(Set(allReturnedIDs).count == allReturnedIDs.count, "pages must not overlap")
+        // All 5 articles accounted for across the three pages
+        #expect(Set(allReturnedIDs) == Set(["a", "b", "c", "d", "e"]))
+        // The articleID secondary sort is .forward, and the primary sort is .reverse
+        // by sortDate. With all sortDates identical, only the secondary applies, so
+        // the order is alphabetical ascending (a, b, c, d, e) regardless of which
+        // direction the primary key claims.
+        #expect(page1.map(\.articleID) == ["a", "b"])
+        #expect(page2.map(\.articleID) == ["c", "d"])
+        #expect(page3.map(\.articleID) == ["e"])
+    }
 }

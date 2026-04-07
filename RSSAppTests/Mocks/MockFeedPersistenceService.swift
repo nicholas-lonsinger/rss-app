@@ -89,13 +89,25 @@ final class MockFeedPersistenceService: FeedPersisting {
         return articlesByFeedID[feed.id] ?? []
     }
 
+    // Mirrors production: primary sort by `sortDate`, secondary tie-breaker by
+    // `articleID` ascending. The tie-breaker matters because clamped sortDates
+    // collide frequently for articles ingested in the same batch (future-dated
+    // and nil-pubDate articles all map to ≈ now). See `FeedPersistenceService`
+    // for the production SortDescriptors this mirrors.
+    private static func sortDescending(_ lhs: PersistentArticle, _ rhs: PersistentArticle) -> Bool {
+        if lhs.sortDate != rhs.sortDate { return lhs.sortDate > rhs.sortDate }
+        return lhs.articleID < rhs.articleID
+    }
+
+    private static func sortAscending(_ lhs: PersistentArticle, _ rhs: PersistentArticle) -> Bool {
+        if lhs.sortDate != rhs.sortDate { return lhs.sortDate < rhs.sortDate }
+        return lhs.articleID < rhs.articleID
+    }
+
     func articles(for feed: PersistentFeed, offset: Int, limit: Int, ascending: Bool = false) throws -> [PersistentArticle] {
         if let error = errorToThrow { throw error }
         let all = (articlesByFeedID[feed.id] ?? [])
-            .sorted { ascending
-                ? $0.sortDate < $1.sortDate
-                : $0.sortDate > $1.sortDate
-            }
+            .sorted(by: ascending ? Self.sortAscending : Self.sortDescending)
         return Array(all.dropFirst(offset).prefix(limit))
     }
 
@@ -103,10 +115,7 @@ final class MockFeedPersistenceService: FeedPersisting {
         if let error = errorToThrow { throw error }
         let all = (articlesByFeedID[feed.id] ?? [])
             .filter { !$0.isRead }
-            .sorted { ascending
-                ? $0.sortDate < $1.sortDate
-                : $0.sortDate > $1.sortDate
-            }
+            .sorted(by: ascending ? Self.sortAscending : Self.sortDescending)
         return Array(all.dropFirst(offset).prefix(limit))
     }
 
@@ -114,17 +123,14 @@ final class MockFeedPersistenceService: FeedPersisting {
         if let error = errorToThrow { throw error }
         return articlesByFeedID.values
             .flatMap { $0 }
-            .sorted { $0.sortDate > $1.sortDate }
+            .sorted(by: Self.sortDescending)
     }
 
     func allArticles(offset: Int, limit: Int, ascending: Bool = false) throws -> [PersistentArticle] {
         if let error = errorToThrow { throw error }
         let all = articlesByFeedID.values
             .flatMap { $0 }
-            .sorted { ascending
-                ? $0.sortDate < $1.sortDate
-                : $0.sortDate > $1.sortDate
-            }
+            .sorted(by: ascending ? Self.sortAscending : Self.sortDescending)
         return Array(all.dropFirst(offset).prefix(limit))
     }
 
@@ -133,7 +139,7 @@ final class MockFeedPersistenceService: FeedPersisting {
         return articlesByFeedID.values
             .flatMap { $0 }
             .filter { !$0.isRead }
-            .sorted { $0.sortDate > $1.sortDate }
+            .sorted(by: Self.sortDescending)
     }
 
     func allUnreadArticles(offset: Int, limit: Int, ascending: Bool = false) throws -> [PersistentArticle] {
@@ -141,10 +147,7 @@ final class MockFeedPersistenceService: FeedPersisting {
         let all = articlesByFeedID.values
             .flatMap { $0 }
             .filter { !$0.isRead }
-            .sorted { ascending
-                ? $0.sortDate < $1.sortDate
-                : $0.sortDate > $1.sortDate
-            }
+            .sorted(by: ascending ? Self.sortAscending : Self.sortDescending)
         return Array(all.dropFirst(offset).prefix(limit))
     }
 
@@ -211,7 +214,15 @@ final class MockFeedPersistenceService: FeedPersisting {
         let all = articlesByFeedID.values
             .flatMap { $0 }
             .filter { $0.isSaved }
-            .sorted { ($0.savedDate ?? .distantPast) > ($1.savedDate ?? .distantPast) }
+            .sorted {
+                // Mirror production: primary by savedDate desc, tie-breaker by
+                // articleID asc, matching the FeedPersistenceService.allSavedArticles
+                // SortDescriptor pair.
+                let lhs = $0.savedDate ?? .distantPast
+                let rhs = $1.savedDate ?? .distantPast
+                if lhs != rhs { return lhs > rhs }
+                return $0.articleID < $1.articleID
+            }
         return Array(all.dropFirst(offset).prefix(limit))
     }
 
