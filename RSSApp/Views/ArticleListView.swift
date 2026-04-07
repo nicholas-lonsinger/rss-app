@@ -126,10 +126,14 @@ struct ArticleListView: View {
             // (two gates)". Both gates are required — removing either reopens #209.
             // (`.task` here also wraps `loadFeed()`, so the gate avoids a redundant
             // network round-trip on every reader pop, on top of the persistence
-            // re-query that drops just-read items under "Show Unread Only".)
+            // re-query that drops just-read items under "Show Unread Only". The flag
+            // is set BEFORE the await: SwiftUI cancels `.task` on disappear, so if
+            // the user taps an article during the initial network fetch, setting
+            // the flag after the await would leave it false and the post-pop re-run
+            // would fire a fresh `loadFeed()` — reproducing the exact bug.)
             guard !hasAppeared else { return }
-            await viewModel.loadFeed()
             hasAppeared = true
+            await viewModel.loadFeed()
         }
         .onAppear {
             guard hasAppeared else { return }
