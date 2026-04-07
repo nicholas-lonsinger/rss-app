@@ -1010,9 +1010,16 @@ struct FeedViewModelTests {
     /// load-bearing: if a refresh rebuilt `PersistentArticle` instances (or otherwise
     /// produced different `articleID` values for the same logical entries), the reader
     /// would fire spurious `.onChange` events on every refresh and could mark the wrong
-    /// articles as read. This test pins the invariant at the view model layer so a
-    /// regression in `reloadArticles()` lands loudly instead of silently.
-    @Test("reloadArticles preserves articleID for previously loaded prefix")
+    /// articles as read.
+    ///
+    /// This variant exercises the cache + overlapping network-merge path — the most
+    /// plausible regression surface described in the issue. The cache is pre-populated
+    /// with `pageSize` articles, then `loadFeed()` fetches a network response whose
+    /// first `pageSize` entries overlap the cache (plus a handful of older additions).
+    /// `upsertArticles` must treat the overlap as a dedupe, not a rebuild, so that both
+    /// the post-fetch reload inside `loadFeed()` and the subsequent explicit
+    /// `reloadArticles()` return the same `articleID` values for the prefix.
+    @Test("reloadArticles preserves articleID prefix when network response overlaps cache")
     @MainActor
     func reloadArticlesPreservesArticleIDPrefix() async {
         UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
@@ -1021,23 +1028,39 @@ struct FeedViewModelTests {
         let mockPersistence = MockFeedPersistenceService()
         mockPersistence.feeds = [feed]
 
-        // Pre-populate persistence with pageSize articles in descending publishedDate
+        // Pre-populate persistence with `pageSize` articles in descending publishedDate
         // order so the loaded prefix is deterministic under the default newest-first sort.
-        let articles = (0..<FeedViewModel.pageSize).map { i in
+        // Uses `makePersistentArticle` because these bypass `upsertArticles` — they model
+        // articles already materialized in SwiftData from a prior session.
+        let totalCount = FeedViewModel.pageSize + 5
+        let cached = (0..<FeedViewModel.pageSize).map { i in
             let article = TestFixtures.makePersistentArticle(
                 articleID: "a\(i)",
-                publishedDate: Date(timeIntervalSince1970: Double(FeedViewModel.pageSize - i) * 1_000_000)
+                publishedDate: Date(timeIntervalSince1970: Double(totalCount - i) * 1_000_000)
             )
             article.feed = feed
             return article
         }
-        mockPersistence.articlesByFeedID[feed.id] = articles
+        mockPersistence.articlesByFeedID[feed.id] = cached
 
-        mock.feedToReturn = TestFixtures.makeFeed()
+        // Network response contains the same `pageSize` articles (full overlap with the
+        // cache) plus 5 older additions. Uses `makeArticle` because this is the parser
+        // struct path — these flow through `upsertArticles`, exercising the merge logic.
+        // The overlap asserts that `upsertArticles` dedupes rather than rebuilding
+        // existing rows, which is the regression shape issue #235 is guarding against.
+        let networkArticles = (0..<totalCount).map { i in
+            TestFixtures.makeArticle(
+                id: "a\(i)",
+                title: "Article \(i)",
+                publishedDate: Date(timeIntervalSince1970: Double(totalCount - i) * 1_000_000)
+            )
+        }
+        mock.feedToReturn = TestFixtures.makeFeed(articles: networkArticles)
 
         let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence)
         await viewModel.loadFeed()
 
+        #expect(viewModel.articles.count == FeedViewModel.pageSize)
         let prefixBefore = Array(viewModel.articles.prefix(FeedViewModel.pageSize)).map(\.articleID)
         #expect(prefixBefore.count == FeedViewModel.pageSize)
 
@@ -1064,7 +1087,9 @@ struct FeedViewModelTests {
         mockPersistence.feeds = [feed]
 
         // pageSize + 5 articles in descending publishedDate order so the first page
-        // is deterministic and the next page contains the remaining 5 entries.
+        // is deterministic and the next page contains the remaining 5 entries. Uses
+        // `makeArticle` (parser struct path) because the cache is empty here — all
+        // rows are materialized through `upsertArticles` during `loadFeed()`.
         let totalCount = FeedViewModel.pageSize + 5
         let articles = (0..<totalCount).map { i in
             TestFixtures.makeArticle(
