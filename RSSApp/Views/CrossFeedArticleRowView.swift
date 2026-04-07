@@ -1,3 +1,4 @@
+import os
 import SwiftUI
 
 /// Article row for cross-feed lists (All Articles, Unread Articles, Saved Articles).
@@ -74,8 +75,8 @@ struct CrossFeedArticleRowView: View {
 /// cached icon is available, so rows without resolved icons collapse to text only.
 private struct InlineFeedIconView: View {
     let feedID: UUID
-    // RATIONALE: iconURL is not read directly — it exists so SwiftUI detects a property
-    // change and re-evaluates the body when the icon becomes available after caching.
+    /// Drives `.task(id:)` so the icon load re-runs after the feed's icon URL is
+    /// resolved and cached. The value itself isn't used for rendering.
     let iconURL: URL?
     let iconService: FeedIconResolving
 
@@ -96,6 +97,7 @@ private struct InlineFeedIconView: View {
         }
         .task(id: iconURL) {
             guard let fileURL = iconService.cachedIconFileURL(for: feedID) else {
+                inlineFeedIconLogger.debug("No cached icon for feed \(feedID.uuidString, privacy: .public) — awaiting next refresh")
                 iconImage = nil
                 return
             }
@@ -103,9 +105,13 @@ private struct InlineFeedIconView: View {
             // the FeedIconResolving protocol because it is a pure static utility with no I/O
             // or state — protocol abstraction would add complexity with no testability benefit.
             let image = await Task.detached(priority: .userInitiated) { [iconService] () -> UIImage? in
-                guard let img = UIImage(contentsOfFile: fileURL.path(percentEncoded: false)),
-                      FeedIconService.hasVisibleContent(img) else {
-                    // Cached icon is corrupt or transparent — remove so next refresh retries
+                guard let img = UIImage(contentsOfFile: fileURL.path(percentEncoded: false)) else {
+                    inlineFeedIconLogger.warning("Cached icon file unreadable for feed \(feedID.uuidString, privacy: .public) at \(fileURL.path, privacy: .public) — deleting")
+                    iconService.deleteCachedIcon(for: feedID)
+                    return nil
+                }
+                guard FeedIconService.hasVisibleContent(img) else {
+                    inlineFeedIconLogger.warning("Cached icon for feed \(feedID.uuidString, privacy: .public) has no visible content — deleting")
                     iconService.deleteCachedIcon(for: feedID)
                     return nil
                 }
@@ -115,3 +121,8 @@ private struct InlineFeedIconView: View {
         }
     }
 }
+
+// RATIONALE: File-private module-level logger so it can be accessed from inside
+// `Task.detached` closures without crossing the `View`'s `@MainActor` isolation,
+// matching the pattern used by `downloadRetryLogger` in ThumbnailPrefetchService.
+private let inlineFeedIconLogger = Logger(category: "InlineFeedIconView")

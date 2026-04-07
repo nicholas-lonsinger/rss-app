@@ -3,8 +3,8 @@ import SwiftUI
 struct FeedIconView: View {
 
     let feedID: UUID
-    // RATIONALE: iconURL is not read directly — it exists so SwiftUI detects a property
-    // change and re-evaluates the body when the icon becomes available after caching.
+    /// Drives `.task(id:)` so the icon load re-runs after the feed's icon URL is
+    /// resolved and cached. The value itself isn't used for rendering.
     let iconURL: URL?
     let iconService: FeedIconResolving
 
