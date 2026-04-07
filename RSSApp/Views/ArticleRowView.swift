@@ -39,12 +39,14 @@ struct ArticleRowView: View {
 /// unread update bump (`wasUpdated == true`).
 ///
 /// Two distinct UI signals here, intentionally:
-/// - The "Updated [date]" text is *informational* — it always appears for articles
-///   that have an updated date, so users can see "this article was last touched 3
-///   days ago" even after they've read the latest version.
+/// - The "Updated [date]" text is *informational* — it appears whenever the article
+///   carries a meaningfully different `updatedDate` (per
+///   `PersistentArticle.shouldShowUpdatedSuffix`'s tolerance check), so users can see
+///   "this article was last touched 3 days ago" even after they've read the latest
+///   version.
 /// - The orange badge is a *call to action* — it only appears when `wasUpdated == true`,
-///   meaning the article has new content the user hasn't read yet. It clears when
-///   `markArticleRead(_:isRead: true)` fires (issue #74).
+///   meaning the article has new content the user hasn't read yet. It clears on every
+///   read transition (`markArticleRead`, `markAllArticlesRead`).
 struct ArticleRowDateLine: View {
     let article: PersistentArticle
 
@@ -55,17 +57,10 @@ struct ArticleRowDateLine: View {
             // update detection — see the RATIONALE on `PersistentArticle.sortDate`
             // for why these are now distinct.
             Text(article.displayedPublishedDate, style: .relative)
-                .font(.caption)
-                .foregroundStyle(.secondary)
 
-            if let updated = article.updatedDate,
-               abs(updated.timeIntervalSince(article.displayedPublishedDate)) > 1 {
+            if article.shouldShowUpdatedSuffix, let updated = article.updatedDate {
                 Text("\u{00B7}")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
                 Text("Updated \(updated, style: .relative)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
 
             if article.wasUpdated {
@@ -78,5 +73,10 @@ struct ArticleRowDateLine: View {
                     .background(Color.orange.opacity(0.15), in: Capsule())
             }
         }
+        // Apply caption font and secondary color to the whole HStack so the
+        // publication-date Text and the "Updated [date]" suffix Text inherit them.
+        // The orange badge below overrides both via its own modifier chain.
+        .font(.caption)
+        .foregroundStyle(.secondary)
     }
 }

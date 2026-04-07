@@ -470,12 +470,9 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
     func markArticleRead(_ article: PersistentArticle, isRead: Bool) throws {
         article.isRead = isRead
         article.readDate = isRead ? Date() : nil
-        // Clear the issue #74 update-detection flag when the user reads the article so
-        // the orange "Updated" badge disappears the moment they open it. Asymmetric on
-        // purpose: manually marking unread does NOT re-set `wasUpdated`, because the
-        // user toggling read state has nothing to do with whether the publisher
-        // actually revised the content. The flag is set only by `upsertArticles` and
-        // cleared only here.
+        // Clear the issue #74 update flag on read transitions. See the doc comment on
+        // `PersistentArticle.wasUpdated` for the asymmetric-clear rationale (manually
+        // marking unread does not re-set the flag).
         if isRead {
             article.wasUpdated = false
         }
@@ -497,6 +494,11 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
         for article in unreadArticles {
             article.isRead = true
             article.readDate = now
+            // Match `markArticleRead`'s read-transition clear so the issue #74
+            // "Updated" badge doesn't survive a bulk mark-as-read. Without this, the
+            // documented "exactly one clearer" invariant on `wasUpdated` would be
+            // false the moment a user invoked this API.
+            article.wasUpdated = false
         }
         try modelContext.save()
         Self.logger.notice("Marked \(unreadArticles.count, privacy: .public) articles as read for feed '\(feed.title, privacy: .public)'")
@@ -515,6 +517,10 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
         for article in unreadArticles {
             article.isRead = true
             article.readDate = now
+            // Same read-transition clear as the per-feed bulk path above and the
+            // single-article `markArticleRead` — keeps issue #74's `wasUpdated`
+            // contract consistent across every read transition.
+            article.wasUpdated = false
         }
         try modelContext.save()
         Self.logger.notice("Marked \(unreadArticles.count, privacy: .public) articles as read across all feeds")
