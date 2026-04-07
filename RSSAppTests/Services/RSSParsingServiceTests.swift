@@ -730,60 +730,37 @@ struct RSSParsingServiceTests {
     // entry from the formats list must cause the matching test here to fail.
     // See GitHub issue #215.
 
-    @Test("Zoned format 'dd MMM yyyy HH:mm:ss zzz' is reachable (no weekday, named zone)")
-    func zonedDDMMMYYYYHHmmssNamedZone() throws {
-        // No weekday prefix and a named zone that `DateFormatter`'s `zzz` accepts.
-        // This combination does not match any of the weekday-bearing formats or the
-        // numeric-offset `dd MMM yyyy HH:mm:ss Z` form above it.
-        // 08:30 GMT = 08:30 UTC.
-        let xml = Self.rssXML(pubDate: "06 Apr 2026 08:30:00 GMT")
-        let feed = try service.parse(Data(xml.utf8))
-
-        let date = try #require(feed.articles[0].publishedDate)
-        let expected = try Self.utcDate(year: 2026, month: 4, day: 6, hour: 8, minute: 30)
-        #expect(date == expected)
-    }
-
     @Test("Zoned format 'EEE, dd MMM yyyy HH:mm zzz' is reachable (no seconds, named zone)")
     func zonedEEEDDMMMYYYYHHmmNamedZone() throws {
-        // RFC 2822 permits omitting seconds; pairing that with a named zone reaches
-        // the `EEE, dd MMM yyyy HH:mm zzz` entry specifically. The corresponding
-        // numeric-offset form (`EEE, dd MMM yyyy HH:mm Z`) appears just above it
-        // and will fail against a `GMT` suffix.
-        // 08:30 GMT = 08:30 UTC.
-        let xml = Self.rssXML(pubDate: "Mon, 06 Apr 2026 08:30 GMT")
+        // RFC 2822 permits omitting seconds; pairing that with a named non-`GMT` zone
+        // reaches the `EEE, dd MMM yyyy HH:mm zzz` entry specifically. A `GMT` suffix
+        // would be absorbed by the earlier numeric-offset `EEE, dd MMM yyyy HH:mm Z`
+        // entry, since `DateFormatter`'s `Z` specifier with `en_US_POSIX` accepts the
+        // literal `GMT`. `EST` is rejected by `Z` and accepted by `zzz`, so it
+        // forces the formatter to fall through to the named-zone entry.
+        // 08:30 EST = 13:30 UTC.
+        let xml = Self.rssXML(pubDate: "Mon, 06 Apr 2026 08:30 EST")
         let feed = try service.parse(Data(xml.utf8))
 
         let date = try #require(feed.articles[0].publishedDate)
-        let expected = try Self.utcDate(year: 2026, month: 4, day: 6, hour: 8, minute: 30)
-        #expect(date == expected)
-    }
-
-    @Test("Zoned format 'yyyy-MM-dd HH:mm:ss Z' is reachable (space before numeric offset)")
-    func zonedYYYYMMDDSpaceNumericZone() throws {
-        // `isoSpaceSeparatorZoned` covers `yyyy-MM-dd HH:mm:ssZ` (no space before
-        // the offset). This variant has a space between the time and the offset,
-        // which only `yyyy-MM-dd HH:mm:ss Z` matches.
-        // 08:30 at -0700 = 15:30 UTC.
-        let xml = Self.rssXML(pubDate: "2026-04-06 08:30:00 -0700")
-        let feed = try service.parse(Data(xml.utf8))
-
-        let date = try #require(feed.articles[0].publishedDate)
-        let expected = try Self.utcDate(year: 2026, month: 4, day: 6, hour: 15, minute: 30)
+        let expected = try Self.utcDate(year: 2026, month: 4, day: 6, hour: 13, minute: 30)
         #expect(date == expected)
     }
 
     @Test("Zoned format 'yyyy-MM-dd HH:mm:ss zzz' is reachable (space separator, named zone)")
     func zonedYYYYMMDDSpaceNamedZone() throws {
-        // SQL-flavored space separator combined with a named zone. The named zone
-        // rules out every earlier numeric-offset variant, and the space-before-`T`
-        // form distinguishes it from the ISO 8601 `'T'` variants.
-        // 08:30 GMT = 08:30 UTC.
-        let xml = Self.rssXML(pubDate: "2026-04-06 08:30:00 GMT")
+        // SQL-flavored space separator combined with a named non-`GMT` zone. A `GMT`
+        // suffix would be absorbed by the earlier `yyyy-MM-dd HH:mm:ssZ` entry, since
+        // `DateFormatter`'s `Z` specifier with `en_US_POSIX` accepts the literal
+        // `GMT` and tolerates leading whitespace before the zone token. `EST` is
+        // rejected by `Z` and accepted by `zzz`, so it forces the formatter to fall
+        // through to the named-zone entry.
+        // 08:30 EST = 13:30 UTC.
+        let xml = Self.rssXML(pubDate: "2026-04-06 08:30:00 EST")
         let feed = try service.parse(Data(xml.utf8))
 
         let date = try #require(feed.articles[0].publishedDate)
-        let expected = try Self.utcDate(year: 2026, month: 4, day: 6, hour: 8, minute: 30)
+        let expected = try Self.utcDate(year: 2026, month: 4, day: 6, hour: 13, minute: 30)
         #expect(date == expected)
     }
 
@@ -822,20 +799,24 @@ struct RSSParsingServiceTests {
         let feed = try service.parse(Data(xml.utf8))
 
         let date = try #require(feed.articles[0].publishedDate)
-        let (y, mo, d, hr, mi, _) = Self.utcComponents(date)
+        let (y, mo, d, hr, mi, s) = Self.utcComponents(date)
         #expect(y == 2026)
         #expect(mo == 4)
         #expect(d == 6)
         #expect(hr == 8)
         #expect(mi == 30)
+        // Asserting `s == 0` catches a regression where the formatter mis-reads the
+        // fractional component into the seconds slot (e.g., interpreting `.123` such
+        // that the resulting `Date` lands on `08:30:30.something`).
+        #expect(s == 0)
     }
 
     @Test("Zoneless format 'yyyy-MM-dd HH:mm:ss' is reachable (space separator, no zone)")
     func zonelessYYYYMMDDSpace() throws {
         // SQL-flavored space separator without a zone. Distinguishes this entry
-        // from the zone-bearing `yyyy-MM-dd HH:mm:ssZ` / `yyyy-MM-dd HH:mm:ss Z`
-        // / `yyyy-MM-dd HH:mm:ss zzz` zoned formats and from the ISO 8601 `'T'`
-        // zoneless formats that come earlier in the zoneless list.
+        // from the zone-bearing `yyyy-MM-dd HH:mm:ssZ` / `yyyy-MM-dd HH:mm:ss zzz`
+        // zoned formats and from the ISO 8601 `'T'` zoneless formats that come
+        // earlier in the zoneless list.
         let xml = Self.rssXML(pubDate: "2026-04-06 08:30:00")
         let feed = try service.parse(Data(xml.utf8))
 

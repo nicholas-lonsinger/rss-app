@@ -746,9 +746,11 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
         // Single-digit day variant (appears in real RFC 822 feeds)
         "EEE, d MMM yyyy HH:mm:ss Z",
         "EEE, d MMM yyyy HH:mm:ss zzz",
-        // Without weekday (seen in the wild)
-        "dd MMM yyyy HH:mm:ss Z",
-        "dd MMM yyyy HH:mm:ss zzz",
+        // Without weekday (seen in the wild). Only the single-digit-day (`d`) variants
+        // are listed: `DateFormatter`'s `d` specifier with `en_US_POSIX` accepts both
+        // one- and two-digit days, so a separate `dd`-prefixed entry would be dead
+        // code (the `d` variant immediately below would already match every input
+        // the `dd` variant could).
         "d MMM yyyy HH:mm:ss Z",
         "d MMM yyyy HH:mm:ss zzz",
         // Without seconds (RFC 2822/5322 permits this; rare but appears in some wire formats)
@@ -759,9 +761,13 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
         // fractional-seconds precision or minor whitespace quirks).
         "yyyy-MM-dd'T'HH:mm:ssZ",
         "yyyy-MM-dd'T'HH:mm:ss.SSSZ",
-        // ISO 8601 with space separator instead of 'T' (common in SQL-flavored feeds)
+        // ISO 8601 with space separator instead of 'T' (common in SQL-flavored feeds).
+        // RATIONALE: there is no separate `"yyyy-MM-dd HH:mm:ss Z"` entry (with a
+        // space before `Z`) because `DateFormatter`'s `Z` specifier with
+        // `en_US_POSIX` tolerates leading whitespace before the offset token, so the
+        // no-space form below already absorbs `"2026-04-06 08:30:00 -0700"` and a
+        // separate spaced variant would be dead code.
         "yyyy-MM-dd HH:mm:ssZ",
-        "yyyy-MM-dd HH:mm:ss Z",
         "yyyy-MM-dd HH:mm:ss zzz",
     ]
 
