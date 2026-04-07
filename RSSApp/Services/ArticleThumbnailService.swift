@@ -124,10 +124,15 @@ struct ArticleThumbnailService: ArticleThumbnailCaching {
 
         // Priority 2: Fetch article page and extract og:image
         if let articleLink {
-            if let ogImageURL = await resolveOGImage(from: articleLink) {
+            switch await resolveOGImage(from: articleLink) {
+            case .found(let ogImageURL):
                 let result = await cacheThumbnail(from: ogImageURL, articleID: articleID)
                 if result == .cached { return .cached }
                 if result == .transientFailure { sawTransient = true }
+            case .fetchFailed:
+                sawTransient = true
+            case .notFound:
+                break
             }
         }
 
@@ -182,13 +187,23 @@ struct ArticleThumbnailService: ArticleThumbnailCaching {
 
     // MARK: - OG Image Resolution
 
+    /// Distinguishes successful og:image extraction from "no tag present" vs "fetch failed."
+    private enum OGImageResult {
+        /// An og:image URL was found in the page's `<head>`.
+        case found(URL)
+        /// The page loaded successfully but contained no og:image meta tag.
+        case notFound
+        /// A network or HTTP error prevented loading the page — transient, worth retrying.
+        case fetchFailed
+    }
+
     private static let htmlFetchTimeout: TimeInterval = 10
 
     /// The og:image meta tag is in the `<head>`, so we only need the first portion of the page.
     private static let htmlHeadMaxBytes = 51_200 // 50 KB
 
     /// Fetches the beginning of an article page and extracts the `og:image` meta tag URL.
-    private func resolveOGImage(from articleLink: URL) async -> URL? {
+    private func resolveOGImage(from articleLink: URL) async -> OGImageResult {
         Self.logger.debug("Resolving og:image from \(articleLink.absoluteString, privacy: .public)")
 
         do {
@@ -200,7 +215,9 @@ struct ArticleThumbnailService: ArticleThumbnailCaching {
                   (200...299).contains(httpResponse.statusCode) else {
                 let code = (response as? HTTPURLResponse)?.statusCode ?? -1
                 Self.logger.warning("Article page fetch returned HTTP \(code, privacy: .public) for \(articleLink.absoluteString, privacy: .public)")
-                return nil
+                // Non-2xx HTTP responses are treated as transient — the server may recover.
+                // 429 (rate limited) and 408 (request timeout) are transient despite being 4xx.
+                return .fetchFailed
             }
 
             // Read only the first portion — og:image is in <head>, no need for the full body
@@ -213,12 +230,16 @@ struct ArticleThumbnailService: ArticleThumbnailCaching {
 
             guard let html = String(data: collected, encoding: .utf8) else {
                 Self.logger.warning("Article page response is not valid UTF-8 from \(articleLink.absoluteString, privacy: .public)")
-                return nil
+                return .notFound
             }
-            return HTMLUtilities.extractOGImageURL(from: html, baseURL: articleLink)
+
+            if let ogURL = HTMLUtilities.extractOGImageURL(from: html, baseURL: articleLink) {
+                return .found(ogURL)
+            }
+            return .notFound
         } catch {
             Self.logger.warning("Failed to fetch article page for og:image: \(error, privacy: .public)")
-            return nil
+            return .fetchFailed
         }
     }
 
