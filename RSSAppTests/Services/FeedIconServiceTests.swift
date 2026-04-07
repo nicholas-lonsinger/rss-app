@@ -213,6 +213,132 @@ struct FeedIconServiceTests {
         service.deleteCachedIcon(for: UUID())
     }
 
+    // MARK: - loadValidatedIcon
+
+    @Test("Returns nil when no cached icon exists")
+    func loadValidatedIconReturnsNilWhenUncached() async {
+        let result = await service.loadValidatedIcon(for: UUID())
+
+        #expect(result == nil)
+    }
+
+    @Test("Returns decoded image when cached file is valid and visible")
+    @MainActor
+    func loadValidatedIconReturnsImageForValidCache() async throws {
+        let feedID = UUID()
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let pngData = UIGraphicsImageRenderer(size: CGSize(width: 16, height: 16), format: format)
+            .pngData { ctx in
+                UIColor.red.setFill()
+                ctx.fill(CGRect(x: 0, y: 0, width: 16, height: 16))
+            }
+        let fileURL = try writeCacheFile(feedID: feedID, data: pngData)
+        // Safety net if the service didn't delete the file due to a regression.
+        defer { try? FileManager.default.removeItem(at: fileURL) }
+
+        let image = await service.loadValidatedIcon(for: feedID)
+
+        #expect(image != nil)
+        // Valid icons must remain on disk after a successful load
+        #expect(FileManager.default.fileExists(atPath: fileURL.path(percentEncoded: false)))
+    }
+
+    @Test("Deletes cached file and returns nil when data is not a decodable image")
+    func loadValidatedIconDeletesUndecodableFile() async throws {
+        let feedID = UUID()
+        let garbage = Data("not a real image".utf8)
+        let fileURL = try writeCacheFile(feedID: feedID, data: garbage)
+        // Safety net if the service didn't delete the file due to a regression.
+        defer { try? FileManager.default.removeItem(at: fileURL) }
+
+        let image = await service.loadValidatedIcon(for: feedID)
+
+        #expect(image == nil)
+        #expect(!FileManager.default.fileExists(atPath: fileURL.path(percentEncoded: false)))
+    }
+
+    @Test("Deletes cached file and returns nil when image is fully transparent")
+    @MainActor
+    func loadValidatedIconDeletesTransparentImage() async throws {
+        let feedID = UUID()
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let pngData = UIGraphicsImageRenderer(size: CGSize(width: 16, height: 16), format: format)
+            .pngData { ctx in
+                UIColor.clear.setFill()
+                ctx.fill(CGRect(x: 0, y: 0, width: 16, height: 16))
+            }
+        let fileURL = try writeCacheFile(feedID: feedID, data: pngData)
+        // Safety net if the service didn't delete the file due to a regression.
+        defer { try? FileManager.default.removeItem(at: fileURL) }
+
+        let image = await service.loadValidatedIcon(for: feedID)
+
+        #expect(image == nil)
+        #expect(!FileManager.default.fileExists(atPath: fileURL.path(percentEncoded: false)))
+    }
+
+    @Test("Deletes cached file and returns nil when image is below visibility threshold")
+    @MainActor
+    func loadValidatedIconDeletesBelowThresholdImage() async throws {
+        // 20x20 = 400 pixels; 3 opaque pixels = 0.75%, below the 1% threshold.
+        // This exercises the `hasVisibleContent` delegation path for sub-threshold
+        // (but non-transparent) icons — e.g. tracking-pixel or 1-px decoration favicons.
+        let feedID = UUID()
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let pngData = UIGraphicsImageRenderer(size: CGSize(width: 20, height: 20), format: format)
+            .pngData { ctx in
+                UIColor.clear.setFill()
+                ctx.fill(CGRect(x: 0, y: 0, width: 20, height: 20))
+                UIColor.red.setFill()
+                ctx.fill(CGRect(x: 0, y: 0, width: 3, height: 1))
+            }
+        let fileURL = try writeCacheFile(feedID: feedID, data: pngData)
+        // Safety net if the service didn't delete the file due to a regression.
+        defer { try? FileManager.default.removeItem(at: fileURL) }
+
+        let image = await service.loadValidatedIcon(for: feedID)
+
+        #expect(image == nil)
+        #expect(!FileManager.default.fileExists(atPath: fileURL.path(percentEncoded: false)))
+    }
+
+    @Test("Handles concurrent invocations against an undecodable cache file")
+    func loadValidatedIconHandlesConcurrentInvocations() async throws {
+        // Two FeedIconView instances mounted for the same feed could hit
+        // loadValidatedIcon simultaneously. The detached delete path must
+        // tolerate one deleter racing ahead of the other without crashing.
+        let feedID = UUID()
+        let garbage = Data("not a real image".utf8)
+        let fileURL = try writeCacheFile(feedID: feedID, data: garbage)
+        // Safety net if the service didn't delete the file due to a regression.
+        defer { try? FileManager.default.removeItem(at: fileURL) }
+
+        async let first = service.loadValidatedIcon(for: feedID)
+        async let second = service.loadValidatedIcon(for: feedID)
+        let (a, b) = await (first, second)
+
+        #expect(a == nil)
+        #expect(b == nil)
+        #expect(!FileManager.default.fileExists(atPath: fileURL.path(percentEncoded: false)))
+    }
+
+    // MARK: - Test helpers
+
+    /// Writes `data` to the path that `FeedIconService` expects for `feedID`'s cached
+    /// icon. This mirrors the service's private `iconFileURL(for:)` so tests can prime
+    /// the cache without going through the network-backed caching path.
+    private func writeCacheFile(feedID: UUID, data: Data) throws -> URL {
+        let cacheDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("feed-icons")
+        try FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
+        let fileURL = cacheDir.appendingPathComponent("\(feedID.uuidString).png")
+        try data.write(to: fileURL, options: .atomic)
+        return fileURL
+    }
+
     // MARK: - hasVisibleContent
 
     @Test("Rejects fully transparent image")

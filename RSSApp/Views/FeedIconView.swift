@@ -1,4 +1,3 @@
-import os
 import SwiftUI
 
 struct FeedIconView: View {
@@ -70,33 +69,10 @@ struct FeedIconView: View {
         }
         .frame(width: style.iconSize, height: style.iconSize)
         .task(id: iconURL) {
-            guard let fileURL = iconService.cachedIconFileURL(for: feedID) else {
-                feedIconLogger.debug("No cached icon for feed \(feedID.uuidString, privacy: .public) — awaiting next refresh")
-                iconImage = nil
-                return
-            }
-            // RATIONALE: Calls FeedIconService.hasVisibleContent directly rather than through
-            // the FeedIconResolving protocol because it is a pure static utility with no I/O
-            // or state — protocol abstraction would add complexity with no testability benefit.
-            let image = await Task.detached(priority: .userInitiated) { [iconService] () -> UIImage? in
-                guard let img = UIImage(contentsOfFile: fileURL.path(percentEncoded: false)) else {
-                    feedIconLogger.warning("Cached icon file unreadable for feed \(feedID.uuidString, privacy: .public) at \(fileURL.path, privacy: .public) — deleting")
-                    iconService.deleteCachedIcon(for: feedID)
-                    return nil
-                }
-                guard FeedIconService.hasVisibleContent(img) else {
-                    feedIconLogger.warning("Cached icon for feed \(feedID.uuidString, privacy: .public) has no visible content — deleting")
-                    iconService.deleteCachedIcon(for: feedID)
-                    return nil
-                }
-                return img
-            }.value
-            iconImage = image
+            // RATIONALE: Delegates decode + visibility validation + delete-on-corrupt
+            // to FeedIconResolving so the cache-validity invariant is enforced once at
+            // the service boundary. Keeps this view to a single async call.
+            iconImage = await iconService.loadValidatedIcon(for: feedID)
         }
     }
 }
-
-// RATIONALE: File-private module-level logger so it can be accessed from inside
-// `Task.detached` closures without crossing the `View`'s `@MainActor` isolation,
-// matching the pattern used by `downloadRetryLogger` in ThumbnailPrefetchService.
-private let feedIconLogger = Logger(category: "FeedIconView")
