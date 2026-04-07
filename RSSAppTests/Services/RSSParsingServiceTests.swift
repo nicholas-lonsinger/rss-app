@@ -608,7 +608,8 @@ struct RSSParsingServiceTests {
     @Test("Zone-less RFC 822 date is interpreted as UTC (documented fallback)")
     func zonelessRFC822FallsBackToUTC() throws {
         // Previously this input produced `nil`, hiding the article's timestamp from the UI.
-        // The fallback interprets zone-less dates as UTC and logs a warning. See issue #208.
+        // The fallback interprets zone-less dates as UTC and logs at `.debug` (see issue
+        // #208 for the original fix and #214 for the log-level demotion).
         let xml = Self.rssXML(pubDate: "Mon, 06 Apr 2026 08:30:00")
         let feed = try service.parse(Data(xml.utf8))
 
