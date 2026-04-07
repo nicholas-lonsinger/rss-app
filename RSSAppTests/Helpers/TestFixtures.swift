@@ -582,8 +582,15 @@ enum TestFixtures {
         isSaved: Bool = false,
         savedDate: Date? = nil,
         isThumbnailCached: Bool = false,
-        thumbnailRetryCount: Int = 0
+        thumbnailRetryCount: Int = 0,
+        sortDate: Date? = nil
     ) -> PersistentArticle {
+        // Forward `sortDate` directly: the designated init defaults it to
+        // `PersistentArticle.clampedSortDate(publishedDate:)`, which is the same
+        // formula production uses via the `init(from: Article)` convenience init.
+        // This guarantees the fixture cannot drift from production semantics — even
+        // if a test passes a future `publishedDate`, the helper produces an article
+        // whose `sortDate` is clamped to "now" exactly the way production would.
         PersistentArticle(
             articleID: articleID,
             title: title,
@@ -598,7 +605,8 @@ enum TestFixtures {
             isSaved: isSaved,
             savedDate: savedDate,
             isThumbnailCached: isThumbnailCached,
-            thumbnailRetryCount: thumbnailRetryCount
+            thumbnailRetryCount: thumbnailRetryCount,
+            sortDate: sortDate
         )
     }
 

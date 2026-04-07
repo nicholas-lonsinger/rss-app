@@ -34,6 +34,10 @@ extension PersistentFeed {
 extension PersistentArticle {
 
     convenience init(from article: Article) {
+        // The designated init defaults `sortDate` to `clampedSortDate(publishedDate:)`,
+        // which preserves `publishedDate` verbatim and computes the sort key as
+        // `min(publishedDate ?? now, now)`. See `PersistentArticle.clampedSortDate(...)`
+        // and the `RATIONALE:` comment on `PersistentArticle.sortDate` for the rationale.
         self.init(
             articleID: article.id,
             title: article.title,

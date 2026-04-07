@@ -533,9 +533,11 @@ struct RSSParsingServiceTests {
     // guard against an OS-level change to that behavior. See GitHub issue #216.
     //
     // The 2025 transition dates (rather than 2026) are used so every input is in the
-    // past relative to any plausible test-run clock; otherwise the November fall-back
-    // case would be rejected by `parseDate`'s `now + 1 day` upper-bound sanity check
-    // when the test runs before the 2026 fall transition.
+    // past relative to any plausible test-run clock. The parser no longer rejects
+    // future dates (the upper bound was removed when `sortDate` was introduced — see
+    // `RSSApp/Models/PersistentArticle.swift`), but past-dated inputs keep these
+    // assertions stable across test-run years and avoid relying on the unrelated
+    // year-1990 lower-bound rejection from edge-case clock skew.
 
     @Test("RSS pubDate at 2025 spring-forward instant in PDT parses to correct UTC moment")
     func rssPubDateSpringForwardPDT() throws {
@@ -680,7 +682,9 @@ struct RSSParsingServiceTests {
     // moment and immediately break these assertions.
     //
     // As with the PDT/PST block, 2025 dates are used so every input remains in
-    // the past relative to `parseDate`'s `now + 1 day` upper-bound sanity check.
+    // the past relative to any plausible test-run clock — keeping the assertions
+    // year-stable. The parser no longer enforces a future-date upper bound (see
+    // the PDT/PST block above for the rationale).
 
     @Test("RSS pubDate at 2025 spring-forward instant in EDT parses to correct UTC moment")
     func rssPubDateSpringForwardEDT() throws {
@@ -1102,15 +1106,34 @@ struct RSSParsingServiceTests {
         #expect(feed.articles[0].publishedDate == nil)
     }
 
-    @Test("Far-future year is rejected by the sanity check")
-    func farFutureDateIsRejected() throws {
-        // A date thousands of years in the future is almost certainly a typo or a
-        // corrupted feed; it should not displace legitimate articles in retention or
-        // sorting. See issue #208.
-        let xml = Self.rssXML(pubDate: "Mon, 06 Apr 9999 08:30:00 +0000")
+    @Test("Future pubDate flows through the parser unchanged (no upper-bound clamping)")
+    func futurePubDatePassesThroughParser() throws {
+        // Pins the asymmetric sanity policy: the parser rejects only the year-1990
+        // lower bound and allows all future dates through unchanged. The clamping
+        // for sort/retention/display purposes happens at insert time in
+        // `PersistentArticle.clampedSortDate(publishedDate:)`, NOT in the parser —
+        // because the planned content-update detection feature compares pubDate
+        // values across refreshes, so any mutation here would destroy that signal.
+        //
+        // This is the parser-side regression test for the Cloudflare bug. The
+        // persistence-layer integration tests bypass the parser by constructing
+        // `Article` directly via `TestFixtures.makeArticle`, so they cannot catch a
+        // regression that re-introduces an upper bound in `RSSParsingService.sanityChecked`.
+        let fourHoursFromNow = Date().addingTimeInterval(4 * 60 * 60)
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "GMT")
+        formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss 'GMT'"
+        let pubDate = formatter.string(from: fourHoursFromNow)
+
+        let xml = Self.rssXML(pubDate: pubDate)
         let feed = try service.parse(Data(xml.utf8))
 
-        #expect(feed.articles[0].publishedDate == nil)
+        let parsed = try #require(feed.articles[0].publishedDate)
+        // Within 1 second of the original (DateFormatter has second-level precision)
+        #expect(abs(parsed.timeIntervalSince(fourHoursFromNow)) < 1.0)
+        // Still in the future — the parser did not clamp.
+        #expect(parsed > Date())
     }
 
     // MARK: - Date Parsing (Per-Format Coverage)

@@ -595,6 +595,34 @@ struct FeedPersistenceServiceTests {
         #expect(needing.isEmpty)
     }
 
+    @Test("articlesNeedingThumbnails returns articles in sortDate descending (newest first)")
+    @MainActor
+    func articlesNeedingThumbnailsSortsBySortDateDescending() throws {
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+
+        // Insert two uncached articles: one with a past pubDate, one with a future
+        // pubDate. Without the sortDate migration, the future article would come first
+        // by an inflated future timestamp; with sortDate clamping, both have sortDate
+        // ≈ now, but the past article (sortDate = now - 1h) comes after.
+        try service.upsertArticles([
+            TestFixtures.makeArticle(id: "future", publishedDate: Date().addingTimeInterval(4 * 60 * 60)),
+            TestFixtures.makeArticle(id: "past", publishedDate: Date().addingTimeInterval(-3600)),
+        ], for: feed)
+        try service.save()
+
+        let needing = try service.articlesNeedingThumbnails(maxRetryCount: 3)
+        #expect(needing.count == 2)
+        // Newest-first by sortDate: future is clamped to ~now, past is -1h.
+        #expect(needing[0].articleID == "future")
+        #expect(needing[1].articleID == "past")
+        // The clamped future article must NOT be sorted by its raw publishedDate;
+        // its sortDate is bounded by the past article's sortDate plus a small window.
+        #expect(needing[0].sortDate >= needing[1].sortDate)
+    }
+
     @Test("markThumbnailCached sets isThumbnailCached to true")
     @MainActor
     func markThumbnailCachedSetsFlag() throws {
@@ -1229,5 +1257,268 @@ struct FeedPersistenceServiceTests {
         let toDelete = try service.oldestArticleIDsExceedingLimit(2)
         #expect(toDelete.count == 1)
         #expect(toDelete[0].articleID == "a2")
+    }
+
+    // MARK: - sortDate Behavior
+
+    // The two tests below pin the cross-feed sort and retention behavior against
+    // future-dated articles, the bug that motivated `sortDate`. Real-world feeds
+    // (e.g., the Cloudflare blog) publish scheduled posts whose `pubDate` lies
+    // hours in the future relative to the feed's `lastBuildDate`. Sorting by raw
+    // `publishedDate` would pin those articles to the top of newest-first lists
+    // and shield genuinely-old articles from retention. `sortDate` clamps any
+    // future date to ingestion time at insert.
+
+    @Test("allArticles uses clamped sortDate for future-dated articles, preserving original publishedDate")
+    @MainActor
+    func allArticlesClampsFutureDatedArticleSortDate() throws {
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+
+        // Reproduces the Cloudflare bug: a feed contains an article whose pubDate
+        // is 4 hours in the future (a scheduled post). The bug was that this
+        // article would sort by its 4-hour-future raw pubDate, pinning it to the
+        // top of newest-first lists by an enormous margin. With sortDate, the
+        // article is clamped to ingestion time and sorts as a freshly-ingested
+        // article (its sortDate ≈ now), while the original publishedDate is
+        // preserved verbatim for the planned content-update detection feature.
+        let before = Date()
+        try service.upsertArticles([
+            TestFixtures.makeArticle(id: "cloudflare", publishedDate: Date().addingTimeInterval(4 * 60 * 60)),
+            TestFixtures.makeArticle(id: "verge", publishedDate: Date().addingTimeInterval(-30)),
+        ], for: feed)
+        let after = Date()
+        try service.save()
+
+        let result = try service.allArticles()
+        #expect(result.count == 2)
+
+        let cloudflare = try #require(result.first { $0.articleID == "cloudflare" })
+        let verge = try #require(result.first { $0.articleID == "verge" })
+
+        // Load-bearing: publishedDate is preserved exactly as the publisher provided
+        // it. A planned content-update detection feature compares pubDate values
+        // across refreshes, so any mutation here would destroy that signal.
+        let preservedPubDate = try #require(cloudflare.publishedDate)
+        #expect(preservedPubDate > Date()) // still 4 hours in the future, untouched
+
+        // sortDate is clamped to ingestion time (somewhere between `before` and
+        // `after`). It must NOT equal the raw 4-hour-future publishedDate.
+        #expect(cloudflare.sortDate >= before)
+        #expect(cloudflare.sortDate <= after)
+        #expect(cloudflare.sortDate < preservedPubDate)
+
+        // verge's past pubDate passes through unchanged (min(past, now) == past).
+        #expect(verge.sortDate == verge.publishedDate)
+
+        // Ordering: cloudflare's clamped sortDate (≈ now) is later than verge's
+        // sortDate (now − 30s), so cloudflare appears at index 0 in the descending
+        // newest-first sort. This is the post-fix expected ordering — the bug was
+        // that cloudflare appeared at index 0 by ~4 hours, dominating verge by an
+        // enormous margin. With sortDate, the gap is ~30 seconds (verge's offset),
+        // not ~4 hours. Pin the position so a regression that reverts to raw
+        // publishedDate sorting still produces the same index but for the wrong
+        // reason — the sortDate clamp assertion above is the load-bearing check.
+        #expect(result[0].articleID == "cloudflare")
+        #expect(result[1].articleID == "verge")
+    }
+
+    @Test("oldestArticleIDsExceedingLimit uses sortDate so future-dated articles are not deleted prematurely")
+    @MainActor
+    func oldestArticleIDsExceedingLimitUsesSortDate() throws {
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+
+        // Three articles by ingestion-clamped sortDate ordering:
+        //   - "genuinely-old": publishedDate = 1970-epoch+1000 → sortDate = past
+        //   - "recent-real":   publishedDate = -60s → sortDate = -60s
+        //   - "future-claimed": publishedDate = +10h → sortDate ≈ now (clamped)
+        // With limit=1 (excess=2), the two oldest by sortDate should be returned:
+        // "genuinely-old" and "recent-real". "future-claimed" must NOT be returned
+        // because its sortDate ≈ now is the freshest, even though its publishedDate
+        // would otherwise sort it as the newest if we used the raw value.
+        try service.upsertArticles([
+            TestFixtures.makeArticle(id: "genuinely-old", publishedDate: Date(timeIntervalSince1970: 1000)),
+            TestFixtures.makeArticle(id: "future-claimed", publishedDate: Date().addingTimeInterval(10 * 60 * 60)),
+            TestFixtures.makeArticle(id: "recent-real", publishedDate: Date().addingTimeInterval(-60)),
+        ], for: feed)
+        try service.save()
+
+        let result = try service.oldestArticleIDsExceedingLimit(1)
+        #expect(result.count == 2)
+        let ids = Set(result.map(\.articleID))
+        #expect(ids.contains("genuinely-old"))
+        #expect(ids.contains("recent-real"))
+        #expect(!ids.contains("future-claimed"))
+    }
+
+    // The four tests below close coverage on the per-feed and unread-only sort
+    // descriptors that the cross-feed `allArticles` and retention tests above don't
+    // exercise. Each pins a single migrated SortDescriptor with a future + past pair
+    // so a regression that reverts one descriptor to `\.publishedDate` would fail.
+
+    @Test("articles(for:offset:limit:ascending:false) clamps future-dated article")
+    @MainActor
+    func perFeedDescendingClampsFutureDatedArticle() throws {
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+        try service.upsertArticles([
+            TestFixtures.makeArticle(id: "future", publishedDate: Date().addingTimeInterval(4 * 60 * 60)),
+            TestFixtures.makeArticle(id: "past", publishedDate: Date().addingTimeInterval(-3600)),
+        ], for: feed)
+        try service.save()
+
+        let result = try service.articles(for: feed, offset: 0, limit: 10, ascending: false)
+        #expect(result.count == 2)
+        // Newest-first: future (clamped to ~now) comes before past (-1h).
+        #expect(result[0].articleID == "future")
+        #expect(result[1].articleID == "past")
+        // The future article must be sorted by clamped sortDate, not raw publishedDate.
+        #expect(result[0].sortDate < result[0].publishedDate!)
+    }
+
+    @Test("unreadArticles(for:offset:limit:ascending:false) clamps future-dated article")
+    @MainActor
+    func perFeedUnreadDescendingClampsFutureDatedArticle() throws {
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+        try service.upsertArticles([
+            TestFixtures.makeArticle(id: "future-unread", publishedDate: Date().addingTimeInterval(4 * 60 * 60)),
+            TestFixtures.makeArticle(id: "past-unread", publishedDate: Date().addingTimeInterval(-3600)),
+        ], for: feed)
+        try service.save()
+
+        let result = try service.unreadArticles(for: feed, offset: 0, limit: 10, ascending: false)
+        #expect(result.count == 2)
+        #expect(result[0].articleID == "future-unread")
+        #expect(result[1].articleID == "past-unread")
+        #expect(result[0].sortDate < result[0].publishedDate!)
+    }
+
+    @Test("allUnreadArticles() (no pagination) clamps future-dated article")
+    @MainActor
+    func crossFeedUnreadNoPaginationClampsFutureDatedArticle() throws {
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+        try service.upsertArticles([
+            TestFixtures.makeArticle(id: "future-unread", publishedDate: Date().addingTimeInterval(4 * 60 * 60)),
+            TestFixtures.makeArticle(id: "past-unread", publishedDate: Date().addingTimeInterval(-3600)),
+        ], for: feed)
+        try service.save()
+
+        let result = try service.allUnreadArticles()
+        #expect(result.count == 2)
+        #expect(result[0].articleID == "future-unread")
+        #expect(result[1].articleID == "past-unread")
+        #expect(result[0].sortDate < result[0].publishedDate!)
+    }
+
+    @Test("allUnreadArticles(offset:limit:ascending:true) sorts oldest-first by sortDate")
+    @MainActor
+    func crossFeedUnreadAscendingClampsFutureDatedArticle() throws {
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+        try service.upsertArticles([
+            TestFixtures.makeArticle(id: "future-unread", publishedDate: Date().addingTimeInterval(4 * 60 * 60)),
+            TestFixtures.makeArticle(id: "past-unread", publishedDate: Date().addingTimeInterval(-3600)),
+        ], for: feed)
+        try service.save()
+
+        let result = try service.allUnreadArticles(offset: 0, limit: 10, ascending: true)
+        #expect(result.count == 2)
+        // Oldest-first: past (-1h) comes before future (clamped to ~now).
+        #expect(result[0].articleID == "past-unread")
+        #expect(result[1].articleID == "future-unread")
+        // The future article must be sorted by clamped sortDate, not raw publishedDate.
+        #expect(result[1].sortDate < result[1].publishedDate!)
+    }
+
+    // The two tests below pin the secondary sort tie-breaker (`articleID` ascending)
+    // that all article SortDescriptors carry. The tie-breaker is necessary because
+    // `sortDate` clamping makes collisions common: every future-dated and every
+    // nil-pubDate article in a refresh batch lands at ≈ now. Without a deterministic
+    // secondary key, SwiftData / SQLite returns identical-key rows in storage-engine
+    // order, which is unstable across queries — breaking pagination (an item could
+    // shift between pages or be skipped entirely between page 1 and page 2 fetches).
+
+    @Test("Sort order is stable when multiple articles share the same sortDate")
+    @MainActor
+    func sortOrderIsStableForIdenticalSortDates() throws {
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+
+        // Three articles whose publishedDate (and therefore sortDate) is identical.
+        // Inserted in non-alphabetical order so a missing tie-breaker would let the
+        // storage engine return them in insertion order rather than articleID order.
+        let sharedDate = Date(timeIntervalSince1970: 1_700_000_000)
+        try service.upsertArticles([
+            TestFixtures.makeArticle(id: "c-third", publishedDate: sharedDate),
+            TestFixtures.makeArticle(id: "a-first", publishedDate: sharedDate),
+            TestFixtures.makeArticle(id: "b-second", publishedDate: sharedDate),
+        ], for: feed)
+        try service.save()
+
+        let firstFetch = try service.allArticles()
+        let secondFetch = try service.allArticles()
+
+        // Same query run twice must return the same order.
+        #expect(firstFetch.map(\.articleID) == secondFetch.map(\.articleID))
+
+        // The order is determined by the articleID secondary sort (forward), so
+        // the result is alphabetical: a, b, c — regardless of insertion order.
+        #expect(firstFetch.map(\.articleID) == ["a-first", "b-second", "c-third"])
+    }
+
+    @Test("Pagination is stable across pages when sortDates collide")
+    @MainActor
+    func paginationIsStableForIdenticalSortDates() throws {
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+
+        // Five articles with identical sortDates. A missing tie-breaker would let
+        // page 1 (offset=0, limit=2) and page 2 (offset=2, limit=2) overlap or skip
+        // items, depending on storage-engine ordering.
+        let sharedDate = Date(timeIntervalSince1970: 1_700_000_000)
+        try service.upsertArticles([
+            TestFixtures.makeArticle(id: "e", publishedDate: sharedDate),
+            TestFixtures.makeArticle(id: "b", publishedDate: sharedDate),
+            TestFixtures.makeArticle(id: "d", publishedDate: sharedDate),
+            TestFixtures.makeArticle(id: "a", publishedDate: sharedDate),
+            TestFixtures.makeArticle(id: "c", publishedDate: sharedDate),
+        ], for: feed)
+        try service.save()
+
+        let page1 = try service.allArticles(offset: 0, limit: 2, ascending: false)
+        let page2 = try service.allArticles(offset: 2, limit: 2, ascending: false)
+        let page3 = try service.allArticles(offset: 4, limit: 2, ascending: false)
+
+        // No overlap between pages
+        let allReturnedIDs = page1.map(\.articleID) + page2.map(\.articleID) + page3.map(\.articleID)
+        #expect(Set(allReturnedIDs).count == allReturnedIDs.count, "pages must not overlap")
+        // All 5 articles accounted for across the three pages
+        #expect(Set(allReturnedIDs) == Set(["a", "b", "c", "d", "e"]))
+        // The articleID secondary sort is .forward, and the primary sort is .reverse
+        // by sortDate. With all sortDates identical, only the secondary applies, so
+        // the order is alphabetical ascending (a, b, c, d, e) regardless of which
+        // direction the primary key claims.
+        #expect(page1.map(\.articleID) == ["a", "b"])
+        #expect(page2.map(\.articleID) == ["c", "d"])
+        #expect(page3.map(\.articleID) == ["e"])
     }
 }

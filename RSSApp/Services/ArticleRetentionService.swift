@@ -42,7 +42,9 @@ protocol ArticleRetaining: Sendable {
     var articleLimit: ArticleLimit { get set }
 
     /// Cleans up articles that exceed the configured limit.
-    /// Deletes the oldest articles (by `publishedDate`) and their associated thumbnail files.
+    /// Deletes the oldest articles (by `sortDate`, which clamps publisher-supplied future
+    /// dates to ingestion time so scheduled posts can't shield genuinely-old articles
+    /// from deletion) and their associated thumbnail files.
     /// - Parameters:
     ///   - persistence: The persistence service to query and delete articles.
     ///   - thumbnailService: The thumbnail service to delete cached thumbnail files.
