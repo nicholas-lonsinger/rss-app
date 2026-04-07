@@ -369,6 +369,74 @@ struct FeedViewModelTests {
         UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
     }
 
+    /// Regression test for #209 (per-feed surface). When the user opens an article
+    /// from `ArticleListView` with "Show Unread Only" active, reads it (and additional
+    /// articles via the reader's previous/next navigation), then returns to the list,
+    /// the now-read articles must remain visible until the user explicitly leaves
+    /// and returns or pulls to refresh. This covers the `FeedViewModel` half of
+    /// the contract: `markAsRead` (and direct `markArticleRead` calls bypassing the
+    /// view model) must mutate persistence without re-querying `articles`, so the
+    /// snapshot stays intact for the duration of a reader session — until the view
+    /// explicitly calls `reloadArticles()` again. The view-layer suppression that
+    /// prevents the post-pop `onAppear` from triggering that explicit reload is
+    /// exercised manually (it cannot be tested at the view model layer in isolation).
+    @Test("mark as read during simulated reader session leaves unread-filtered list snapshot intact")
+    @MainActor
+    func readerSessionPreservesUnreadFilteredListSnapshot() async {
+        let feed = TestFixtures.makePersistentFeed(feedURL: URL(string: "https://example.com/feed")!)
+        let mock = MockFeedFetchingService()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+
+        // Two unread articles with strictly distinct publish dates so sort order is
+        // unambiguous. Expected order under default newest-first sort: u1, u2.
+        let article1 = TestFixtures.makePersistentArticle(
+            articleID: "u1",
+            publishedDate: Date(timeIntervalSince1970: 2_000_000),
+            isRead: false
+        )
+        article1.feed = feed
+        let article2 = TestFixtures.makePersistentArticle(
+            articleID: "u2",
+            publishedDate: Date(timeIntervalSince1970: 1_000_000),
+            isRead: false
+        )
+        article2.feed = feed
+        mockPersistence.articlesByFeedID[feed.id] = [article1, article2]
+
+        mock.feedToReturn = TestFixtures.makeFeed()
+
+        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
+        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence)
+        viewModel.showUnreadOnly = true
+        await viewModel.loadFeed()
+
+        let expectedOrder = ["u1", "u2"]
+        #expect(viewModel.articles.map(\.articleID) == expectedOrder)
+
+        // Simulate tapping article 1: view model marks it as read before pushing the reader.
+        viewModel.markAsRead(article1)
+        #expect(article1.isRead == true)
+
+        // Simulate the reader paging forward and marking article 2 as read via its own
+        // markArticleRead path (bypasses FeedViewModel's snapshot preservation helpers).
+        try? mockPersistence.markArticleRead(article2, isRead: true)
+        #expect(article2.isRead == true)
+
+        // Returning from the reader must NOT drop the now-read articles from the list —
+        // the view suppresses its post-reader onAppear reload so the snapshot is stable
+        // even with showUnreadOnly active. Compare against the explicit expected order,
+        // not just a captured snapshot, so a regression that scrambles ordering still
+        // trips this assertion.
+        #expect(viewModel.articles.map(\.articleID) == expectedOrder)
+
+        // Explicit reload (pull-to-refresh, sort/filter toggle, tab change) drops them.
+        viewModel.reloadArticles()
+        #expect(viewModel.articles.isEmpty)
+
+        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
+    }
+
     @Test("reloadArticles refreshes list from persistence")
     @MainActor
     func reloadArticlesRefreshesList() async {

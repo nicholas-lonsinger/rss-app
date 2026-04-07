@@ -7,6 +7,9 @@ struct AllArticlesView: View {
     @State private var selectedArticleIndex: Int?
     @State private var showMarkAllReadConfirmation = false
     @State private var hasAppeared = false
+    // RATIONALE: Snapshot preservation across reader push/pop. See
+    // ARCHITECTURE.md → "`returningFromReader` flag suppresses post-pop reload".
+    @State private var returningFromReader = false
 
     private let thumbnailService: ArticleThumbnailCaching = ArticleThumbnailService()
 
@@ -22,6 +25,7 @@ struct AllArticlesView: View {
                 List(Array(homeViewModel.allArticlesList.enumerated()), id: \.element.articleID) { index, article in
                     Button {
                         if homeViewModel.markAsRead(article) {
+                            returningFromReader = true
                             selectedArticleIndex = index
                         }
                     } label: {
@@ -122,6 +126,10 @@ struct AllArticlesView: View {
         }
         .onAppear {
             guard hasAppeared else { return }
+            if returningFromReader {
+                returningFromReader = false
+                return
+            }
             homeViewModel.loadAllArticles()
         }
         .onDisappear {

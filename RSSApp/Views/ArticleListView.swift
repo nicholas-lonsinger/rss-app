@@ -7,6 +7,9 @@ struct ArticleListView: View {
     @State private var selectedArticleIndex: Int?
     @State private var showMarkAllReadConfirmation = false
     @State private var hasAppeared = false
+    // RATIONALE: Snapshot preservation across reader push/pop. See
+    // ARCHITECTURE.md → "`returningFromReader` flag suppresses post-pop reload".
+    @State private var returningFromReader = false
 
     var body: some View {
         Group {
@@ -27,6 +30,7 @@ struct ArticleListView: View {
                 List(Array(viewModel.articles.enumerated()), id: \.element.articleID) { index, article in
                     Button {
                         viewModel.markAsRead(article)
+                        returningFromReader = true
                         selectedArticleIndex = index
                     } label: {
                         ArticleRowView(article: article, thumbnailService: thumbnailService)
@@ -122,6 +126,10 @@ struct ArticleListView: View {
         }
         .onAppear {
             guard hasAppeared else { return }
+            if returningFromReader {
+                returningFromReader = false
+                return
+            }
             viewModel.reloadArticles()
         }
         .alert("Error", isPresented: errorAlertBinding) {
