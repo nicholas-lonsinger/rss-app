@@ -8,7 +8,7 @@ struct SavedArticlesView: View {
     @State private var showMarkAllReadConfirmation = false
     @State private var hasAppeared = false
     // RATIONALE: Snapshot preservation across reader push/pop. See
-    // ARCHITECTURE.md → "`returningFromReader` flag suppresses post-pop reload".
+    // ARCHITECTURE.md → "Snapshot preservation across reader push/pop (two gates)".
     @State private var returningFromReader = false
 
     private let thumbnailService: ArticleThumbnailCaching = ArticleThumbnailService()
@@ -107,6 +107,10 @@ struct SavedArticlesView: View {
             homeViewModel.loadSavedCount()
         }
         .task {
+            // RATIONALE: First half of the two-gate snapshot-preservation mechanism.
+            // See ARCHITECTURE.md → "Snapshot preservation across reader push/pop
+            // (two gates)". Both gates are required — removing either reopens #209.
+            guard !hasAppeared else { return }
             homeViewModel.loadSavedArticles()
             hasAppeared = true
         }
