@@ -661,6 +661,254 @@ struct RSSParsingServiceTests {
         #expect(pdtFeed.articles[0].publishedDate != nil)
     }
 
+    // MARK: - DST Boundary Tests for EDT/EST, CDT/CST, MDT/MST
+    //
+    // These mirror the PDT/PST coverage above for the other North American named
+    // zones accepted by `parseDate` via the `zzz` specifier. The same OS-level
+    // drift risk applies to every zone resolved through `zzz`, so each pair is
+    // pinned at the 2025 spring-forward and fall-back transitions following the
+    // pattern established for PDT/PST. See GitHub issues #216 and #240.
+    //
+    // The CST/CDT pair is especially important because the named-zone substitution
+    // table in `RSSParsingService` routes `CST` to `+0800` (China Standard Time)
+    // as a fallback for feeds that specify CST without an explicit-zone format
+    // match. The zoned-format pass runs before the substitution pass, so North
+    // American `CST` inputs are expected to resolve as Central Standard Time
+    // (UTC-6) via `zzz` and never reach the substitution table. These tests pin
+    // that ordering: a regression that made `CST` drop through to the substitution
+    // table would push the parsed instant 14 hours away from the intended UTC
+    // moment and immediately break these assertions.
+    //
+    // As with the PDT/PST block, 2025 dates are used so every input remains in
+    // the past relative to `parseDate`'s `now + 1 day` upper-bound sanity check.
+
+    @Test("RSS pubDate at 2025 spring-forward instant in EDT parses to correct UTC moment")
+    func rssPubDateSpringForwardEDT() throws {
+        // First wall-clock moment in EDT after the 2025 spring-forward transition
+        // (Sun, 09 Mar 2025). 03:00:00 EDT (UTC-4) = 07:00:00 UTC on the same day.
+        let xml = Self.rssXML(pubDate: "Sun, 09 Mar 2025 03:00:00 EDT")
+        let feed = try service.parse(Data(xml.utf8))
+
+        let date = try #require(feed.articles[0].publishedDate)
+        let expected = try #require(
+            Calendar(identifier: .gregorian).date(
+                from: DateComponents(
+                    timeZone: TimeZone(identifier: "UTC"),
+                    year: 2025, month: 3, day: 9, hour: 7, minute: 0, second: 0
+                )
+            )
+        )
+        #expect(date == expected)
+    }
+
+    @Test("RSS pubDate at 2025 fall-back instant in EST parses to correct UTC moment")
+    func rssPubDateFallBackEST() throws {
+        // First wall-clock moment in EST after the 2025 fall-back transition
+        // (Sun, 02 Nov 2025). 01:00:00 EST (UTC-5) = 06:00:00 UTC on the same day.
+        // The wall-clock hour 01:00–02:00 occurs twice in America/New_York on
+        // this date; the explicit `EST` token disambiguates to the second (post-
+        // rollback) occurrence.
+        let xml = Self.rssXML(pubDate: "Sun, 02 Nov 2025 01:00:00 EST")
+        let feed = try service.parse(Data(xml.utf8))
+
+        let date = try #require(feed.articles[0].publishedDate)
+        let expected = try #require(
+            Calendar(identifier: .gregorian).date(
+                from: DateComponents(
+                    timeZone: TimeZone(identifier: "UTC"),
+                    year: 2025, month: 11, day: 2, hour: 6, minute: 0, second: 0
+                )
+            )
+        )
+        #expect(date == expected)
+    }
+
+    @Test("EDT and EST tokens at fall-back disambiguate to different UTC instants")
+    func rssPubDateFallBackEasternTokenDisambiguation() throws {
+        // The one-hour gap between the two occurrences of "01:00:00" on the 2025
+        // fall-back date is entirely determined by the trailing zone token.
+        let edtFeed = try service.parse(
+            Data(Self.rssXML(pubDate: "Sun, 02 Nov 2025 01:00:00 EDT").utf8)
+        )
+        let estFeed = try service.parse(
+            Data(Self.rssXML(pubDate: "Sun, 02 Nov 2025 01:00:00 EST").utf8)
+        )
+        let edtDate = try #require(edtFeed.articles[0].publishedDate)
+        let estDate = try #require(estFeed.articles[0].publishedDate)
+        #expect(estDate.timeIntervalSince(edtDate) == 3600)
+    }
+
+    @Test("RSS pubDate in non-existent spring-forward hour parses as fixed offset for Eastern zones")
+    func rssPubDateInSpringForwardGapEastern() throws {
+        // 02:30:00 on Sun, 09 Mar 2025 does not exist in America/New_York: the
+        // local clock jumps from 01:59:59 EST to 03:00:00 EDT. Pins the fixed-
+        // offset interpretation against a future change that would reject
+        // skipped-hour inputs as ambiguous.
+        let estFeed = try service.parse(
+            Data(Self.rssXML(pubDate: "Sun, 09 Mar 2025 02:30:00 EST").utf8)
+        )
+        let edtFeed = try service.parse(
+            Data(Self.rssXML(pubDate: "Sun, 09 Mar 2025 02:30:00 EDT").utf8)
+        )
+        #expect(estFeed.articles[0].publishedDate != nil)
+        #expect(edtFeed.articles[0].publishedDate != nil)
+    }
+
+    @Test("RSS pubDate at 2025 spring-forward instant in CDT parses to correct UTC moment")
+    func rssPubDateSpringForwardCDT() throws {
+        // First wall-clock moment in CDT after the 2025 spring-forward transition
+        // (Sun, 09 Mar 2025). 03:00:00 CDT (UTC-5) = 08:00:00 UTC on the same day.
+        let xml = Self.rssXML(pubDate: "Sun, 09 Mar 2025 03:00:00 CDT")
+        let feed = try service.parse(Data(xml.utf8))
+
+        let date = try #require(feed.articles[0].publishedDate)
+        let expected = try #require(
+            Calendar(identifier: .gregorian).date(
+                from: DateComponents(
+                    timeZone: TimeZone(identifier: "UTC"),
+                    year: 2025, month: 3, day: 9, hour: 8, minute: 0, second: 0
+                )
+            )
+        )
+        #expect(date == expected)
+    }
+
+    @Test("RSS pubDate at 2025 fall-back instant in CST parses to correct UTC moment, not China time")
+    func rssPubDateFallBackCST() throws {
+        // First wall-clock moment in CST after the 2025 fall-back transition
+        // (Sun, 02 Nov 2025). 01:00:00 CST (UTC-6) = 07:00:00 UTC on the same day.
+        //
+        // This test is doubly important: the named-zone substitution table in
+        // `RSSParsingService` routes `CST` to `+0800` (China Standard Time) as a
+        // fallback. The zoned-format pass runs before the substitution pass, so
+        // North American `CST` inputs are expected to resolve as Central Standard
+        // Time via `zzz` and never reach the substitution table. A regression
+        // that caused `CST` to drop through to the substitution table would
+        // resolve this input to 17:00:00 UTC on 01 Nov 2025 instead, putting
+        // the parsed instant 14 hours off the intended moment.
+        let xml = Self.rssXML(pubDate: "Sun, 02 Nov 2025 01:00:00 CST")
+        let feed = try service.parse(Data(xml.utf8))
+
+        let date = try #require(feed.articles[0].publishedDate)
+        let expected = try #require(
+            Calendar(identifier: .gregorian).date(
+                from: DateComponents(
+                    timeZone: TimeZone(identifier: "UTC"),
+                    year: 2025, month: 11, day: 2, hour: 7, minute: 0, second: 0
+                )
+            )
+        )
+        #expect(date == expected)
+    }
+
+    @Test("CDT and CST tokens at fall-back disambiguate to different UTC instants")
+    func rssPubDateFallBackCentralTokenDisambiguation() throws {
+        // The one-hour gap between the two occurrences of "01:00:00" on the 2025
+        // fall-back date is entirely determined by the trailing zone token. If
+        // a regression caused `CST` to resolve via the China-time substitution
+        // table, the two instants would be separated by many hours instead of
+        // exactly 3600 seconds and this assertion would immediately fail.
+        let cdtFeed = try service.parse(
+            Data(Self.rssXML(pubDate: "Sun, 02 Nov 2025 01:00:00 CDT").utf8)
+        )
+        let cstFeed = try service.parse(
+            Data(Self.rssXML(pubDate: "Sun, 02 Nov 2025 01:00:00 CST").utf8)
+        )
+        let cdtDate = try #require(cdtFeed.articles[0].publishedDate)
+        let cstDate = try #require(cstFeed.articles[0].publishedDate)
+        #expect(cstDate.timeIntervalSince(cdtDate) == 3600)
+    }
+
+    @Test("RSS pubDate in non-existent spring-forward hour parses as fixed offset for Central zones")
+    func rssPubDateInSpringForwardGapCentral() throws {
+        // 02:30:00 on Sun, 09 Mar 2025 does not exist in America/Chicago: the
+        // local clock jumps from 01:59:59 CST to 03:00:00 CDT. Pins the fixed-
+        // offset interpretation against a future change that would reject
+        // skipped-hour inputs as ambiguous.
+        let cstFeed = try service.parse(
+            Data(Self.rssXML(pubDate: "Sun, 09 Mar 2025 02:30:00 CST").utf8)
+        )
+        let cdtFeed = try service.parse(
+            Data(Self.rssXML(pubDate: "Sun, 09 Mar 2025 02:30:00 CDT").utf8)
+        )
+        #expect(cstFeed.articles[0].publishedDate != nil)
+        #expect(cdtFeed.articles[0].publishedDate != nil)
+    }
+
+    @Test("RSS pubDate at 2025 spring-forward instant in MDT parses to correct UTC moment")
+    func rssPubDateSpringForwardMDT() throws {
+        // First wall-clock moment in MDT after the 2025 spring-forward transition
+        // (Sun, 09 Mar 2025). 03:00:00 MDT (UTC-6) = 09:00:00 UTC on the same day.
+        // Note: Arizona stays on MST year-round, so the real-world semantics of
+        // an `MDT` token are publisher-dependent. These tests pin the fixed-
+        // offset interpretation that `DateFormatter`'s `zzz` specifier applies
+        // regardless of the wall-clock date, matching the PDT/PST/EDT/EST/CDT/CST
+        // behavior above.
+        let xml = Self.rssXML(pubDate: "Sun, 09 Mar 2025 03:00:00 MDT")
+        let feed = try service.parse(Data(xml.utf8))
+
+        let date = try #require(feed.articles[0].publishedDate)
+        let expected = try #require(
+            Calendar(identifier: .gregorian).date(
+                from: DateComponents(
+                    timeZone: TimeZone(identifier: "UTC"),
+                    year: 2025, month: 3, day: 9, hour: 9, minute: 0, second: 0
+                )
+            )
+        )
+        #expect(date == expected)
+    }
+
+    @Test("RSS pubDate at 2025 fall-back instant in MST parses to correct UTC moment")
+    func rssPubDateFallBackMST() throws {
+        // First wall-clock moment in MST after the 2025 fall-back transition
+        // (Sun, 02 Nov 2025). 01:00:00 MST (UTC-7) = 08:00:00 UTC on the same day.
+        let xml = Self.rssXML(pubDate: "Sun, 02 Nov 2025 01:00:00 MST")
+        let feed = try service.parse(Data(xml.utf8))
+
+        let date = try #require(feed.articles[0].publishedDate)
+        let expected = try #require(
+            Calendar(identifier: .gregorian).date(
+                from: DateComponents(
+                    timeZone: TimeZone(identifier: "UTC"),
+                    year: 2025, month: 11, day: 2, hour: 8, minute: 0, second: 0
+                )
+            )
+        )
+        #expect(date == expected)
+    }
+
+    @Test("MDT and MST tokens at fall-back disambiguate to different UTC instants")
+    func rssPubDateFallBackMountainTokenDisambiguation() throws {
+        // The one-hour gap between the two occurrences of "01:00:00" on the 2025
+        // fall-back date is entirely determined by the trailing zone token.
+        let mdtFeed = try service.parse(
+            Data(Self.rssXML(pubDate: "Sun, 02 Nov 2025 01:00:00 MDT").utf8)
+        )
+        let mstFeed = try service.parse(
+            Data(Self.rssXML(pubDate: "Sun, 02 Nov 2025 01:00:00 MST").utf8)
+        )
+        let mdtDate = try #require(mdtFeed.articles[0].publishedDate)
+        let mstDate = try #require(mstFeed.articles[0].publishedDate)
+        #expect(mstDate.timeIntervalSince(mdtDate) == 3600)
+    }
+
+    @Test("RSS pubDate in non-existent spring-forward hour parses as fixed offset for Mountain zones")
+    func rssPubDateInSpringForwardGapMountain() throws {
+        // 02:30:00 on Sun, 09 Mar 2025 does not exist in America/Denver: the
+        // local clock jumps from 01:59:59 MST to 03:00:00 MDT. Pins the fixed-
+        // offset interpretation against a future change that would reject
+        // skipped-hour inputs as ambiguous.
+        let mstFeed = try service.parse(
+            Data(Self.rssXML(pubDate: "Sun, 09 Mar 2025 02:30:00 MST").utf8)
+        )
+        let mdtFeed = try service.parse(
+            Data(Self.rssXML(pubDate: "Sun, 09 Mar 2025 02:30:00 MDT").utf8)
+        )
+        #expect(mstFeed.articles[0].publishedDate != nil)
+        #expect(mdtFeed.articles[0].publishedDate != nil)
+    }
+
     @Test("RSS pubDate with named GMT zone parses to correct absolute UTC moment")
     func rssPubDateNamedGMT() throws {
         let xml = Self.rssXML(pubDate: "Mon, 06 Apr 2026 08:30:00 GMT")
