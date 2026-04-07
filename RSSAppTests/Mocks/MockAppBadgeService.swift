@@ -6,7 +6,7 @@ final class MockAppBadgeService: AppBadgeUpdating {
 
     // MARK: - State
 
-    var badgeEnabled: Bool = true
+    var badgeEnabled: Bool = false
     var permissionStatus: BadgePermissionStatus = .authorized
 
     /// When set, `updateBadge(unreadCount:)` transitions `permissionStatus` to this
