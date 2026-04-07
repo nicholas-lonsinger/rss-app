@@ -71,9 +71,7 @@ struct ArticleThumbnailService: ArticleThumbnailCaching {
                   (200...299).contains(httpResponse.statusCode) else {
                 let code = (response as? HTTPURLResponse)?.statusCode ?? -1
                 Self.logger.warning("Thumbnail fetch returned HTTP \(code, privacy: .public) for \(remoteURL.absoluteString, privacy: .public)")
-                // 429 (rate limited) and 408 (request timeout) are transient despite being 4xx
-                let isPermanent = (400...499).contains(code) && code != 429 && code != 408
-                return isPermanent ? .permanentFailure : .transientFailure
+                return Self.isPermanentHTTPFailure(code: code) ? .permanentFailure : .transientFailure
             }
 
             // Reject SVG content type — catches extensionless SVG URLs (e.g. deploy buttons)
@@ -217,12 +215,11 @@ struct ArticleThumbnailService: ArticleThumbnailCaching {
                   (200...299).contains(httpResponse.statusCode) else {
                 let code = (response as? HTTPURLResponse)?.statusCode ?? -1
                 Self.logger.warning("Article page fetch returned HTTP \(code, privacy: .public) for \(articleLink.absoluteString, privacy: .public)")
-                // Mirror cacheThumbnail's classification: standard 4xx responses are
-                // permanent client errors where og:image extraction can never succeed,
-                // while 429 (rate limited) and 408 (request timeout) are transient
-                // despite being 4xx. Everything else (5xx, unknown) is transient.
-                let isPermanent = (400...499).contains(code) && code != 429 && code != 408
-                return isPermanent ? .notFound : .fetchFailed
+                if Self.isPermanentHTTPFailure(code: code) {
+                    Self.logger.info("Treating HTTP \(code, privacy: .public) as permanent og:image failure for \(articleLink.absoluteString, privacy: .public)")
+                    return .notFound
+                }
+                return .fetchFailed
             }
 
             // Read only the first portion — og:image is in <head>, no need for the full body
@@ -247,6 +244,17 @@ struct ArticleThumbnailService: ArticleThumbnailCaching {
             Self.logger.warning("Failed to fetch article page for og:image: \(error, privacy: .public)")
             return .fetchFailed
         }
+    }
+
+    // MARK: - HTTP Classification
+
+    /// Returns `true` if an HTTP status code represents a permanent client error
+    /// where retrying will not help. Standard 4xx responses (404, 403, etc.) are
+    /// permanent, but 429 (rate limited) and 408 (request timeout) are transient
+    /// despite being 4xx. Everything else (5xx, code == -1 for non-HTTPURLResponse,
+    /// unknown) is treated as transient.
+    private static func isPermanentHTTPFailure(code: Int) -> Bool {
+        (400...499).contains(code) && code != 429 && code != 408
     }
 
     // MARK: - File System
