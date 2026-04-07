@@ -880,6 +880,60 @@ struct RSSParsingServiceTests {
         #expect(feed.articles[0].publishedDate == nil)
     }
 
+    @Test("RSS pubDate with named CST zone parses as US Central Standard Time, not China")
+    func rssPubDateNamedCSTResolvesToUSCentral() throws {
+        // Regression guard for a load-bearing assumption documented in the
+        // `namedZoneOffsets` doc comment: `DateFormatter`'s `zzz` with `en_US_POSIX`
+        // recognizes "CST" as US Central Standard Time (UTC-6), so the input is
+        // matched by the explicit-zone pass *before* the named-zone substitution
+        // table (which would resolve "CST" to China Standard Time, UTC+8) is ever
+        // consulted. If `en_US_POSIX` ever stops recognizing CST, or if the parse
+        // passes are reordered, US Central feeds would silently shift by 14 hours
+        // — this test must fail in that case.
+        //
+        // 08:30 CST (UTC-6, US Central) = 14:30 UTC. China would be 00:30 UTC.
+        let xml = Self.rssXML(pubDate: "Mon, 06 Apr 2026 08:30:00 CST")
+        let feed = try service.parse(Data(xml.utf8))
+
+        let date = try #require(feed.articles[0].publishedDate)
+        let expected = try Self.utcDate(year: 2026, month: 4, day: 6, hour: 14, minute: 30)
+        #expect(date == expected)
+    }
+
+    @Test("RSS pubDate with trailing whitespace after named zone parses correctly")
+    func rssPubDateNamedZoneTrailingWhitespace() throws {
+        // Regression guard: without input trimming, the trailing token of
+        // `"...08:30:00 CET "` is the empty string after the final space, so the
+        // named-zone lookup misses and the input falls through to the zoneless
+        // UTC fallback — silently producing a date that is 1 hour off. The
+        // `substituteNamedZone` helper trims the input before tokenizing so feeds
+        // emitting trailing whitespace still resolve to the correct moment.
+        //
+        // 08:30 CET (UTC+1) = 07:30 UTC.
+        let xml = Self.rssXML(pubDate: "Mon, 06 Apr 2026 08:30:00 CET ")
+        let feed = try service.parse(Data(xml.utf8))
+
+        let date = try #require(feed.articles[0].publishedDate)
+        let expected = try Self.utcDate(year: 2026, month: 4, day: 6, hour: 7, minute: 30)
+        #expect(date == expected)
+    }
+
+    @Test("RSS pubDate with UT alias parses to UTC")
+    func rssPubDateNamedZoneUTAlias() throws {
+        // RFC 822 explicitly defines "UT" (no trailing C) as an alias for Universal
+        // Time. Whether the substitution pass or `DateFormatter`'s `zzz` matches it
+        // first, the resolved moment must be the literal wall-clock time interpreted
+        // as UTC (08:30 UT = 08:30 UTC). This test documents the current behavior
+        // and acts as a defense-in-depth guard against the table entry being
+        // accidentally removed.
+        let xml = Self.rssXML(pubDate: "Mon, 06 Apr 2026 08:30:00 UT")
+        let feed = try service.parse(Data(xml.utf8))
+
+        let date = try #require(feed.articles[0].publishedDate)
+        let expected = try Self.utcDate(year: 2026, month: 4, day: 6, hour: 8, minute: 30)
+        #expect(date == expected)
+    }
+
     // MARK: - XHTML Content
 
     @Test("Atom XHTML content is reconstructed as HTML")

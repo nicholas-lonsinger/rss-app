@@ -603,15 +603,21 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
     /// Only the trailing whitespace-delimited token is examined: feed dates almost
     /// universally place the zone last, and rewriting tokens elsewhere risks corrupting
     /// month names or weekdays that happen to share letters with a zone abbreviation.
+    ///
+    /// The input is trimmed of leading/trailing whitespace and newlines before token
+    /// extraction so trailing-space inputs (e.g., `"...08:30:00 CET "`) still resolve.
+    /// Without this trim, the trailing token would be empty and the lookup would miss,
+    /// causing the input to fall through to the zoneless UTC fallback (off by N hours).
     private static func substituteNamedZone(in input: String) -> String? {
-        guard let separatorIndex = input.lastIndex(where: { $0 == " " }) else {
+        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let separatorIndex = trimmed.lastIndex(where: { $0 == " " }) else {
             return nil
         }
-        let token = input[input.index(after: separatorIndex)...]
+        let token = trimmed[trimmed.index(after: separatorIndex)...]
         guard let offset = Self.namedZoneOffsets[String(token).uppercased()] else {
             return nil
         }
-        return input[..<separatorIndex] + " " + offset
+        return trimmed[..<separatorIndex] + " " + offset
     }
 
     /// Lookup table mapping non-US named timezone abbreviations to their RFC 822 numeric
@@ -686,10 +692,13 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
         "CLT": "-0400",     // Chile Standard Time
         "CLST": "-0300",    // Chile Summer Time
 
-        // Universal aliases not always recognized by DateFormatter
+        // Universal aliases not always recognized by DateFormatter. Bare "Z" is
+        // intentionally omitted: any input ending in `" Z"` is consumed by the
+        // first numeric-zone format (`...HH:mm:ss Z`) in `zonedDateFormats`, since
+        // `DateFormatter`'s `Z` specifier with `en_US_POSIX` accepts the literal
+        // `Z`. The substitution pass would never see it.
         "UT": "+0000",      // Universal Time (RFC 822 alias for UTC)
         "UTC": "+0000",     // Coordinated Universal Time (defense-in-depth)
-        "Z": "+0000",       // Zulu (RFC 3339 alias for UTC)
     ]
 
     /// Plausible-date window used to reject obviously-wrong parse results. The lower bound
