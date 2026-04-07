@@ -58,6 +58,10 @@ struct ArticleThumbnailView: View {
             return
         }
 
+        // RATIONALE: `resolveAndCacheThumbnail` is `throws(CancellationError)`, so the only
+        // catch arm we need handles task cancellation. The compiler enforces that no other
+        // error type can escape, eliminating the need for a `catch { assertionFailure(...) }`
+        // safety net.
         let result: ThumbnailCacheResult
         do {
             result = try await thumbnailService.resolveAndCacheThumbnail(
@@ -67,13 +71,6 @@ struct ArticleThumbnailView: View {
             )
         } catch is CancellationError {
             // View task was cancelled (e.g., row scrolled off-screen) — bail out quietly.
-            return
-        } catch {
-            // RATIONALE: `resolveAndCacheThumbnail` only throws `CancellationError`; any other
-            // thrown error is an unexpected invariant violation. Log at fault and fall back to placeholder.
-            Self.logger.fault("Unexpected error resolving thumbnail for article \(articleID, privacy: .public): \(error, privacy: .public)")
-            assertionFailure("Unexpected error resolving thumbnail: \(error)")
-            thumbnailImage = nil
             return
         }
         guard result == .cached, let fileURL = thumbnailService.cachedThumbnailFileURL(for: articleID) else {

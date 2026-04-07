@@ -24,16 +24,19 @@ protocol ArticleThumbnailCaching: Sendable {
     /// and caches it to disk under a hash of the article ID.
     ///
     /// Throws `CancellationError` if the current task is cancelled during the download.
-    /// All other errors (network, HTTP, decode, filesystem) are surfaced via the returned
-    /// `ThumbnailCacheResult` so callers can distinguish retry-worthy from permanent failures.
-    func cacheThumbnail(from remoteURL: URL, articleID: String) async throws -> ThumbnailCacheResult
+    /// The `throws(CancellationError)` typed-throws signature compile-time enforces that
+    /// no other error type can escape this method: all network, HTTP, decode, and filesystem
+    /// failures are surfaced via the returned `ThumbnailCacheResult` so callers can
+    /// distinguish retry-worthy from permanent failures.
+    func cacheThumbnail(from remoteURL: URL, articleID: String) async throws(CancellationError) -> ThumbnailCacheResult
 
     /// Resolves and caches a thumbnail: tries `thumbnailURL` first, then fetches
     /// the article page at `articleLink` to extract `og:image` as a fallback.
     ///
     /// Throws `CancellationError` if the current task is cancelled during resolution.
-    /// All other outcomes are reported via `ThumbnailCacheResult`.
-    func resolveAndCacheThumbnail(thumbnailURL: URL?, articleLink: URL?, articleID: String) async throws -> ThumbnailCacheResult
+    /// The `throws(CancellationError)` typed-throws signature compile-time enforces that
+    /// no other error type can escape; all other outcomes are reported via `ThumbnailCacheResult`.
+    func resolveAndCacheThumbnail(thumbnailURL: URL?, articleLink: URL?, articleID: String) async throws(CancellationError) -> ThumbnailCacheResult
 
     /// Returns the local file URL for a cached thumbnail, or `nil` if not cached.
     func cachedThumbnailFileURL(for articleID: String) -> URL?
@@ -64,7 +67,7 @@ struct ArticleThumbnailService: ArticleThumbnailCaching {
 
     // MARK: - ArticleThumbnailCaching
 
-    func cacheThumbnail(from remoteURL: URL, articleID: String) async throws -> ThumbnailCacheResult {
+    func cacheThumbnail(from remoteURL: URL, articleID: String) async throws(CancellationError) -> ThumbnailCacheResult {
         Self.logger.debug("cacheThumbnail() from \(remoteURL.absoluteString, privacy: .public) for article \(articleID, privacy: .public)")
 
         guard remoteURL.scheme == "http" || remoteURL.scheme == "https" else {
@@ -78,42 +81,15 @@ struct ArticleThumbnailService: ArticleThumbnailCaching {
             return .permanentFailure
         }
 
+        // RATIONALE: The inner do/catch is untyped because URLSession + Foundation APIs throw
+        // generic `Error`. We classify failures into the typed return enum (`ThumbnailCacheResult`)
+        // here, and only rethrow `CancellationError` so the outer typed-throws signature holds.
+        let data: Data
+        let response: URLResponse
         do {
             var request = URLRequest(url: remoteURL, timeoutInterval: Self.fetchTimeout)
             request.setBrowserUserAgent()
-            let (data, response) = try await URLSession.shared.data(for: request)
-
-            guard let httpResponse = response as? HTTPURLResponse,
-                  (200...299).contains(httpResponse.statusCode) else {
-                let code = (response as? HTTPURLResponse)?.statusCode ?? -1
-                Self.logger.warning("Thumbnail fetch returned HTTP \(code, privacy: .public) for \(remoteURL.absoluteString, privacy: .public)")
-                return Self.isPermanentHTTPFailure(code: code) ? .permanentFailure : .transientFailure
-            }
-
-            // Reject SVG content type — catches extensionless SVG URLs (e.g. deploy buttons)
-            let contentType = httpResponse.value(forHTTPHeaderField: "Content-Type") ?? ""
-            if contentType.hasPrefix("image/svg") {
-                Self.logger.debug("Rejecting SVG content type (\(contentType, privacy: .public), \(data.count, privacy: .public) bytes) from \(remoteURL.absoluteString, privacy: .public)")
-                return .permanentFailure
-            }
-
-            guard let image = UIImage(data: data) else {
-                Self.logger.warning("Downloaded data is not a valid image (\(contentType, privacy: .public), \(data.count, privacy: .public) bytes) from \(remoteURL.absoluteString, privacy: .public)")
-                return .permanentFailure
-            }
-
-            let thumbnail = cropAndResize(image)
-            guard let jpegData = thumbnail.jpegData(compressionQuality: Self.jpegQuality) else {
-                Self.logger.warning("Failed to generate JPEG data from thumbnail")
-                return .permanentFailure
-            }
-
-            let fileURL = thumbnailFileURL(for: articleID)
-            try ensureCacheDirectoryExists()
-            try jpegData.write(to: fileURL, options: .atomic)
-
-            Self.logger.debug("Cached thumbnail for article \(articleID, privacy: .public) (\(jpegData.count, privacy: .public) bytes)")
-            return .cached
+            (data, response) = try await URLSession.shared.data(for: request)
         } catch is CancellationError {
             // Propagate structured-concurrency cancellation so callers stop retrying immediately.
             throw CancellationError()
@@ -124,13 +100,49 @@ struct ArticleThumbnailService: ArticleThumbnailCaching {
             Self.logger.warning("Network error caching thumbnail for \(remoteURL.absoluteString, privacy: .public): \(urlError, privacy: .public)")
             return .transientFailure
         } catch {
-            // Filesystem errors (permissions, disk full) are permanent within this session
             Self.logger.warning("Failed to cache thumbnail for \(remoteURL.absoluteString, privacy: .public): \(error, privacy: .public)")
+            return .permanentFailure
+        }
+
+        guard let httpResponse = response as? HTTPURLResponse,
+              (200...299).contains(httpResponse.statusCode) else {
+            let code = (response as? HTTPURLResponse)?.statusCode ?? -1
+            Self.logger.warning("Thumbnail fetch returned HTTP \(code, privacy: .public) for \(remoteURL.absoluteString, privacy: .public)")
+            return Self.isPermanentHTTPFailure(code: code) ? .permanentFailure : .transientFailure
+        }
+
+        // Reject SVG content type — catches extensionless SVG URLs (e.g. deploy buttons)
+        let contentType = httpResponse.value(forHTTPHeaderField: "Content-Type") ?? ""
+        if contentType.hasPrefix("image/svg") {
+            Self.logger.debug("Rejecting SVG content type (\(contentType, privacy: .public), \(data.count, privacy: .public) bytes) from \(remoteURL.absoluteString, privacy: .public)")
+            return .permanentFailure
+        }
+
+        guard let image = UIImage(data: data) else {
+            Self.logger.warning("Downloaded data is not a valid image (\(contentType, privacy: .public), \(data.count, privacy: .public) bytes) from \(remoteURL.absoluteString, privacy: .public)")
+            return .permanentFailure
+        }
+
+        let thumbnail = cropAndResize(image)
+        guard let jpegData = thumbnail.jpegData(compressionQuality: Self.jpegQuality) else {
+            Self.logger.warning("Failed to generate JPEG data from thumbnail")
+            return .permanentFailure
+        }
+
+        // Filesystem errors (permissions, disk full) are permanent within this session.
+        do {
+            let fileURL = thumbnailFileURL(for: articleID)
+            try ensureCacheDirectoryExists()
+            try jpegData.write(to: fileURL, options: .atomic)
+            Self.logger.debug("Cached thumbnail for article \(articleID, privacy: .public) (\(jpegData.count, privacy: .public) bytes)")
+            return .cached
+        } catch {
+            Self.logger.warning("Failed to write thumbnail file for \(remoteURL.absoluteString, privacy: .public): \(error, privacy: .public)")
             return .permanentFailure
         }
     }
 
-    func resolveAndCacheThumbnail(thumbnailURL: URL?, articleLink: URL?, articleID: String) async throws -> ThumbnailCacheResult {
+    func resolveAndCacheThumbnail(thumbnailURL: URL?, articleLink: URL?, articleID: String) async throws(CancellationError) -> ThumbnailCacheResult {
         Self.logger.debug("resolveAndCacheThumbnail() thumbnailURL=\(thumbnailURL?.absoluteString ?? "nil", privacy: .public) articleLink=\(articleLink?.absoluteString ?? "nil", privacy: .public) articleID=\(articleID, privacy: .public)")
 
         var sawTransient = false
@@ -228,58 +240,27 @@ struct ArticleThumbnailService: ArticleThumbnailCaching {
 
     /// Fetches the beginning of an article page and extracts the `og:image` meta tag URL.
     ///
-    /// Throws `CancellationError` if the task is cancelled during the fetch. Non-cancellation
-    /// errors (network, HTTP, decode) are surfaced via `OGImageResult`.
+    /// Throws `CancellationError` if the task is cancelled during the fetch. The
+    /// `throws(CancellationError)` typed-throws signature compile-time enforces that no
+    /// other error type can escape; non-cancellation errors (network, HTTP, decode) are
+    /// surfaced via `OGImageResult`.
     // RATIONALE: Internal (not private) so `@testable` unit tests can exercise the
     // HTTP status classification paths with an injected URLProtocol-backed session.
-    func resolveOGImage(from articleLink: URL) async throws -> OGImageResult {
+    func resolveOGImage(from articleLink: URL) async throws(CancellationError) -> OGImageResult {
         Self.logger.debug("Resolving og:image from \(articleLink.absoluteString, privacy: .public)")
 
+        // RATIONALE: Two separate untyped do/catches funnel network and stream errors into
+        // the typed return enum (`OGImageResult`). Only `CancellationError` is rethrown, so
+        // the outer typed-throws signature holds.
+        let bytes: URLSession.AsyncBytes
+        let response: URLResponse
         do {
             var request = URLRequest(url: articleLink, timeoutInterval: Self.htmlFetchTimeout)
             request.setBrowserUserAgent()
-            let (bytes, response) = try await session.bytes(for: request)
-
-            guard let httpResponse = response as? HTTPURLResponse,
-                  (200...299).contains(httpResponse.statusCode) else {
-                let code = (response as? HTTPURLResponse)?.statusCode ?? -1
-                Self.logger.warning("Article page fetch returned HTTP \(code, privacy: .public) for \(articleLink.absoluteString, privacy: .public)")
-                if Self.isPermanentHTTPFailure(code: code) {
-                    Self.logger.info("Treating HTTP \(code, privacy: .public) as permanent og:image failure for \(articleLink.absoluteString, privacy: .public)")
-                    return .notFound
-                }
-                return .fetchFailed
-            }
-
-            // Read only the first portion — og:image is in <head>, no need for the full body
-            var collected = Data()
-            collected.reserveCapacity(Self.htmlHeadMaxBytes)
-            for try await byte in bytes {
-                collected.append(byte)
-                if collected.count >= Self.htmlHeadMaxBytes { break }
-            }
-
-            // RATIONALE: Decode tolerantly with `String(decoding:as:)` rather than the
-            // failable `String(data:encoding:.utf8)`. The 50 KB head slice frequently
-            // cuts through a multi-byte UTF-8 character at the boundary, which makes
-            // strict decoding fail on otherwise-valid pages. Substituting replacement
-            // characters for invalid bytes lets the og:image extractor still find the
-            // tag (which is virtually always pure ASCII). If the page is genuinely
-            // non-UTF-8, the regex will simply fail to match and we fall through to
-            // `.notFound` — a permanent classification — so the prefetcher does not
-            // burn retry budget on a request that can never succeed.
-            let html = String(decoding: collected, as: UTF8.self)
-
-            if let ogURL = HTMLUtilities.extractOGImageURL(from: html, baseURL: articleLink) {
-                return .found(ogURL)
-            }
-            Self.logger.debug("No og:image meta tag found in page from \(articleLink.absoluteString, privacy: .public)")
-            return .notFound
+            (bytes, response) = try await session.bytes(for: request)
         } catch is CancellationError {
-            // Propagate structured-concurrency cancellation so callers stop retrying immediately.
             throw CancellationError()
         } catch let urlError as URLError where urlError.code == .cancelled {
-            // URLSession surfaces task cancellation as URLError(.cancelled); normalize to CancellationError.
             throw CancellationError()
         } catch let urlError as URLError {
             Self.logger.warning("Network error fetching article page for og:image from \(articleLink.absoluteString, privacy: .public): \(urlError, privacy: .public)")
@@ -288,6 +269,56 @@ struct ArticleThumbnailService: ArticleThumbnailCaching {
             Self.logger.warning("Failed to fetch article page for og:image from \(articleLink.absoluteString, privacy: .public): \(error, privacy: .public)")
             return .fetchFailed
         }
+
+        guard let httpResponse = response as? HTTPURLResponse,
+              (200...299).contains(httpResponse.statusCode) else {
+            let code = (response as? HTTPURLResponse)?.statusCode ?? -1
+            Self.logger.warning("Article page fetch returned HTTP \(code, privacy: .public) for \(articleLink.absoluteString, privacy: .public)")
+            if Self.isPermanentHTTPFailure(code: code) {
+                Self.logger.info("Treating HTTP \(code, privacy: .public) as permanent og:image failure for \(articleLink.absoluteString, privacy: .public)")
+                return .notFound
+            }
+            return .fetchFailed
+        }
+
+        // Read only the first portion — og:image is in <head>, no need for the full body
+        var collected = Data()
+        collected.reserveCapacity(Self.htmlHeadMaxBytes)
+        do {
+            for try await byte in bytes {
+                collected.append(byte)
+                if collected.count >= Self.htmlHeadMaxBytes { break }
+            }
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch let urlError as URLError where urlError.code == .cancelled {
+            // URLSession.AsyncBytes surfaces mid-stream task cancellation as URLError(.cancelled);
+            // normalize to CancellationError so callers stop retrying immediately.
+            throw CancellationError()
+        } catch let urlError as URLError {
+            Self.logger.warning("Network error streaming article page for og:image from \(articleLink.absoluteString, privacy: .public): \(urlError, privacy: .public)")
+            return .fetchFailed
+        } catch {
+            Self.logger.warning("Failed to stream article page for og:image from \(articleLink.absoluteString, privacy: .public): \(error, privacy: .public)")
+            return .fetchFailed
+        }
+
+        // RATIONALE: Decode tolerantly with `String(decoding:as:)` rather than the
+        // failable `String(data:encoding:.utf8)`. The 50 KB head slice frequently
+        // cuts through a multi-byte UTF-8 character at the boundary, which makes
+        // strict decoding fail on otherwise-valid pages. Substituting replacement
+        // characters for invalid bytes lets the og:image extractor still find the
+        // tag (which is virtually always pure ASCII). If the page is genuinely
+        // non-UTF-8, the regex will simply fail to match and we fall through to
+        // `.notFound` — a permanent classification — so the prefetcher does not
+        // burn retry budget on a request that can never succeed.
+        let html = String(decoding: collected, as: UTF8.self)
+
+        if let ogURL = HTMLUtilities.extractOGImageURL(from: html, baseURL: articleLink) {
+            return .found(ogURL)
+        }
+        Self.logger.debug("No og:image meta tag found in page from \(articleLink.absoluteString, privacy: .public)")
+        return .notFound
     }
 
     // MARK: - HTTP Classification

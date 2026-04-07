@@ -373,11 +373,11 @@ private final class SelectiveThumbnailMock: ArticleThumbnailCaching, @unchecked 
         self.successArticleIDs = successArticleIDs
     }
 
-    func cacheThumbnail(from remoteURL: URL, articleID: String) async throws -> ThumbnailCacheResult {
+    func cacheThumbnail(from remoteURL: URL, articleID: String) async throws(CancellationError) -> ThumbnailCacheResult {
         successArticleIDs.contains(articleID) ? .cached : .permanentFailure
     }
 
-    func resolveAndCacheThumbnail(thumbnailURL: URL?, articleLink: URL?, articleID: String) async throws -> ThumbnailCacheResult {
+    func resolveAndCacheThumbnail(thumbnailURL: URL?, articleLink: URL?, articleID: String) async throws(CancellationError) -> ThumbnailCacheResult {
         successArticleIDs.contains(articleID) ? .cached : .permanentFailure
     }
 
@@ -414,11 +414,11 @@ private final class SequenceThumbnailMock: ArticleThumbnailCaching, @unchecked S
         lock.withLock { callCounts[articleID, default: 0] }
     }
 
-    func cacheThumbnail(from remoteURL: URL, articleID: String) async throws -> ThumbnailCacheResult {
+    func cacheThumbnail(from remoteURL: URL, articleID: String) async throws(CancellationError) -> ThumbnailCacheResult {
         .transientFailure
     }
 
-    func resolveAndCacheThumbnail(thumbnailURL: URL?, articleLink: URL?, articleID: String) async throws -> ThumbnailCacheResult {
+    func resolveAndCacheThumbnail(thumbnailURL: URL?, articleLink: URL?, articleID: String) async throws(CancellationError) -> ThumbnailCacheResult {
         let currentCall: Int = lock.withLock {
             let count = callCounts[articleID, default: 0]
             callCounts[articleID] = count + 1
