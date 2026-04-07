@@ -15,6 +15,17 @@ final class PersistentArticle {
     var articleDescription: String
     var snippet: String
     var publishedDate: Date?
+    /// Atom `<updated>` (or namespaced equivalent) parsed from the feed XML. Distinct from
+    /// `publishedDate` so the persistence layer can detect publisher revisions across
+    /// refreshes by comparing this value against the incoming feed. `nil` for feeds that
+    /// don't expose any update timestamp, and `nil` for articles persisted before this
+    /// field existed (SwiftData lightweight migration leaves the new column null).
+    var updatedDate: Date?
+    /// Set to `true` when `FeedPersistenceService.upsertArticles` detects an update bump
+    /// against this row. Cleared when the user opens the article (the read transition).
+    /// Distinguishes "newly resurfaced because content changed" from "brand new unread"
+    /// in the article list UI.
+    var wasUpdated: Bool
     var thumbnailURL: URL?
     var author: String?
     var categories: [String]
@@ -79,6 +90,8 @@ final class PersistentArticle {
         articleDescription: String = "",
         snippet: String = "",
         publishedDate: Date? = nil,
+        updatedDate: Date? = nil,
+        wasUpdated: Bool = false,
         thumbnailURL: URL? = nil,
         author: String? = nil,
         categories: [String] = [],
@@ -97,6 +110,8 @@ final class PersistentArticle {
         self.articleDescription = articleDescription
         self.snippet = snippet
         self.publishedDate = publishedDate
+        self.updatedDate = updatedDate
+        self.wasUpdated = wasUpdated
         self.thumbnailURL = thumbnailURL
         self.author = author
         self.categories = categories
@@ -112,6 +127,29 @@ final class PersistentArticle {
         // every construction path goes through the same clamping rule. Tests that need to
         // pin a specific value can still override.
         self.sortDate = sortDate ?? Self.clampedSortDate(publishedDate: publishedDate)
+    }
+
+    // MARK: - Display Helpers
+
+    /// Stable display value for the article's original publication time, suitable for
+    /// "Published [N] days ago" labels in list rows.
+    ///
+    /// Distinct from `sortDate` because PR 2 of issue #74 will start bumping `sortDate`
+    /// to the current time when content-update detection fires, so the row view can
+    /// keep showing the *original* publication time alongside a separate "Updated [N]
+    /// minutes ago" label. Computed inline as `min(publishedDate ?? fetchedDate, fetchedDate)`:
+    ///
+    /// - `fetchedDate` is the clamp ceiling. It's set once at insert and never mutated by
+    ///   `upsertArticles`, so it preserves the same "no future-dated articles displayed"
+    ///   guarantee that `clampedSortDate(publishedDate:)` enforces at insert time.
+    /// - When `publishedDate` is `nil` (parser rejected an implausible date or the feed
+    ///   omitted it), the fallback to `fetchedDate` keeps the row showing *some* stable
+    ///   moment instead of an empty cell.
+    ///
+    /// This is a non-persisted computed property — SwiftData ignores it because it's not
+    /// declared as a stored `var`.
+    var displayedPublishedDate: Date {
+        min(publishedDate ?? fetchedDate, fetchedDate)
     }
 
     /// Computes the clamped `sortDate` for an article with the given `publishedDate`.

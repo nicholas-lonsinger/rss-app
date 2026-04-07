@@ -122,6 +122,7 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
     private var itemDescription = ""
     private var itemGuid = ""
     private var itemPubDate = ""
+    private var itemUpdatedDate = ""
     private var itemThumbnailURL: String?
     private var itemEnclosureURL: String?
     private var itemAuthor = ""
@@ -212,6 +213,7 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
             itemDescription = ""
             itemGuid = ""
             itemPubDate = ""
+            itemUpdatedDate = ""
             itemThumbnailURL = nil
             itemEnclosureURL = nil
             itemAuthor = ""
@@ -403,7 +405,41 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
             case "published":
                 itemPubDate = textBuffer
             case "updated":
-                // Atom updated date; fallback when neither RSS <pubDate> nor Atom <published> was found
+                // Atom <updated>: captured unconditionally as the first-class update signal,
+                // and *also* used as a fallback for the publication date when neither RSS
+                // <pubDate> nor Atom <published> was present.
+                itemUpdatedDate = textBuffer
+                if itemPubDate.isEmpty {
+                    itemPubDate = textBuffer
+                }
+            // RATIONALE: namespace processing is disabled on the XMLParser
+            // (`shouldProcessNamespaces = false`), so namespaced elements arrive here as
+            // their literal qualified names. Matching the standard prefixes — `dc:`, `dcterms:`,
+            // and `atom:` — covers the overwhelming majority of feeds. A feed declaring its
+            // own custom prefix for the Dublin Core or Atom namespace (e.g.,
+            // `xmlns:foo="http://purl.org/dc/elements/1.1/"` and using `foo:modified`) will
+            // not be matched. The principled fix would be enabling namespace processing
+            // and reworking every existing namespaced case (`content:encoded`, `media:*`,
+            // etc.); that is out of scope for issue #74.
+            case "dc:modified", "dcterms:modified":
+                // Dublin Core modification date — rare in practice but cheap to support
+                // because the parser already matches namespaced elements by literal prefix.
+                itemUpdatedDate = textBuffer
+                if itemPubDate.isEmpty {
+                    itemPubDate = textBuffer
+                }
+            case "atom:updated":
+                // Some RSS 2.0 feeds embed Atom elements via `xmlns:atom`. Treat identically
+                // to a native Atom <updated>.
+                itemUpdatedDate = textBuffer
+                if itemPubDate.isEmpty {
+                    itemPubDate = textBuffer
+                }
+            case "dc:date", "dcterms:created":
+                // Dublin Core publication date — fallback only. Real RSS <pubDate> or Atom
+                // <published> take priority, matching the existing precedence rules. This is
+                // a publication signal, not an update signal, so it does NOT populate
+                // itemUpdatedDate.
                 if itemPubDate.isEmpty {
                     itemPubDate = textBuffer
                 }
@@ -531,6 +567,7 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
             articleDescription: rawDescription,
             snippet: snippet,
             publishedDate: Self.parseDate(itemPubDate),
+            updatedDate: Self.parseDate(itemUpdatedDate),
             thumbnailURL: thumbnailURL,
             author: authorTrimmed.isEmpty ? nil : authorTrimmed,
             categories: itemCategories

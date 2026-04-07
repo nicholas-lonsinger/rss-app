@@ -145,6 +145,137 @@ enum TestFixtures {
         </feed>
         """
 
+    // MARK: - Update Detection Fixtures (issue #74)
+
+    /// Atom feed where `<updated>` is the only date present (no `<published>`/`<pubDate>`).
+    /// Exercises the fallback path: `updatedDate` should populate, and `publishedDate`
+    /// should also resolve to the same `<updated>` value.
+    static let atomUpdatedOnlyXML = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <feed xmlns="http://www.w3.org/2005/Atom">
+            <title>Updated Only Feed</title>
+            <link rel="alternate" href="https://example.com" />
+            <id>https://example.com/updated-only-feed</id>
+            <updated>2026-04-01T12:00:00Z</updated>
+            <entry>
+                <title>Entry With Only Updated</title>
+                <link rel="alternate" href="https://example.com/updated-only" />
+                <id>updated-only-entry-id</id>
+                <updated>2026-04-01T11:30:00Z</updated>
+                <summary>An entry that only has an updated timestamp</summary>
+            </entry>
+        </feed>
+        """
+
+    /// RSS 2.0 feed declaring `xmlns:dc` and using `<dc:modified>` as the modification
+    /// timestamp alongside a strictly older `<pubDate>`. Exercises Dublin Core update
+    /// signal extraction.
+    static let rssWithDcModifiedXML = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <rss version="2.0" xmlns:dc="http://purl.org/dc/elements/1.1/">
+        <channel>
+            <title>DC Modified Feed</title>
+            <link>https://example.com</link>
+            <description>RSS feed with dc:modified</description>
+            <item>
+                <title>DC Modified Item</title>
+                <link>https://example.com/dc-modified</link>
+                <description>An item modified after publication</description>
+                <guid>dc-modified-guid</guid>
+                <pubDate>Mon, 30 Mar 2026 12:00:00 +0000</pubDate>
+                <dc:modified>2026-04-01T08:00:00Z</dc:modified>
+            </item>
+        </channel>
+        </rss>
+        """
+
+    /// RSS 2.0 feed using the more standards-compliant `dcterms:modified` element instead
+    /// of `dc:modified`. Confirms the parser accepts both literal prefixes.
+    static let rssWithDctermsModifiedXML = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <rss version="2.0" xmlns:dcterms="http://purl.org/dc/terms/">
+        <channel>
+            <title>DCTerms Modified Feed</title>
+            <link>https://example.com</link>
+            <description>RSS feed with dcterms:modified</description>
+            <item>
+                <title>DCTerms Modified Item</title>
+                <link>https://example.com/dcterms-modified</link>
+                <description>An item with a dcterms:modified timestamp</description>
+                <guid>dcterms-modified-guid</guid>
+                <pubDate>Mon, 30 Mar 2026 12:00:00 +0000</pubDate>
+                <dcterms:modified>2026-04-01T09:30:00Z</dcterms:modified>
+            </item>
+        </channel>
+        </rss>
+        """
+
+    /// RSS 2.0 feed embedding Atom's `<atom:updated>` via `xmlns:atom`. Confirms namespaced
+    /// Atom update signals are recognized when used inside an RSS document.
+    static let rssWithAtomUpdatedXML = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+        <channel>
+            <title>Atom Updated In RSS Feed</title>
+            <link>https://example.com</link>
+            <description>RSS feed embedding atom:updated</description>
+            <item>
+                <title>Atom Updated Item</title>
+                <link>https://example.com/atom-updated</link>
+                <description>An item with an embedded atom:updated</description>
+                <guid>atom-updated-guid</guid>
+                <pubDate>Mon, 30 Mar 2026 12:00:00 +0000</pubDate>
+                <atom:updated>2026-04-01T10:15:00Z</atom:updated>
+            </item>
+        </channel>
+        </rss>
+        """
+
+    /// RSS 2.0 feed with `<dc:date>` and no `<pubDate>`. Exercises the Dublin Core
+    /// publication-date fallback — `publishedDate` should populate from `<dc:date>` and
+    /// `updatedDate` should remain `nil` because `<dc:date>` is a publication signal,
+    /// not an update signal.
+    static let rssWithDcDateOnlyXML = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <rss version="2.0" xmlns:dc="http://purl.org/dc/elements/1.1/">
+        <channel>
+            <title>DC Date Only Feed</title>
+            <link>https://example.com</link>
+            <description>RSS feed using dc:date as the only date</description>
+            <item>
+                <title>DC Date Item</title>
+                <link>https://example.com/dc-date-only</link>
+                <description>An item with only a dc:date</description>
+                <guid>dc-date-only-guid</guid>
+                <dc:date>2026-04-01T07:00:00Z</dc:date>
+            </item>
+        </channel>
+        </rss>
+        """
+
+    /// RSS 2.0 feed with both `<pubDate>` and `<dc:date>`. Regression guard for the
+    /// publication-date precedence rule: `<pubDate>` is the format's native field and
+    /// must take priority over the Dublin Core fallback even when `<dc:date>` would parse
+    /// to a different value.
+    static let rssWithPubDateAndDcDateXML = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <rss version="2.0" xmlns:dc="http://purl.org/dc/elements/1.1/">
+        <channel>
+            <title>PubDate Wins Feed</title>
+            <link>https://example.com</link>
+            <description>RSS feed where pubDate must beat dc:date</description>
+            <item>
+                <title>Precedence Item</title>
+                <link>https://example.com/precedence</link>
+                <description>pubDate should win over dc:date</description>
+                <guid>precedence-guid</guid>
+                <pubDate>Mon, 30 Mar 2026 12:00:00 +0000</pubDate>
+                <dc:date>2020-01-01T00:00:00Z</dc:date>
+            </item>
+        </channel>
+        </rss>
+        """
+
     static let atomNoContentXML = """
         <?xml version="1.0" encoding="UTF-8"?>
         <feed xmlns="http://www.w3.org/2005/Atom">
@@ -475,6 +606,7 @@ enum TestFixtures {
         articleDescription: String = "<p>Test description</p>",
         snippet: String = "Test description",
         publishedDate: Date? = Date(timeIntervalSince1970: 1_711_800_000),
+        updatedDate: Date? = nil,
         thumbnailURL: URL? = URL(string: "https://example.com/thumb.jpg"),
         author: String? = nil,
         categories: [String] = []
@@ -486,6 +618,7 @@ enum TestFixtures {
             articleDescription: articleDescription,
             snippet: snippet,
             publishedDate: publishedDate,
+            updatedDate: updatedDate,
             thumbnailURL: thumbnailURL,
             author: author,
             categories: categories
@@ -575,6 +708,8 @@ enum TestFixtures {
         articleDescription: String = "<p>Test description</p>",
         snippet: String = "Test description",
         publishedDate: Date? = Date(timeIntervalSince1970: 1_711_800_000),
+        updatedDate: Date? = nil,
+        wasUpdated: Bool = false,
         thumbnailURL: URL? = URL(string: "https://example.com/thumb.jpg"),
         author: String? = nil,
         categories: [String] = [],
@@ -598,6 +733,8 @@ enum TestFixtures {
             articleDescription: articleDescription,
             snippet: snippet,
             publishedDate: publishedDate,
+            updatedDate: updatedDate,
+            wasUpdated: wasUpdated,
             thumbnailURL: thumbnailURL,
             author: author,
             categories: categories,

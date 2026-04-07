@@ -57,4 +57,76 @@ struct PersistentArticleConversionTests {
         #expect(persistent.sortDate >= before)
         #expect(persistent.sortDate <= after)
     }
+
+    // MARK: - updatedDate / wasUpdated round-trip (issue #74)
+
+    @Test("updatedDate round-trips through Article → PersistentArticle → Article unchanged")
+    func updatedDateRoundTrip() {
+        let published = Date(timeIntervalSince1970: 1_700_000_000)
+        let updated = Date(timeIntervalSince1970: 1_700_003_600) // +1 hour
+        let article = TestFixtures.makeArticle(
+            publishedDate: published,
+            updatedDate: updated
+        )
+
+        let persistent = PersistentArticle(from: article)
+        #expect(persistent.publishedDate == published)
+        #expect(persistent.updatedDate == updated)
+        // Fresh inserts must default wasUpdated to false — the upsert path is the only
+        // code that sets it (issue #74 PR 2).
+        #expect(persistent.wasUpdated == false)
+
+        let roundTripped = persistent.toArticle()
+        #expect(roundTripped.publishedDate == published)
+        #expect(roundTripped.updatedDate == updated)
+    }
+
+    @Test("Nil updatedDate round-trips as nil")
+    func nilUpdatedDateRoundTrips() {
+        let article = TestFixtures.makeArticle(
+            publishedDate: Date(timeIntervalSince1970: 1_700_000_000),
+            updatedDate: nil
+        )
+
+        let persistent = PersistentArticle(from: article)
+        #expect(persistent.updatedDate == nil)
+        #expect(persistent.wasUpdated == false)
+
+        let roundTripped = persistent.toArticle()
+        #expect(roundTripped.updatedDate == nil)
+    }
+
+    // MARK: - displayedPublishedDate (issue #74)
+
+    @Test("displayedPublishedDate uses publishedDate when it predates fetchedDate")
+    func displayedPublishedDateForPastPublication() {
+        // Past publishedDate clamps through unchanged because it's <= fetchedDate.
+        let past = Date(timeIntervalSince1970: 1_000_000)
+        let article = TestFixtures.makeArticle(publishedDate: past)
+        let persistent = PersistentArticle(from: article)
+
+        #expect(persistent.displayedPublishedDate == past)
+    }
+
+    @Test("displayedPublishedDate clamps a future publishedDate to fetchedDate")
+    func displayedPublishedDateClampsFuture() {
+        // Future publishedDate (Cloudflare-style scheduled post) is clamped to fetchedDate
+        // for display purposes — same guarantee that clampedSortDate provides at insert
+        // time, but recomputed inline so the row view never shows a future date even
+        // after PR 2 starts mutating sortDate on update detection.
+        let future = Date().addingTimeInterval(4 * 60 * 60)
+        let article = TestFixtures.makeArticle(publishedDate: future)
+        let persistent = PersistentArticle(from: article)
+
+        #expect(persistent.displayedPublishedDate == persistent.fetchedDate)
+        #expect(persistent.displayedPublishedDate <= Date())
+    }
+
+    @Test("displayedPublishedDate falls back to fetchedDate when publishedDate is nil")
+    func displayedPublishedDateFallsBackWhenNil() {
+        let article = TestFixtures.makeArticle(publishedDate: nil)
+        let persistent = PersistentArticle(from: article)
+
+        #expect(persistent.displayedPublishedDate == persistent.fetchedDate)
+    }
 }
