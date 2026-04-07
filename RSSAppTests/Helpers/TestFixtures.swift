@@ -253,6 +253,105 @@ enum TestFixtures {
         </rss>
         """
 
+    /// RSS 2.0 feed where the first item has both `<pubDate>` and `<dc:date>` with
+    /// `<dc:date>` appearing **before** `<pubDate>` in source order. Verifies that
+    /// element ordering does not affect the precedence rule — `<pubDate>` always wins
+    /// because it sets `itemPubDate` unconditionally regardless of when the
+    /// `<dc:date>` arm fired.
+    static let rssWithDcDateBeforePubDateXML = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <rss version="2.0" xmlns:dc="http://purl.org/dc/elements/1.1/">
+        <channel>
+            <title>DC Date First Feed</title>
+            <link>https://example.com</link>
+            <description>RSS feed where dc:date precedes pubDate in source order</description>
+            <item>
+                <title>Order Test Item</title>
+                <link>https://example.com/order</link>
+                <description>dc:date appears first; pubDate must still win</description>
+                <guid>order-test-guid</guid>
+                <dc:date>2020-01-01T00:00:00Z</dc:date>
+                <pubDate>Mon, 30 Mar 2026 12:00:00 +0000</pubDate>
+            </item>
+        </channel>
+        </rss>
+        """
+
+    /// RSS 2.0 feed using `<dcterms:created>` (the dcterms alias for the Dublin Core
+    /// publication date). Verifies the parser accepts the dcterms-namespace alias as a
+    /// publication-date fallback alongside `<dc:date>`.
+    static let rssWithDctermsCreatedOnlyXML = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <rss version="2.0" xmlns:dcterms="http://purl.org/dc/terms/">
+        <channel>
+            <title>DCTerms Created Only Feed</title>
+            <link>https://example.com</link>
+            <description>RSS feed using dcterms:created as the only date</description>
+            <item>
+                <title>DCTerms Created Item</title>
+                <link>https://example.com/dcterms-created</link>
+                <description>An item with only a dcterms:created</description>
+                <guid>dcterms-created-only-guid</guid>
+                <dcterms:created>2026-04-01T07:00:00Z</dcterms:created>
+            </item>
+        </channel>
+        </rss>
+        """
+
+    /// RSS 2.0 feed where `<dc:modified>` is unparseable garbage. Verifies that the
+    /// parser returns `nil` for `updatedDate` without crashing or fabricating a fallback
+    /// value, AND that the failed update parse does not poison `publishedDate`. Pins the
+    /// `parseDate` → `nil` contract that the planned update-detection logic depends on.
+    static let rssWithMalformedDcModifiedXML = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <rss version="2.0" xmlns:dc="http://purl.org/dc/elements/1.1/">
+        <channel>
+            <title>Malformed Modified Feed</title>
+            <link>https://example.com</link>
+            <description>RSS feed with garbage in dc:modified</description>
+            <item>
+                <title>Garbage Modified Item</title>
+                <link>https://example.com/garbage-modified</link>
+                <description>An item with unparseable dc:modified</description>
+                <guid>garbage-modified-guid</guid>
+                <pubDate>Mon, 30 Mar 2026 12:00:00 +0000</pubDate>
+                <dc:modified>not a real date</dc:modified>
+            </item>
+        </channel>
+        </rss>
+        """
+
+    /// RSS 2.0 feed with TWO items: the first carries `<dc:modified>`, the second has
+    /// only `<pubDate>`. Pins the per-item accumulator reset for `itemUpdatedDate` —
+    /// without the reset, the second item would silently inherit the first item's
+    /// update value. The single highest-value test against the brittle accumulator
+    /// pattern in `RSSParserDelegate`.
+    static let rssAccumulatorLeakageProbeXML = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <rss version="2.0" xmlns:dc="http://purl.org/dc/elements/1.1/">
+        <channel>
+            <title>Accumulator Probe Feed</title>
+            <link>https://example.com</link>
+            <description>Two items, only first has dc:modified</description>
+            <item>
+                <title>Updated Item</title>
+                <link>https://example.com/updated</link>
+                <description>Has dc:modified</description>
+                <guid>updated-item-guid</guid>
+                <pubDate>Mon, 30 Mar 2026 12:00:00 +0000</pubDate>
+                <dc:modified>2026-04-01T08:00:00Z</dc:modified>
+            </item>
+            <item>
+                <title>No Update Item</title>
+                <link>https://example.com/no-update</link>
+                <description>Has only pubDate, no update signal</description>
+                <guid>no-update-item-guid</guid>
+                <pubDate>Sun, 29 Mar 2026 10:30:00 +0000</pubDate>
+            </item>
+        </channel>
+        </rss>
+        """
+
     /// RSS 2.0 feed with both `<pubDate>` and `<dc:date>`. Regression guard for the
     /// publication-date precedence rule: `<pubDate>` is the format's native field and
     /// must take priority over the Dublin Core fallback even when `<dc:date>` would parse

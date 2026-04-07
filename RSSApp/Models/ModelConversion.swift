@@ -38,8 +38,8 @@ extension PersistentArticle {
         // which preserves `publishedDate` verbatim and computes the sort key as
         // `min(publishedDate ?? now, now)`. See `PersistentArticle.clampedSortDate(...)`
         // and the `RATIONALE:` comment on `PersistentArticle.sortDate` for the rationale.
-        // `wasUpdated` defaults to `false` for fresh inserts; `FeedPersistenceService`
-        // sets it directly when the upsert path detects an update bump (issue #74).
+        // `wasUpdated` defaults to `false` for fresh inserts and is reserved for a
+        // follow-up to issue #74; no production code in this PR sets it.
         self.init(
             articleID: article.id,
             title: article.title,

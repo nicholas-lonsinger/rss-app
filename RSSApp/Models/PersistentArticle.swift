@@ -15,16 +15,22 @@ final class PersistentArticle {
     var articleDescription: String
     var snippet: String
     var publishedDate: Date?
-    /// Atom `<updated>` (or namespaced equivalent) parsed from the feed XML. Distinct from
-    /// `publishedDate` so the persistence layer can detect publisher revisions across
-    /// refreshes by comparing this value against the incoming feed. `nil` for feeds that
-    /// don't expose any update timestamp, and `nil` for articles persisted before this
-    /// field existed (SwiftData lightweight migration leaves the new column null).
+    /// Atom `<updated>` (or namespaced equivalent — `dc:modified`, `dcterms:modified`,
+    /// `atom:updated`) parsed from the feed XML. Distinct from `publishedDate` so the
+    /// persistence layer can compare this value across refreshes when detecting
+    /// publisher revisions (issue #74). `nil` for feeds that don't expose any update
+    /// timestamp, and `nil` for articles persisted before this field was added —
+    /// SwiftData's implicit schema migration initializes the new optional column to
+    /// `nil` for existing rows on the first launch after the schema bump.
     var updatedDate: Date?
-    /// Set to `true` when `FeedPersistenceService.upsertArticles` detects an update bump
-    /// against this row. Cleared when the user opens the article (the read transition).
-    /// Distinguishes "newly resurfaced because content changed" from "brand new unread"
-    /// in the article list UI.
+    /// Reserved flag for the upsert path to mark when a publisher revision is detected
+    /// against an existing row (issue #74). **Currently always `false`**: no production
+    /// code in this PR reads or writes this field beyond the default initializer. A
+    /// follow-up to issue #74 is expected to wire `FeedPersistenceService.upsertArticles`
+    /// to set it on detection and clear it on the read transition.
+    ///
+    /// Existing rows persisted before this field was added deserialize as `false` via
+    /// SwiftData's implicit schema migration, matching the default for fresh inserts.
     var wasUpdated: Bool
     var thumbnailURL: URL?
     var author: String?
@@ -51,6 +57,16 @@ final class PersistentArticle {
 
     // MARK: - Caching
 
+    // RATIONALE: `fetchedDate` is set exactly once at insert (the designated init's
+    // default is `Date()`) and is never mutated by `FeedPersistenceService.upsertArticles`
+    // or anywhere else in production code. This post-insert immutability is load-bearing
+    // for the `displayedPublishedDate` computed property below, which uses `fetchedDate`
+    // as the clamp ceiling so the row view shows a stable original publication time even
+    // after a follow-up to issue #74 starts mutating `sortDate` on update detection. Any
+    // future code path that mutates `fetchedDate` on an already-persisted article would
+    // silently retroactively change `displayedPublishedDate` for every article inserted
+    // before that change. SwiftData requires `var` here, so this invariant cannot be
+    // enforced at the type level.
     var fetchedDate: Date
 
     // MARK: - Sort Key
@@ -131,23 +147,37 @@ final class PersistentArticle {
 
     // MARK: - Display Helpers
 
-    /// Stable display value for the article's original publication time, suitable for
-    /// "Published [N] days ago" labels in list rows.
+    /// Stable display value for the article's original publication time. Added in advance
+    /// of the row-view changes planned for issue #74; not yet consumed by any production
+    /// view in this PR.
     ///
-    /// Distinct from `sortDate` because PR 2 of issue #74 will start bumping `sortDate`
-    /// to the current time when content-update detection fires, so the row view can
-    /// keep showing the *original* publication time alongside a separate "Updated [N]
-    /// minutes ago" label. Computed inline as `min(publishedDate ?? fetchedDate, fetchedDate)`:
+    /// Distinct from `sortDate` because a follow-up to issue #74 is expected to mutate
+    /// `sortDate` to the current time when content-update detection fires (see the
+    /// stability invariant block on `sortDate` above for the constraints any such change
+    /// must satisfy). Once that lands, the row view will need *both* an "Updated [N]
+    /// minutes ago" label using the bumped `sortDate`/`updatedDate` *and* a stable
+    /// "Published [N] days ago" label that reflects the original publication moment —
+    /// this property is the source for the latter.
     ///
-    /// - `fetchedDate` is the clamp ceiling. It's set once at insert and never mutated by
-    ///   `upsertArticles`, so it preserves the same "no future-dated articles displayed"
-    ///   guarantee that `clampedSortDate(publishedDate:)` enforces at insert time.
+    /// Formula: `min(publishedDate ?? fetchedDate, fetchedDate)`.
+    ///
+    /// - For production-inserted rows, `fetchedDate` is the wall clock at insert time
+    ///   (set once via the designated init's default; see the `RATIONALE:` block on
+    ///   `fetchedDate` above for why it's never mutated). The result is therefore
+    ///   guaranteed to be ≤ ingestion time, preserving the same "no future-dated
+    ///   articles displayed" guarantee that `clampedSortDate(publishedDate:)` enforces
+    ///   for `sortDate`.
     /// - When `publishedDate` is `nil` (parser rejected an implausible date or the feed
     ///   omitted it), the fallback to `fetchedDate` keeps the row showing *some* stable
     ///   moment instead of an empty cell.
+    /// - Tests that pass a synthetic future `fetchedDate` will see that future value
+    ///   pass through unclamped — the property does not re-clamp against `Date()` at
+    ///   read time, since that would make the displayed value non-stable across calls
+    ///   and cause SwiftUI diffing churn.
     ///
-    /// This is a non-persisted computed property — SwiftData ignores it because it's not
-    /// declared as a stored `var`.
+    /// This is a computed property (no backing storage), so SwiftData's `@Model` macro
+    /// does not generate persistence code for it. SwiftData only persists stored
+    /// properties — Swift requires `var` for any computed property regardless.
     var displayedPublishedDate: Date {
         min(publishedDate ?? fetchedDate, fetchedDate)
     }
