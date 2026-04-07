@@ -36,6 +36,9 @@ struct FeedIconService: FeedIconResolving {
     private static let iconCacheDirectoryName = "feed-icons"
     private static let htmlFetchTimeout: TimeInterval = 10
     private static let iconFetchTimeout: TimeInterval = 15
+
+    /// The icon-related meta tags are in the `<head>`, so we only need the first portion of the page.
+    private static let htmlHeadMaxBytes = 51_200 // 50 KB
     private static let maxIconDimension: CGFloat = 128
 
     // MARK: - FeedIconResolving
@@ -63,7 +66,8 @@ struct FeedIconService: FeedIconResolving {
         Self.logger.debug("cacheIcon() from \(remoteURL.absoluteString, privacy: .public) for feed \(feedID.uuidString, privacy: .public)")
 
         do {
-            let request = URLRequest(url: remoteURL, timeoutInterval: Self.iconFetchTimeout)
+            var request = URLRequest(url: remoteURL, timeoutInterval: Self.iconFetchTimeout)
+            request.setBrowserUserAgent()
             let (data, response) = try await URLSession.shared.data(for: request)
 
             guard let httpResponse = response as? HTTPURLResponse,
@@ -142,7 +146,7 @@ struct FeedIconService: FeedIconResolving {
         /// Icon URLs extracted from `<link>` tags, ordered by priority: apple-touch-icon first, then rel="icon".
         let linkIcons: [URL]
         /// The `og:image` URL from `<meta property="og:image">`, if present.
-        /// Expected to be absolute per the Open Graph protocol, so no base-URL resolution is applied.
+        /// Resolved against the page's base URL to handle protocol-relative and relative URLs.
         let ogImageURL: URL?
         /// The host of the final URL after redirects, if it differs from the
         /// requested host (indicates a platform-hosted blog like Medium/Substack).
@@ -200,8 +204,9 @@ struct FeedIconService: FeedIconResolving {
 
     private func resolveFromHTML(siteURL: URL) async -> HTMLIconResult? {
         do {
-            let request = URLRequest(url: siteURL, timeoutInterval: Self.htmlFetchTimeout)
-            let (data, response) = try await URLSession.shared.data(for: request)
+            var request = URLRequest(url: siteURL, timeoutInterval: Self.htmlFetchTimeout)
+            request.setBrowserUserAgent()
+            let (bytes, response) = try await URLSession.shared.bytes(for: request)
 
             guard let httpResponse = response as? HTTPURLResponse,
                   (200...299).contains(httpResponse.statusCode) else {
@@ -213,14 +218,22 @@ struct FeedIconService: FeedIconResolving {
             // Use the final URL (after redirects) as the base for resolving relative hrefs
             let baseURL = httpResponse.url ?? siteURL
 
-            guard let html = String(data: data, encoding: .utf8) else {
+            // Read only the first portion — icon metadata is in <head>, no need for the full body
+            var collected = Data()
+            collected.reserveCapacity(Self.htmlHeadMaxBytes)
+            for try await byte in bytes {
+                collected.append(byte)
+                if collected.count >= Self.htmlHeadMaxBytes { break }
+            }
+
+            guard let html = String(data: collected, encoding: .utf8) else {
                 let contentType = httpResponse.value(forHTTPHeaderField: "Content-Type") ?? "unknown"
-                Self.logger.warning("Failed to decode site HTML as UTF-8 (\(contentType, privacy: .public), \(data.count, privacy: .public) bytes) from \(siteURL.absoluteString, privacy: .public)")
+                Self.logger.warning("Failed to decode site HTML as UTF-8 (\(contentType, privacy: .public), \(collected.count, privacy: .public) bytes) from \(siteURL.absoluteString, privacy: .public)")
                 return nil
             }
 
             let linkIcons = HTMLUtilities.extractIconURLs(from: html, baseURL: baseURL)
-            let ogImageURL = HTMLUtilities.extractOGImageURL(from: html)
+            let ogImageURL = HTMLUtilities.extractOGImageURL(from: html, baseURL: baseURL)
 
             // Detect cross-domain redirects (e.g., bothsidesofthetable.com → medium.com)
             let originalHost = siteURL.host(percentEncoded: false)

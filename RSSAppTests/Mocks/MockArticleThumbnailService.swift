@@ -5,8 +5,8 @@ import Foundation
 // test methods within a single test actor — no concurrent mutation occurs.
 final class MockArticleThumbnailService: ArticleThumbnailCaching, @unchecked Sendable {
 
-    var cacheResult = true
-    var resolveResult = true
+    var cacheResult: ThumbnailCacheResult = .cached
+    var resolveResult: ThumbnailCacheResult = .cached
     var cachedFileURL: URL?
     var cacheCallCount = 0
     var resolveCallCount = 0
@@ -14,13 +14,13 @@ final class MockArticleThumbnailService: ArticleThumbnailCaching, @unchecked Sen
     var cachedArticleIDs: [String] = []
     var deletedArticleIDs: [String] = []
 
-    func cacheThumbnail(from remoteURL: URL, articleID: String) async -> Bool {
+    func cacheThumbnail(from remoteURL: URL, articleID: String) async -> ThumbnailCacheResult {
         cacheCallCount += 1
         cachedArticleIDs.append(articleID)
         return cacheResult
     }
 
-    func resolveAndCacheThumbnail(thumbnailURL: URL?, articleLink: URL?, articleID: String) async -> Bool {
+    func resolveAndCacheThumbnail(thumbnailURL: URL?, articleLink: URL?, articleID: String) async -> ThumbnailCacheResult {
         resolveCallCount += 1
         cachedArticleIDs.append(articleID)
         return resolveResult

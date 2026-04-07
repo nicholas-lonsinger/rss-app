@@ -173,6 +173,34 @@ struct HTMLUtilitiesTests {
         #expect(HTMLUtilities.extractFirstImageURL(from: "") == nil)
     }
 
+    @Test("Skips Medium tracking pixel and returns next real image")
+    func skipsMediumTrackingPixel() {
+        let html = """
+            <img src="https://medium.com/_/stat?event=post.clientViewed&referrerSource=full_rss&postId=abc123">
+            <img src="https://cdn-images.example.com/photo.jpg">
+            """
+        let url = HTMLUtilities.extractFirstImageURL(from: html)
+        #expect(url?.absoluteString == "https://cdn-images.example.com/photo.jpg")
+    }
+
+    @Test("Returns nil when only tracking pixel images present")
+    func returnsNilForOnlyTrackingPixels() {
+        let html = """
+            <img src="https://example.com/pixel?track=1">
+            <img src="https://analytics.example.com/stat?event=view">
+            """
+        #expect(HTMLUtilities.extractFirstImageURL(from: html) == nil)
+    }
+
+    @Test("Does not filter legitimate URLs containing pixel or track as substrings")
+    func doesNotFilterLegitimateURLs() {
+        let html = """
+            <img src="https://example.com/images/pixel-art-gallery.jpg">
+            """
+        let url = HTMLUtilities.extractFirstImageURL(from: html)
+        #expect(url?.absoluteString == "https://example.com/images/pixel-art-gallery.jpg")
+    }
+
     // MARK: - extractOGImageURL
 
     @Test("Extracts og:image URL from meta tag")
@@ -234,5 +262,43 @@ struct HTMLUtilitiesTests {
             """
         let url = HTMLUtilities.extractOGImageURL(from: html)
         #expect(url?.absoluteString == "https://cdn-images.example.com/max/1200/1*abc123.jpeg")
+    }
+
+    @Test("Resolves protocol-relative og:image URL with baseURL")
+    func extractOGImageProtocolRelative() {
+        let html = """
+            <html><head>
+            <meta property="og:image" content="//cdn.example.com/image.jpg">
+            </head></html>
+            """
+        let baseURL = URL(string: "https://example.com/article/1")!
+        let url = HTMLUtilities.extractOGImageURL(from: html, baseURL: baseURL)
+        #expect(url?.absoluteString == "https://cdn.example.com/image.jpg")
+    }
+
+    @Test("Protocol-relative og:image without baseURL returns schemeless URL")
+    func extractOGImageProtocolRelativeNoBase() {
+        let html = """
+            <html><head>
+            <meta property="og:image" content="//cdn.example.com/image.jpg">
+            </head></html>
+            """
+        // Without a baseURL, URL(string:) accepts "//..." as a valid scheme-relative reference,
+        // but the result has no scheme — downstream cacheThumbnail rejects non-HTTP URLs.
+        let url = HTMLUtilities.extractOGImageURL(from: html)
+        #expect(url != nil)
+        #expect(url?.scheme == nil)
+    }
+
+    @Test("Relative og:image URL resolved with baseURL")
+    func extractOGImageRelativeURL() {
+        let html = """
+            <html><head>
+            <meta property="og:image" content="/images/og-banner.png">
+            </head></html>
+            """
+        let baseURL = URL(string: "https://example.com/blog/post")!
+        let url = HTMLUtilities.extractOGImageURL(from: html, baseURL: baseURL)
+        #expect(url?.absoluteString == "https://example.com/images/og-banner.png")
     }
 }

@@ -78,29 +78,59 @@ enum HTMLUtilities {
             .replacingOccurrences(of: ">", with: "&gt;")
     }
 
-    /// Extracts the first `<img src="...">` URL from HTML content.
+    /// Extracts the first `<img src="...">` URL from HTML content,
+    /// skipping known tracking pixels and analytics beacons.
     static func extractFirstImageURL(from html: String) -> URL? {
-        guard let match = html.firstMatch(of: ##/<img[^>]+src=["']([^"']+)["']/##) else {
-            return nil
+        let pattern = ##/<img[^>]+src=["']([^"']+)["']/##
+        for match in html.matches(of: pattern) {
+            let src = String(match.1)
+            if isTrackingPixelURL(src) {
+                logger.debug("Skipping suspected tracking pixel URL: \(src, privacy: .public)")
+                continue
+            }
+            return URL(string: src)
         }
-        return URL(string: String(match.1))
+        return nil
+    }
+
+    /// Returns `true` for URLs that are known tracking pixels or analytics beacons
+    /// rather than actual content images. Matches specific path patterns to avoid
+    /// false positives on legitimate URLs containing words like "pixel" or "track".
+    private static func isTrackingPixelURL(_ urlString: String) -> Bool {
+        // Medium read-tracking pixel
+        if urlString.contains("/stat?event=") { return true }
+        // Tracking pixel endpoints — require query string or file extension delimiter
+        // to avoid false positives on paths like "/pixel-art/" or "/racetrack/"
+        if urlString.contains("/pixel?") || urlString.contains("/pixel.") { return true }
+        if urlString.contains("/track?") || urlString.contains("/track.") { return true }
+        return false
     }
 
     /// Extracts the `og:image` URL from an HTML page's `<meta>` tags.
-    static func extractOGImageURL(from html: String) -> URL? {
+    /// When `baseURL` is provided, protocol-relative URLs (e.g., `//cdn.example.com/img.jpg`)
+    /// are resolved against the base URL's scheme.
+    static func extractOGImageURL(from html: String, baseURL: URL? = nil) -> URL? {
         // Match <meta property="og:image" content="..."> with either attribute order
         let pattern1 = ##/<meta\s[^>]*?property=["']og:image["'][^>]*?content=["']([^"']+)["']/##
             .ignoresCase()
         let pattern2 = ##/<meta\s[^>]*?content=["']([^"']+)["'][^>]*?property=["']og:image["']/##
             .ignoresCase()
 
+        let rawValue: String?
         if let match = html.firstMatch(of: pattern1) {
-            return URL(string: String(match.1))
+            rawValue = String(match.1)
+        } else if let match = html.firstMatch(of: pattern2) {
+            rawValue = String(match.1)
+        } else {
+            rawValue = nil
         }
-        if let match = html.firstMatch(of: pattern2) {
-            return URL(string: String(match.1))
+
+        guard let rawValue else { return nil }
+
+        if let baseURL {
+            return resolveURL(rawValue, base: baseURL)
         }
-        return nil
+        return URL(string: rawValue)
     }
 
     /// Extracts icon URLs from HTML `<link>` tags, ordered by priority:

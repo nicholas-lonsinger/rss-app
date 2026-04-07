@@ -3,18 +3,30 @@ import Foundation
 import os
 import UIKit
 
+// MARK: - Result Type
+
+/// Outcome of a single thumbnail cache attempt, distinguishing permanent from transient failures
+/// so callers can decide whether to retry.
+enum ThumbnailCacheResult: Sendable {
+    /// Thumbnail was successfully downloaded and cached.
+    case cached
+    /// A transient failure occurred (5xx, timeout, network error) — worth retrying.
+    case transientFailure
+    /// A permanent failure occurred (4xx, invalid image data, bad URL scheme) — retrying won't help.
+    case permanentFailure
+}
+
 // MARK: - Protocol
 
 protocol ArticleThumbnailCaching: Sendable {
 
     /// Downloads the image at `remoteURL`, resizes it to thumbnail dimensions,
-    /// and caches it to disk under a hash of the article ID. Returns `true` on success.
-    func cacheThumbnail(from remoteURL: URL, articleID: String) async -> Bool
+    /// and caches it to disk under a hash of the article ID.
+    func cacheThumbnail(from remoteURL: URL, articleID: String) async -> ThumbnailCacheResult
 
     /// Resolves and caches a thumbnail: tries `thumbnailURL` first, then fetches
     /// the article page at `articleLink` to extract `og:image` as a fallback.
-    /// Returns `true` if a thumbnail was cached from either source.
-    func resolveAndCacheThumbnail(thumbnailURL: URL?, articleLink: URL?, articleID: String) async -> Bool
+    func resolveAndCacheThumbnail(thumbnailURL: URL?, articleLink: URL?, articleID: String) async -> ThumbnailCacheResult
 
     /// Returns the local file URL for a cached thumbnail, or `nil` if not cached.
     func cachedThumbnailFileURL(for articleID: String) -> URL?
@@ -36,30 +48,50 @@ struct ArticleThumbnailService: ArticleThumbnailCaching {
 
     // MARK: - ArticleThumbnailCaching
 
-    func cacheThumbnail(from remoteURL: URL, articleID: String) async -> Bool {
+    func cacheThumbnail(from remoteURL: URL, articleID: String) async -> ThumbnailCacheResult {
         Self.logger.debug("cacheThumbnail() from \(remoteURL.absoluteString, privacy: .public) for article \(articleID, privacy: .public)")
 
+        guard remoteURL.scheme == "http" || remoteURL.scheme == "https" else {
+            Self.logger.warning("Rejecting non-HTTP URL scheme '\(remoteURL.scheme ?? "nil", privacy: .public)' for \(remoteURL.absoluteString, privacy: .public)")
+            return .permanentFailure
+        }
+
+        // Reject SVG URLs before downloading — UIImage can't render SVGs
+        if remoteURL.pathExtension.lowercased() == "svg" {
+            Self.logger.debug("Rejecting SVG URL before download: \(remoteURL.absoluteString, privacy: .public)")
+            return .permanentFailure
+        }
+
         do {
-            let request = URLRequest(url: remoteURL, timeoutInterval: Self.fetchTimeout)
+            var request = URLRequest(url: remoteURL, timeoutInterval: Self.fetchTimeout)
+            request.setBrowserUserAgent()
             let (data, response) = try await URLSession.shared.data(for: request)
 
             guard let httpResponse = response as? HTTPURLResponse,
                   (200...299).contains(httpResponse.statusCode) else {
                 let code = (response as? HTTPURLResponse)?.statusCode ?? -1
                 Self.logger.warning("Thumbnail fetch returned HTTP \(code, privacy: .public) for \(remoteURL.absoluteString, privacy: .public)")
-                return false
+                // 429 (rate limited) and 408 (request timeout) are transient despite being 4xx
+                let isPermanent = (400...499).contains(code) && code != 429 && code != 408
+                return isPermanent ? .permanentFailure : .transientFailure
+            }
+
+            // Reject SVG content type — catches extensionless SVG URLs (e.g. deploy buttons)
+            let contentType = httpResponse.value(forHTTPHeaderField: "Content-Type") ?? ""
+            if contentType.hasPrefix("image/svg") {
+                Self.logger.debug("Rejecting SVG content type (\(contentType, privacy: .public), \(data.count, privacy: .public) bytes) from \(remoteURL.absoluteString, privacy: .public)")
+                return .permanentFailure
             }
 
             guard let image = UIImage(data: data) else {
-                let contentType = httpResponse.value(forHTTPHeaderField: "Content-Type") ?? "unknown"
                 Self.logger.warning("Downloaded data is not a valid image (\(contentType, privacy: .public), \(data.count, privacy: .public) bytes) from \(remoteURL.absoluteString, privacy: .public)")
-                return false
+                return .permanentFailure
             }
 
             let thumbnail = cropAndResize(image)
             guard let jpegData = thumbnail.jpegData(compressionQuality: Self.jpegQuality) else {
                 Self.logger.warning("Failed to generate JPEG data from thumbnail")
-                return false
+                return .permanentFailure
             }
 
             let fileURL = thumbnailFileURL(for: articleID)
@@ -67,30 +99,39 @@ struct ArticleThumbnailService: ArticleThumbnailCaching {
             try jpegData.write(to: fileURL, options: .atomic)
 
             Self.logger.debug("Cached thumbnail for article \(articleID, privacy: .public) (\(jpegData.count, privacy: .public) bytes)")
-            return true
+            return .cached
+        } catch let urlError as URLError {
+            Self.logger.warning("Network error caching thumbnail for \(remoteURL.absoluteString, privacy: .public): \(urlError, privacy: .public)")
+            return .transientFailure
         } catch {
+            // Filesystem errors (permissions, disk full) are permanent within this session
             Self.logger.warning("Failed to cache thumbnail for \(remoteURL.absoluteString, privacy: .public): \(error, privacy: .public)")
-            return false
+            return .permanentFailure
         }
     }
 
-    func resolveAndCacheThumbnail(thumbnailURL: URL?, articleLink: URL?, articleID: String) async -> Bool {
+    func resolveAndCacheThumbnail(thumbnailURL: URL?, articleLink: URL?, articleID: String) async -> ThumbnailCacheResult {
         Self.logger.debug("resolveAndCacheThumbnail() thumbnailURL=\(thumbnailURL?.absoluteString ?? "nil", privacy: .public) articleLink=\(articleLink?.absoluteString ?? "nil", privacy: .public) articleID=\(articleID, privacy: .public)")
+
+        var sawTransient = false
 
         // Priority 1: Direct thumbnail URL from feed
         if let thumbnailURL {
-            let cached = await cacheThumbnail(from: thumbnailURL, articleID: articleID)
-            if cached { return true }
+            let result = await cacheThumbnail(from: thumbnailURL, articleID: articleID)
+            if result == .cached { return .cached }
+            if result == .transientFailure { sawTransient = true }
         }
 
         // Priority 2: Fetch article page and extract og:image
         if let articleLink {
             if let ogImageURL = await resolveOGImage(from: articleLink) {
-                return await cacheThumbnail(from: ogImageURL, articleID: articleID)
+                let result = await cacheThumbnail(from: ogImageURL, articleID: articleID)
+                if result == .cached { return .cached }
+                if result == .transientFailure { sawTransient = true }
             }
         }
 
-        return false
+        return sawTransient ? .transientFailure : .permanentFailure
     }
 
     func cachedThumbnailFileURL(for articleID: String) -> URL? {
@@ -151,7 +192,8 @@ struct ArticleThumbnailService: ArticleThumbnailCaching {
         Self.logger.debug("Resolving og:image from \(articleLink.absoluteString, privacy: .public)")
 
         do {
-            let request = URLRequest(url: articleLink, timeoutInterval: Self.htmlFetchTimeout)
+            var request = URLRequest(url: articleLink, timeoutInterval: Self.htmlFetchTimeout)
+            request.setBrowserUserAgent()
             let (bytes, response) = try await URLSession.shared.bytes(for: request)
 
             guard let httpResponse = response as? HTTPURLResponse,
@@ -173,7 +215,7 @@ struct ArticleThumbnailService: ArticleThumbnailCaching {
                 Self.logger.warning("Article page response is not valid UTF-8 from \(articleLink.absoluteString, privacy: .public)")
                 return nil
             }
-            return HTMLUtilities.extractOGImageURL(from: html)
+            return HTMLUtilities.extractOGImageURL(from: html, baseURL: articleLink)
         } catch {
             Self.logger.warning("Failed to fetch article page for og:image: \(error, privacy: .public)")
             return nil

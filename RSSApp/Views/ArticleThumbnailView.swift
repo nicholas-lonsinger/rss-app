@@ -58,12 +58,12 @@ struct ArticleThumbnailView: View {
             return
         }
 
-        let cached = await thumbnailService.resolveAndCacheThumbnail(
+        let result = await thumbnailService.resolveAndCacheThumbnail(
             thumbnailURL: thumbnailURL,
             articleLink: articleLink,
             articleID: articleID
         )
-        guard cached, let fileURL = thumbnailService.cachedThumbnailFileURL(for: articleID) else {
+        guard result == .cached, let fileURL = thumbnailService.cachedThumbnailFileURL(for: articleID) else {
             thumbnailImage = nil
             return
         }
