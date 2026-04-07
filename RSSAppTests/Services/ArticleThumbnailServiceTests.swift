@@ -45,4 +45,103 @@ struct ArticleThumbnailServiceTests {
         service.deleteCachedThumbnail(for: id2)
         // No crash means the hashing works for distinct IDs
     }
+
+    // MARK: - cacheThumbnail Pre-Download Validation
+    //
+    // These tests cover the synchronous validation checks at the top of
+    // `cacheThumbnail(from:articleID:)` that reject URLs before any network
+    // request is made. They run quickly and reliably without needing a
+    // URLProtocol stub, since the early-return paths never touch the network.
+
+    @Test("Rejects data: URL scheme as permanent failure")
+    func cacheThumbnailRejectsDataScheme() async {
+        let dataURL = URL(string: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Z3sQ4kAAAAASUVORK5CYII=")!
+
+        let result = await service.cacheThumbnail(from: dataURL, articleID: "data-scheme-test")
+
+        #expect(result == .permanentFailure)
+        #expect(service.cachedThumbnailFileURL(for: "data-scheme-test") == nil)
+    }
+
+    @Test("Rejects file: URL scheme as permanent failure")
+    func cacheThumbnailRejectsFileScheme() async {
+        let fileURL = URL(string: "file:///tmp/example.png")!
+
+        let result = await service.cacheThumbnail(from: fileURL, articleID: "file-scheme-test")
+
+        #expect(result == .permanentFailure)
+        #expect(service.cachedThumbnailFileURL(for: "file-scheme-test") == nil)
+    }
+
+    @Test("Rejects ftp: URL scheme as permanent failure")
+    func cacheThumbnailRejectsFTPScheme() async {
+        let ftpURL = URL(string: "ftp://example.com/image.png")!
+
+        let result = await service.cacheThumbnail(from: ftpURL, articleID: "ftp-scheme-test")
+
+        #expect(result == .permanentFailure)
+        #expect(service.cachedThumbnailFileURL(for: "ftp-scheme-test") == nil)
+    }
+
+    @Test("Rejects relative URL with nil scheme as permanent failure")
+    func cacheThumbnailRejectsNilScheme() async {
+        // A relative path produces a URL with scheme == nil. The guard
+        // explicitly handles this (the logger uses `scheme ?? "nil"`),
+        // so this test locks in the rejection behavior.
+        let relativeURL = URL(string: "/relative/icon.png")!
+        #expect(relativeURL.scheme == nil)
+
+        let result = await service.cacheThumbnail(from: relativeURL, articleID: "nil-scheme-test")
+
+        #expect(result == .permanentFailure)
+        #expect(service.cachedThumbnailFileURL(for: "nil-scheme-test") == nil)
+    }
+
+    @Test("http scheme passes scheme guard but is rejected by SVG gate")
+    func cacheThumbnailHTTPSchemePassesGuard() async {
+        // Positive control for the scheme guard: http:// is an allowed scheme,
+        // so the URL passes the first check and reaches the SVG extension gate,
+        // which rejects it. This proves the scheme guard accepts http (not just
+        // https) without requiring a network stub — the SVG gate short-circuits
+        // before any URLSession call.
+        let httpSVGURL = URL(string: "http://example.com/icon.svg")!
+
+        let result = await service.cacheThumbnail(from: httpSVGURL, articleID: "http-svg-test")
+
+        #expect(result == .permanentFailure)
+        #expect(service.cachedThumbnailFileURL(for: "http-svg-test") == nil)
+    }
+
+    @Test("Rejects .svg URL extension as permanent failure")
+    func cacheThumbnailRejectsSVGExtension() async {
+        let svgURL = URL(string: "https://example.com/icon.svg")!
+
+        let result = await service.cacheThumbnail(from: svgURL, articleID: "svg-ext-test")
+
+        #expect(result == .permanentFailure)
+        #expect(service.cachedThumbnailFileURL(for: "svg-ext-test") == nil)
+    }
+
+    @Test("Rejects uppercase .SVG URL extension as permanent failure")
+    func cacheThumbnailRejectsUppercaseSVGExtension() async {
+        // The implementation lowercases the path extension before comparing,
+        // so .SVG should be rejected just like .svg.
+        let svgURL = URL(string: "https://example.com/logo.SVG")!
+
+        let result = await service.cacheThumbnail(from: svgURL, articleID: "svg-uppercase-test")
+
+        #expect(result == .permanentFailure)
+        #expect(service.cachedThumbnailFileURL(for: "svg-uppercase-test") == nil)
+    }
+
+    @Test("Rejects .svg URL with query string as permanent failure")
+    func cacheThumbnailRejectsSVGWithQueryString() async {
+        // pathExtension strips the query string, so this should still be detected.
+        let svgURL = URL(string: "https://example.com/badge.svg?style=flat&v=2")!
+
+        let result = await service.cacheThumbnail(from: svgURL, articleID: "svg-query-test")
+
+        #expect(result == .permanentFailure)
+        #expect(service.cachedThumbnailFileURL(for: "svg-query-test") == nil)
+    }
 }
