@@ -958,6 +958,50 @@ struct FeedViewModelTests {
         #expect(viewModel.errorMessage == nil)
     }
 
+    @Test("loadMoreAndReport appends new article at the expected next index")
+    @MainActor
+    func loadMoreAndReportAppendsNewArticleAtExpectedIndex() async {
+        // Verifies that after `loadMoreAndReport()` returns `.loaded`, the freshly appended
+        // article appears at the expected index in `viewModel.articles` (i.e. immediately
+        // after the previous last element). The pagination read-tracking semantics live in
+        // `ArticleReaderView`'s SwiftUI observer chain (`.onChange(of: article.articleID)`)
+        // and are exercised via the manual test plan, not unit tests.
+        let feed = TestFixtures.makePersistentFeed(feedURL: URL(string: "https://example.com/feed")!)
+        let mock = MockFeedFetchingService()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+
+        // Create pageSize + 1 articles so the second page contains exactly one new article.
+        // Descending publishedDate is intentional: the default fetch sort is newest-first,
+        // so the article order produced by the persistence layer matches the index order
+        // asserted below.
+        let totalCount = FeedViewModel.pageSize + 1
+        let articles = (0..<totalCount).map { i in
+            TestFixtures.makeArticle(
+                id: "a\(i)",
+                title: "Article \(i)",
+                publishedDate: Date(timeIntervalSince1970: Double(totalCount - i) * 1_000_000)
+            )
+        }
+        mock.feedToReturn = TestFixtures.makeFeed(articles: articles)
+
+        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence)
+        await viewModel.loadFeed()
+
+        #expect(viewModel.articles.count == FeedViewModel.pageSize)
+        #expect(viewModel.hasMoreArticles == true)
+
+        // The reader increments its currentIndex from pageSize - 1 to pageSize after
+        // loadMore returns .loaded; the new article must occupy that next slot.
+        let indexBeforePagination = viewModel.articles.count - 1
+        let result = viewModel.loadMoreAndReport()
+        #expect(result == .loaded)
+        #expect(viewModel.articles.count == FeedViewModel.pageSize + 1)
+
+        let newIndex = indexBeforePagination + 1
+        #expect(viewModel.articles.indices.contains(newIndex))
+    }
+
     @Test("loadMoreArticles succeeds on retry after transient error")
     @MainActor
     func loadMoreArticlesRetryAfterError() async {

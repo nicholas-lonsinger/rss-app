@@ -140,14 +140,14 @@ struct ArticleReaderView: View {
                         Self.logger.error("Keychain read failed in onAppear: \(error, privacy: .public)")
                     }
                 }
-                .onChange(of: currentIndex) {
-                    // Deferred mark-as-read for the pagination path: after loadMore appends
-                    // new articles to the view model, SwiftUI re-renders this view with the
-                    // updated array, and this handler ensures the newly visible article is
-                    // marked as read. For normal navigation, markCurrentArticleAsRead() is
-                    // also called directly in onArticleChanged(); the isRead guard prevents
-                    // double-work.
-                    markCurrentArticleAsRead()
+                .onChange(of: article.articleID) {
+                    // Observing the displayed article's identity (rather than currentIndex)
+                    // means this fires whenever the visible article changes — whether because
+                    // currentIndex moved within the existing snapshot or because SwiftUI
+                    // re-rendered with a freshly paginated articles array. That covers both
+                    // normal navigation and the pagination boundary without relying on
+                    // SwiftUI's update batching between the two inputs.
+                    onArticleChanged()
                 }
                 .sheet(isPresented: $showAPIKeySettings, onDismiss: {
                     do {
@@ -199,7 +199,8 @@ struct ArticleReaderView: View {
         guard canGoBack else { return }
         Self.logger.debug("Navigating to previous article (index \(self.currentIndex - 1, privacy: .public))")
         currentIndex -= 1
-        onArticleChanged()
+        // onArticleChanged() is invoked via .onChange(of: article.articleID) once the
+        // computed `article` resolves to the new index.
     }
 
     private func navigateToNext() {
@@ -214,15 +215,10 @@ struct ArticleReaderView: View {
             switch loadMore() {
             case .loaded:
                 Self.logger.info("Loaded more articles via pagination, advancing to next (index \(self.currentIndex + 1, privacy: .public))")
-                // RATIONALE: After loadMore appends to the view model's array, the local
-                // `articles` snapshot is stale (value-type copy). We advance currentIndex
-                // so SwiftUI re-renders with the updated array, but skip onArticleChanged()
-                // because `articles[currentIndex + 1]` would be out of bounds in the current
-                // snapshot. The extraction state reset and mark-as-read are deferred to the
-                // onChange(of: currentIndex) handler which runs after the view re-renders
-                // with the fresh array.
-                extractionState = ReaderExtractionState()
-                showSummary = false
+                // Advance currentIndex so SwiftUI re-renders with the view model's updated
+                // articles array. Extraction-state reset and mark-as-read are handled by
+                // .onChange(of: article.articleID), which fires once the computed `article`
+                // resolves to the newly loaded item.
                 currentIndex += 1
             case .exhausted:
                 Self.logger.info("No more articles available at end of list")
@@ -233,11 +229,14 @@ struct ArticleReaderView: View {
         } else {
             Self.logger.debug("Navigating to next article (index \(self.currentIndex + 1, privacy: .public))")
             currentIndex += 1
-            onArticleChanged()
+            // onArticleChanged() is invoked via .onChange(of: article.articleID) once the
+            // computed `article` resolves to the new index.
         }
     }
 
-    /// Resets extraction state, dismisses the summary sheet, and marks the new article as read after navigation.
+    /// Resets extraction state, dismisses the summary sheet, and marks the newly displayed
+    /// article as read. Invoked from `.onChange(of: article.articleID)` so the same handler
+    /// covers normal navigation and the pagination boundary uniformly.
     private func onArticleChanged() {
         extractionState = ReaderExtractionState()
         showSummary = false
