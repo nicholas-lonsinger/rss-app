@@ -719,6 +719,167 @@ struct RSSParsingServiceTests {
         #expect(feed.articles[0].publishedDate == nil)
     }
 
+    // MARK: - Date Parsing (Non-US Named Timezones)
+
+    /// Builds the expected absolute UTC `Date` for the given UTC wall-clock components.
+    /// Used by the named-timezone tests below to assert exact moment equality without
+    /// per-test boilerplate.
+    private static func utcDate(
+        year: Int, month: Int, day: Int, hour: Int, minute: Int, second: Int = 0
+    ) throws -> Date {
+        try #require(
+            Calendar(identifier: .gregorian).date(
+                from: DateComponents(
+                    timeZone: TimeZone(identifier: "UTC"),
+                    year: year, month: month, day: day,
+                    hour: hour, minute: minute, second: second
+                )
+            )
+        )
+    }
+
+    @Test("RSS pubDate with named CET zone parses to correct absolute UTC moment")
+    func rssPubDateNamedCET() throws {
+        // 08:30 CET (UTC+1) = 07:30 UTC. Regression guard for issue #213: previously
+        // returned nil because `DateFormatter`'s `zzz` with `en_US_POSIX` does not
+        // recognize Central European Time.
+        let xml = Self.rssXML(pubDate: "Mon, 06 Apr 2026 08:30:00 CET")
+        let feed = try service.parse(Data(xml.utf8))
+
+        let date = try #require(feed.articles[0].publishedDate)
+        let expected = try Self.utcDate(year: 2026, month: 4, day: 6, hour: 7, minute: 30)
+        #expect(date == expected)
+    }
+
+    @Test("RSS pubDate with named CEST zone parses to correct absolute UTC moment")
+    func rssPubDateNamedCEST() throws {
+        // 08:30 CEST (UTC+2) = 06:30 UTC. CEST is the daylight-saving form of CET.
+        let xml = Self.rssXML(pubDate: "Mon, 06 Apr 2026 08:30:00 CEST")
+        let feed = try service.parse(Data(xml.utf8))
+
+        let date = try #require(feed.articles[0].publishedDate)
+        let expected = try Self.utcDate(year: 2026, month: 4, day: 6, hour: 6, minute: 30)
+        #expect(date == expected)
+    }
+
+    @Test("RSS pubDate with named BST zone parses as British Summer Time")
+    func rssPubDateNamedBST() throws {
+        // 08:30 BST (UTC+1, British Summer Time) = 07:30 UTC. BST is intentionally
+        // resolved to British Summer Time rather than Bangladesh Standard Time; see the
+        // RATIONALE in `RSSParsingService.namedZoneOffsets`.
+        let xml = Self.rssXML(pubDate: "Mon, 06 Apr 2026 08:30:00 BST")
+        let feed = try service.parse(Data(xml.utf8))
+
+        let date = try #require(feed.articles[0].publishedDate)
+        let expected = try Self.utcDate(year: 2026, month: 4, day: 6, hour: 7, minute: 30)
+        #expect(date == expected)
+    }
+
+    @Test("RSS pubDate with named JST zone parses to correct absolute UTC moment")
+    func rssPubDateNamedJST() throws {
+        // 08:30 JST (UTC+9) = 23:30 UTC on the previous day.
+        let xml = Self.rssXML(pubDate: "Mon, 06 Apr 2026 08:30:00 JST")
+        let feed = try service.parse(Data(xml.utf8))
+
+        let date = try #require(feed.articles[0].publishedDate)
+        let expected = try Self.utcDate(year: 2026, month: 4, day: 5, hour: 23, minute: 30)
+        #expect(date == expected)
+    }
+
+    @Test("RSS pubDate with named KST zone parses to correct absolute UTC moment")
+    func rssPubDateNamedKST() throws {
+        // 08:30 KST (UTC+9) = 23:30 UTC on the previous day. KST shares an offset with
+        // JST; this test exists to lock in support for the abbreviation specifically.
+        let xml = Self.rssXML(pubDate: "Mon, 06 Apr 2026 08:30:00 KST")
+        let feed = try service.parse(Data(xml.utf8))
+
+        let date = try #require(feed.articles[0].publishedDate)
+        let expected = try Self.utcDate(year: 2026, month: 4, day: 5, hour: 23, minute: 30)
+        #expect(date == expected)
+    }
+
+    @Test("RSS pubDate with named IST zone parses as India Standard Time")
+    func rssPubDateNamedIST() throws {
+        // 09:30 IST (UTC+5:30) = 04:00 UTC. IST is intentionally resolved to India
+        // Standard Time rather than Irish or Israel time; see the RATIONALE in
+        // `RSSParsingService.namedZoneOffsets`.
+        let xml = Self.rssXML(pubDate: "Mon, 06 Apr 2026 09:30:00 IST")
+        let feed = try service.parse(Data(xml.utf8))
+
+        let date = try #require(feed.articles[0].publishedDate)
+        let expected = try Self.utcDate(year: 2026, month: 4, day: 6, hour: 4, minute: 0)
+        #expect(date == expected)
+    }
+
+    @Test("RSS pubDate with named AEST zone parses to correct absolute UTC moment")
+    func rssPubDateNamedAEST() throws {
+        // 18:30 AEST (UTC+10) = 08:30 UTC.
+        let xml = Self.rssXML(pubDate: "Mon, 06 Apr 2026 18:30:00 AEST")
+        let feed = try service.parse(Data(xml.utf8))
+
+        let date = try #require(feed.articles[0].publishedDate)
+        let expected = try Self.utcDate(year: 2026, month: 4, day: 6, hour: 8, minute: 30)
+        #expect(date == expected)
+    }
+
+    @Test("RSS pubDate with named MSK zone parses to correct absolute UTC moment")
+    func rssPubDateNamedMSK() throws {
+        // 11:30 MSK (UTC+3, Moscow) = 08:30 UTC.
+        let xml = Self.rssXML(pubDate: "Mon, 06 Apr 2026 11:30:00 MSK")
+        let feed = try service.parse(Data(xml.utf8))
+
+        let date = try #require(feed.articles[0].publishedDate)
+        let expected = try Self.utcDate(year: 2026, month: 4, day: 6, hour: 8, minute: 30)
+        #expect(date == expected)
+    }
+
+    @Test("RSS pubDate with named BRT zone parses to correct absolute UTC moment")
+    func rssPubDateNamedBRT() throws {
+        // 05:30 BRT (UTC-3, Brasília) = 08:30 UTC.
+        let xml = Self.rssXML(pubDate: "Mon, 06 Apr 2026 05:30:00 BRT")
+        let feed = try service.parse(Data(xml.utf8))
+
+        let date = try #require(feed.articles[0].publishedDate)
+        let expected = try Self.utcDate(year: 2026, month: 4, day: 6, hour: 8, minute: 30)
+        #expect(date == expected)
+    }
+
+    @Test("RSS pubDate with single-digit day and named non-US zone parses correctly")
+    func rssPubDateSingleDigitDayNamedZone() throws {
+        // The single-digit-day RFC 822 variant must also benefit from the named-zone
+        // substitution, since both the `dd` and `d` formats need to be retried against
+        // the rewritten input.
+        let xml = Self.rssXML(pubDate: "Mon, 6 Apr 2026 08:30:00 CET")
+        let feed = try service.parse(Data(xml.utf8))
+
+        let date = try #require(feed.articles[0].publishedDate)
+        let expected = try Self.utcDate(year: 2026, month: 4, day: 6, hour: 7, minute: 30)
+        #expect(date == expected)
+    }
+
+    @Test("RSS pubDate with lowercase named zone parses correctly")
+    func rssPubDateLowercaseNamedZone() throws {
+        // Some publishers emit timezone abbreviations in lowercase. The substitution
+        // pass uppercases the trailing token before lookup so these still resolve.
+        let xml = Self.rssXML(pubDate: "Mon, 06 Apr 2026 08:30:00 cet")
+        let feed = try service.parse(Data(xml.utf8))
+
+        let date = try #require(feed.articles[0].publishedDate)
+        let expected = try Self.utcDate(year: 2026, month: 4, day: 6, hour: 7, minute: 30)
+        #expect(date == expected)
+    }
+
+    @Test("RSS pubDate with unknown named zone returns nil instead of guessing")
+    func rssPubDateUnknownNamedZoneReturnsNil() throws {
+        // An unrecognized abbreviation must not silently fall through to the zoneless
+        // UTC fallback (which would produce a wrong-by-N-hours date). The parser must
+        // return nil so the article displays without a misleading timestamp.
+        let xml = Self.rssXML(pubDate: "Mon, 06 Apr 2026 08:30:00 XYZ")
+        let feed = try service.parse(Data(xml.utf8))
+
+        #expect(feed.articles[0].publishedDate == nil)
+    }
+
     // MARK: - XHTML Content
 
     @Test("Atom XHTML content is reconstructed as HTML")
