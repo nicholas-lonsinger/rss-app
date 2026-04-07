@@ -108,11 +108,11 @@ struct ArticleListView: View {
                 viewModel.markAllAsRead()
             }
         }
-        .navigationDestination(isPresented: $selectedArticleIndex.isNotNil) {
+        .navigationDestination(item: $selectedArticleIndex) { index in
             ArticleReaderView(
                 persistence: persistence,
                 articles: viewModel.articles,
-                currentIndex: $selectedArticleIndex.nonOptionalIndex,
+                initialIndex: index,
                 loadMore: viewModel.hasMoreArticles ? { viewModel.loadMoreAndReport() } : nil
             )
         }

@@ -84,11 +84,11 @@ struct SavedArticlesView: View {
                 homeViewModel.markAllAsRead()
             }
         }
-        .navigationDestination(isPresented: $selectedArticleIndex.isNotNil) {
+        .navigationDestination(item: $selectedArticleIndex) { index in
             ArticleReaderView(
                 persistence: persistence,
                 articles: homeViewModel.savedArticlesList,
-                currentIndex: $selectedArticleIndex.nonOptionalIndex,
+                initialIndex: index,
                 loadMore: homeViewModel.hasMoreSavedArticles ? { homeViewModel.loadMoreSavedArticlesAndReport() } : nil
             )
         }

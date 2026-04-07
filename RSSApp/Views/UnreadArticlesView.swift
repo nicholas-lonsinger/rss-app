@@ -98,11 +98,11 @@ struct UnreadArticlesView: View {
                 homeViewModel.markAllAsRead()
             }
         }
-        .navigationDestination(isPresented: $selectedArticleIndex.isNotNil) {
+        .navigationDestination(item: $selectedArticleIndex) { index in
             ArticleReaderView(
                 persistence: persistence,
                 articles: homeViewModel.unreadArticlesList,
-                currentIndex: $selectedArticleIndex.nonOptionalIndex,
+                initialIndex: index,
                 loadMore: homeViewModel.hasMoreUnreadArticles ? { homeViewModel.loadMoreUnreadArticlesAndReport() } : nil
             )
         }
