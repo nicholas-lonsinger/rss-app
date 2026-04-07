@@ -32,26 +32,32 @@ struct SettingsView: View {
 
     var body: some View {
         List {
-            Toggle(isOn: $badgeEnabled) {
-                Label("App Badge", systemImage: "app.badge")
-            }
-            .onChange(of: badgeEnabled) { _, newValue in
-                guard !isRevertingToggle else { return }
-                badgeService.badgeEnabled = newValue
-                Task {
-                    if newValue {
-                        let shouldKeepOn = await homeViewModel.handleBadgeToggleEnabled()
-                        if !shouldKeepOn {
-                            isRevertingToggle = true
-                            badgeEnabled = false
-                            badgeService.badgeEnabled = false
-                            isRevertingToggle = false
-                            showPermissionDeniedAlert = true
+            Section {
+                Toggle(isOn: $badgeEnabled) {
+                    Label("App Badge", systemImage: "app.badge")
+                }
+                .onChange(of: badgeEnabled) { _, newValue in
+                    guard !isRevertingToggle else { return }
+                    badgeService.badgeEnabled = newValue
+                    Task {
+                        if newValue {
+                            let shouldKeepOn = await homeViewModel.handleBadgeToggleEnabled()
+                            if !shouldKeepOn {
+                                isRevertingToggle = true
+                                badgeEnabled = false
+                                badgeService.badgeEnabled = false
+                                isRevertingToggle = false
+                                showPermissionDeniedAlert = true
+                            }
+                        } else {
+                            await badgeService.clearBadge()
                         }
-                    } else {
-                        await badgeService.clearBadge()
                     }
                 }
+            } header: {
+                Text("Notifications")
+            } footer: {
+                Text("Displays the unread article count on the app icon.")
             }
 
             Section {
