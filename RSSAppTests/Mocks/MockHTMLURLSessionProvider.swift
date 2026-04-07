@@ -75,7 +75,7 @@ final class MockHTMLURLProtocol: URLProtocol {
     // RATIONALE: nonisolated(unsafe) is acceptable here because all access goes
     // through the synchronized `storeQueue` dispatch queue below.
     nonisolated(unsafe) private static var requestStore: [String: RequestData] = [:]
-    nonisolated(unsafe) private static let storeQueue = DispatchQueue(label: "MockHTMLURLProtocol.storeQueue")
+    private static let storeQueue = DispatchQueue(label: "MockHTMLURLProtocol.storeQueue")
 
     static func store(requestID: String, payload: Data, statusCode: Int, useNonHTTPResponse: Bool = false) {
         storeQueue.sync {
