@@ -69,9 +69,10 @@ struct AppBadgeService: AppBadgeUpdating {
 
     var badgeEnabled: Bool {
         get {
-            // Default to true (badge on) when key has never been set.
+            // Default to false (badge off) when key has never been set, so first
+            // launch does not trigger a notification-permission prompt.
             if UserDefaults.standard.object(forKey: Self.badgeEnabledDefaultsKey) == nil {
-                return true
+                return false
             }
             return UserDefaults.standard.bool(forKey: Self.badgeEnabledDefaultsKey)
         }
