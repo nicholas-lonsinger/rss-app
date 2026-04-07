@@ -47,7 +47,7 @@ RSSApp/
 │   ├── KeychainService.swift           # Keychain wrapper for secure API key storage
 │   ├── MetadataExtractor.swift         # Extracts article title/byline from meta tags and DOM elements
 │   ├── ModelConfigurationValidator.swift # ModelValidation + MaxTokensValidation enums — input validation for model ID and max tokens
-│   ├── NetworkMonitorService.swift      # NetworkMonitoring protocol + NWPathMonitor implementation — detects WiFi vs cellular/constrained for background download gating
+│   ├── NetworkMonitorService.swift      # NetworkMonitoring protocol + NWPathMonitor implementation — detects WiFi vs cellular/constrained for background download gating; accepts an injectable `wifiOnlyProvider` closure (defaults to `BackgroundImageDownloadSettings.wifiOnly`) so tests can control the preference independently of `UserDefaults`
 │   ├── OPMLService.swift               # OPMLServing protocol + XMLParser-based OPML parser + XML generator
 │   ├── RSSParsingService.swift         # XMLParser-based RSS 2.0 + Atom parser with XHTML content reconstruction
 │   ├── SiteSpecificExtracting.swift    # Protocol for per-hostname content extractors
@@ -139,7 +139,8 @@ RSSAppTests/
 │   ├── BackgroundImageDownloadSettingsTests.swift # WiFi-only default, set/get roundtrip, UserDefaults persistence
 │   ├── MetadataExtractorTests.swift    # Title/byline extraction from meta tags and DOM
 │   ├── ModelConfigurationValidationTests.swift # ModelValidation and MaxTokensValidation input validation
-│   ├── NetworkMonitorServiceTests.swift # Mock conformance and default behavior
+│   ├── MockNetworkMonitorServiceTests.swift # Mock conformance and default behavior
+│   ├── NetworkMonitorServiceTests.swift # Real NetworkMonitorService: injected wifiOnlyProvider invoked on each check, nil-path branch honors wifiOnly, default initializer reads from BackgroundImageDownloadSettings
 │   ├── RSSParsingServiceTests.swift    # Channel parsing, thumbnails, IDs, edge cases
 │   └── ThumbnailPrefetchServiceTests.swift # Bulk prefetch, skip cached/maxed, retry count, permanent failure skip, mixed results, error handling
 ├── ViewModels/
