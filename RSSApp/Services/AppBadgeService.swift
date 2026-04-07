@@ -94,11 +94,12 @@ struct AppBadgeService: AppBadgeUpdating {
 
         Self.logger.debug("updateBadge(unreadCount: \(unreadCount, privacy: .public), badgeEnabled: \(badgeEnabled, privacy: .public))")
 
-        if badgeEnabled {
-            await setBadgeCount(unreadCount)
-        } else {
-            await clearBadge()
+        guard badgeEnabled else {
+            Self.logger.debug("Badge disabled — skipping update")
+            return
         }
+
+        await setBadgeCount(unreadCount)
     }
 
     func clearBadge() async {
