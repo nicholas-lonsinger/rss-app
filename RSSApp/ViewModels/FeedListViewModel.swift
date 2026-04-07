@@ -22,6 +22,7 @@ final class FeedListViewModel {
     private let thumbnailPrefetcher: ThumbnailPrefetching
     private let articleRetention: ArticleRetaining
     private let thumbnailService: ArticleThumbnailCaching
+    private let networkMonitor: NetworkMonitoring
     private var thumbnailPrefetchTask: Task<Void, Never>?
 
     init(
@@ -33,7 +34,8 @@ final class FeedListViewModel {
         // expression, so nil-coalescing is used to construct the default inside the body.
         thumbnailPrefetcher: ThumbnailPrefetching? = nil,
         articleRetention: ArticleRetaining = ArticleRetentionService(),
-        thumbnailService: ArticleThumbnailCaching = ArticleThumbnailService()
+        thumbnailService: ArticleThumbnailCaching = ArticleThumbnailService(),
+        networkMonitor: NetworkMonitoring? = nil
     ) {
         self.persistence = persistence
         self.opmlService = opmlService
@@ -42,6 +44,7 @@ final class FeedListViewModel {
         self.thumbnailPrefetcher = thumbnailPrefetcher ?? ThumbnailPrefetchService(persistence: persistence)
         self.articleRetention = articleRetention
         self.thumbnailService = thumbnailService
+        self.networkMonitor = networkMonitor ?? NetworkMonitorService()
     }
 
     func loadFeeds() {
@@ -305,12 +308,14 @@ final class FeedListViewModel {
                         failureCount += 1
                         Self.logger.error("Failed to clear error state for '\(feed.title, privacy: .public)': \(error, privacy: .public) — feed will appear to have an error on next launch despite successful 304 response")
                     }
-                    Task {
-                        await self.resolveAndCacheIconIfNeeded(
-                            for: feed,
-                            siteURL: Self.siteURL(from: feed.feedURL),
-                            feedImageURL: feed.iconURL
-                        )
+                    if networkMonitor.isBackgroundDownloadAllowed() {
+                        Task {
+                            await self.resolveAndCacheIconIfNeeded(
+                                for: feed,
+                                siteURL: Self.siteURL(from: feed.feedURL),
+                                feedImageURL: feed.iconURL
+                            )
+                        }
                     }
                     continue
                 }
@@ -361,12 +366,14 @@ final class FeedListViewModel {
                     }
                 }
 
-                Task {
-                    await self.resolveAndCacheIconIfNeeded(
-                        for: feed,
-                        siteURL: fetchResult.feed.link,
-                        feedImageURL: fetchResult.feed.imageURL
-                    )
+                if networkMonitor.isBackgroundDownloadAllowed() {
+                    Task {
+                        await self.resolveAndCacheIconIfNeeded(
+                            for: feed,
+                            siteURL: fetchResult.feed.link,
+                            feedImageURL: fetchResult.feed.imageURL
+                        )
+                    }
                 }
             case .failure(let fetchError):
                 failureCount += 1
@@ -413,8 +420,12 @@ final class FeedListViewModel {
 
         // Cancel any in-flight prefetch from a previous refresh cycle before starting a new one
         thumbnailPrefetchTask?.cancel()
-        thumbnailPrefetchTask = Task(priority: .utility) {
-            await self.thumbnailPrefetcher.prefetchThumbnails()
+        if networkMonitor.isBackgroundDownloadAllowed() {
+            thumbnailPrefetchTask = Task(priority: .utility) {
+                await self.thumbnailPrefetcher.prefetchThumbnails()
+            }
+        } else {
+            Self.logger.info("Skipping thumbnail prefetch — background downloads not allowed on current network")
         }
     }
 

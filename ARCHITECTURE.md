@@ -2,7 +2,7 @@
 
 ## Overview
 
-RSS App is an iOS application for reading and managing RSS feeds. It is built as a pure SwiftUI app using the `@main` App lifecycle, targeting iOS 26 (iPhone only) with Swift 6 strict concurrency. There are no external package dependencies — the app uses only Apple system frameworks (`Foundation`, `SwiftData`, `WebKit`, `SafariServices`, `Security`).
+RSS App is an iOS application for reading and managing RSS feeds. It is built as a pure SwiftUI app using the `@main` App lifecycle, targeting iOS 26 (iPhone only) with Swift 6 strict concurrency. There are no external package dependencies — the app uses only Apple system frameworks (`Foundation`, `SwiftData`, `WebKit`, `SafariServices`, `Security`, `Network`).
 
 ## Directory Structure
 
@@ -28,6 +28,7 @@ RSSApp/
 │   └── SubscribedFeed.swift            # Legacy feed subscription struct (Codable) — retained for UserDefaults migration and OPML export
 ├── Services/                           # Business logic and networking
 │   ├── AppBadgeService.swift            # BadgePermissionStatus enum + AppBadgeUpdating protocol + Bool-gated badge update (enabled shows unread count, disabled clears) via UNUserNotificationCenter with badge-only permission request; checkPermission() for non-side-effect authorization status check; includes one-time migration from legacy 3-mode key
+│   ├── BackgroundImageDownloadSettings.swift # Static enum + UserDefaults persistence for WiFi-only background image download toggle (default: WiFi only)
 │   ├── ArticleExtractionService.swift  # WKWebView + domSerializer.js + native content extraction
 │   ├── ArticleRetentionService.swift   # ArticleRetaining protocol + ArticleLimit enum + retention enforcement (oldest-first cleanup with thumbnail deletion)
 │   ├── CandidateScorer.swift           # Readability-style DOM scoring to find article content node
@@ -47,6 +48,7 @@ RSSApp/
 │   ├── KeychainService.swift           # Keychain wrapper for secure API key storage
 │   ├── MetadataExtractor.swift         # Extracts article title/byline from meta tags and DOM elements
 │   ├── ModelConfigurationValidator.swift # ModelValidation + MaxTokensValidation enums — input validation for model ID and max tokens
+│   ├── NetworkMonitorService.swift      # NetworkMonitoring protocol + NWPathMonitor implementation — detects WiFi vs cellular/constrained for background download gating
 │   ├── OPMLService.swift               # OPMLServing protocol + XMLParser-based OPML parser + XML generator
 │   ├── RSSParsingService.swift         # XMLParser-based RSS 2.0 + Atom parser with XHTML content reconstruction
 │   ├── SiteSpecificExtracting.swift    # Protocol for per-hostname content extractors
@@ -79,7 +81,7 @@ RSSApp/
 │   ├── HomeView.swift                  # Home screen — NavigationStack root with All Articles, Unread Articles, Saved Articles, All Feeds rows
 │   ├── FeedRowView.swift               # Single feed row — icon, title, description, unread count badge
 │   ├── SavedArticlesView.swift          # Paginated list of saved/bookmarked articles across all feeds, sorted by saved date
-│   ├── SettingsView.swift              # Top-level settings page with inline badge toggle (reverts and shows permission-denied alert when notifications are disabled) and NavigationLink rows pushing API Key, Article Limit, and Import/Export sub-screens
+│   ├── SettingsView.swift              # Top-level settings page with inline badge toggle (reverts and shows permission-denied alert when notifications are disabled), Network section with WiFi-only image download toggle, and NavigationLink rows pushing API Key, Article Limit, and Import/Export sub-screens
 │   └── UnreadArticlesView.swift        # Filtered list of unread articles across all feeds
 └── Resources/
     ├── domSerializer.js                # Bundled DOM serializer — walks DOM tree, emits JSON for Swift extraction
@@ -106,6 +108,7 @@ RSSAppTests/
 │   ├── MockFeedFetchingService.swift       # FeedFetching mock with injectable results/errors
 │   ├── MockFeedIconService.swift          # FeedIconResolving mock with injectable URL/cache results
 │   ├── MockFeedPersistenceService.swift    # FeedPersisting mock with in-memory store
+│   ├── MockNetworkMonitorService.swift     # NetworkMonitoring mock with injectable allowed flag
 │   ├── MockFeedStorageService.swift        # FeedStoring mock with in-memory store (for migration tests)
 │   ├── MockKeychainService.swift           # KeychainServicing mock with in-memory store
 │   ├── MockOPMLService.swift               # OPMLServing mock with injectable entries/data/errors
@@ -136,8 +139,10 @@ RSSAppTests/
 │   ├── UserDefaultsMigrationTests.swift # Migration from UserDefaults to SwiftData, idempotency, ID preservation
 │   ├── KeychainServiceTests.swift      # Save/load/delete/overwrite roundtrips
 │   ├── OPMLServiceTests.swift          # Parse flat/nested/empty OPML, generate + round-trip, XML escaping
+│   ├── BackgroundImageDownloadSettingsTests.swift # WiFi-only default, set/get roundtrip, UserDefaults persistence
 │   ├── MetadataExtractorTests.swift    # Title/byline extraction from meta tags and DOM
 │   ├── ModelConfigurationValidationTests.swift # ModelValidation and MaxTokensValidation input validation
+│   ├── NetworkMonitorServiceTests.swift # Mock conformance and default behavior
 │   ├── RSSParsingServiceTests.swift    # Channel parsing, thumbnails, IDs, edge cases
 │   └── ThumbnailPrefetchServiceTests.swift # Bulk prefetch, skip cached/maxed, retry count, permanent failure skip, mixed results, error handling
 ├── ViewModels/
@@ -145,6 +150,7 @@ RSSAppTests/
 │   ├── EditFeedViewModelTests.swift        # URL editing, validation, duplicate detection, success/failure
 │   ├── ArticleReaderViewModelTests.swift   # ArticleSummaryViewModel pre-extraction state tests
 │   ├── DiscussionViewModelTests.swift      # Message flow, streaming, no-key behavior
+│   ├── FeedListViewModelNetworkTests.swift  # Network gating: prefetch/icon resolution allowed/skipped based on NetworkMonitoring, 304 path, refresh continues regardless
 │   ├── FeedListViewModelTests.swift        # Load, remove by object, remove by IndexSet
 │   ├── FeedViewModelTests.swift            # Load success/failure, state transitions, sort order, read filter, mark all as read
 │   ├── HomeViewModelBadgeTests.swift        # Badge integration: loadUnreadCount triggers badge update, zero/error paths, mark-read/toggle/mark-all-as-read cascade badge updates
@@ -152,7 +158,7 @@ RSSAppTests/
 │   └── HomeViewModelTests.swift            # Unread count, saved count, cross-feed article queries, read/unread status, saved status, sort order, mark all as read
 ```
 
-**Total: 69 source files + 1 resource, 55 test source files + 1 fixture.**
+**Total: 71 source files + 1 resource, 59 test source files + 1 fixture.**
 
 ## Key Components
 
@@ -176,6 +182,8 @@ The directory tree annotations describe each file's purpose. This section covers
 
 **Article thumbnail resolution and prefetch.** `ArticleThumbnailService` (`ArticleThumbnailCaching` protocol) resolves via: direct thumbnail URL from the feed → `og:image` meta tag from the article's web page (via `HTMLUtilities.extractOGImageURL`). Resizes to 120×120px (aspect-fill + center-crop), caches as JPEG to `{cachesDirectory}/article-thumbnails/{SHA256(articleID)}.jpg`. `ThumbnailPrefetchService` (`ThumbnailPrefetching` protocol) eagerly downloads thumbnails during feed refresh: queries `PersistentArticle` records where `isThumbnailCached == false && thumbnailRetryCount < maxRetryCount`, downloads up to 4 thumbnails concurrently, retries transient failures within a cycle with exponential backoff, and increments `thumbnailRetryCount` on failure so broken URLs stop retrying after the cap (3 attempts). Kicked off by `FeedListViewModel.refreshAllFeeds()` as a background `Task(priority: .utility)` after feed save. `ArticleThumbnailView` reads from disk cache first; on-demand resolution is retained as fallback for articles predating the prefetch feature or whose prefetch is still in progress.
 
+**Background image download gating.** `NetworkMonitorService` (`NetworkMonitoring` protocol) wraps `NWPathMonitor` to detect the current network type. `BackgroundImageDownloadSettings` persists a WiFi-only toggle (default: on) in UserDefaults. `FeedListViewModel` checks `NetworkMonitoring.isBackgroundDownloadAllowed()` before dispatching thumbnail prefetch and feed icon resolution during `refreshAllFeeds()`. When the network is not allowed (cellular or constrained WiFi in WiFi-only mode), both operations are silently skipped — no queuing or retry; they run on the next refresh that occurs on an unrestricted WiFi connection. On-demand image loading in `ArticleThumbnailView` and `FeedIconView` is never gated. `SettingsView` exposes the toggle in a "Network" section.
+
 **Article retention cleanup.** `ArticleRetentionService` (`ArticleRetaining` protocol) enforces a configurable article limit. The `ArticleLimit` enum defines seven options (1,000 to 25,000, default 10,000), persisted in UserDefaults under `articleRetentionLimit`. `enforceArticleLimit(persistence:thumbnailService:)` counts all articles, fetches the oldest exceeding the limit sorted by `publishedDate` ascending, bulk-deletes the `PersistentArticle` records (cascade-deleting `PersistentArticleContent`) first, then deletes their cached thumbnail JPEG files via `ArticleThumbnailCaching.deleteCachedThumbnail(for:)`. DB-first ordering ensures articles still in the DB always have their thumbnail files intact on partial failure. Triggered by `FeedListViewModel.refreshAllFeeds()` after refresh results are committed and before thumbnail prefetch. The Settings page exposes an `ArticleLimitView` sub-screen for user configuration.
 
 ## Data Flow
@@ -197,7 +205,7 @@ RSSAppApp (@main)
                               └── ArticleDiscussionView (DiscussionViewModel + ClaudeAPIService + KeychainService)
 ```
 
-**Observation pattern:** SwiftUI views observe `@Observable @MainActor` view models. View models delegate to protocol-abstracted services (`FeedPersisting`, `FeedFetching`, `FeedIconResolving`, `ArticleThumbnailCaching`, `ThumbnailPrefetching`, `OPMLServing`, `ClaudeAPIServicing`, `KeychainServicing`, `ArticleExtracting`, `ContentExtracting`, `AppBadgeUpdating`), enabling mock injection for testing.
+**Observation pattern:** SwiftUI views observe `@Observable @MainActor` view models. View models delegate to protocol-abstracted services (`FeedPersisting`, `FeedFetching`, `FeedIconResolving`, `ArticleThumbnailCaching`, `ThumbnailPrefetching`, `OPMLServing`, `ClaudeAPIServicing`, `KeychainServicing`, `ArticleExtracting`, `ContentExtracting`, `AppBadgeUpdating`, `NetworkMonitoring`), enabling mock injection for testing.
 
 ## Design Decisions
 
@@ -248,13 +256,17 @@ RSSAppApp (@main)
 | Pagination-on-demand at list boundary | When navigating past the last loaded article, the reader's `loadMore` closure triggers the list's pagination. The closure returns `LoadMoreResult` — `.loaded` advances, `.exhausted` stays put, `.failed(String)` surfaces an error alert. The closure is captured as nil at presentation time when the view model reports no more data (`hasMore*` flag), so the next button disables at the true end of the list. After `loadMore` succeeds, `onArticleChanged()` is deferred via `onChange(of: currentIndex)` because the local `articles` snapshot is stale until SwiftUI re-renders with the view model's updated array |
 | ReaderExtractionState reset on navigation | Each article navigation creates a fresh `ReaderExtractionState` and forces a web view reload via `.id(article.articleID)`, preventing stale extracted content from leaking between articles |
 | App icon badge via `UNUserNotificationCenter.setBadgeCount` | Requests badge-only notification permission (no alerts/sounds); on/off toggle persisted in UserDefaults (defaults to enabled); when enabled, shows total unread count; when disabled, clears badge; updated as fire-and-forget `Task` from `HomeViewModel.loadUnreadCount()` at natural sync points (refresh, mark-read, app foreground); `checkPermission()` enables UI to detect denied state without side effects; `SettingsView` reverts the toggle and shows a permission-denied alert directing to Settings.app when notifications are denied; includes one-time migration from legacy 3-mode key |
+| WiFi-only default for background image downloads | Reduces cellular data usage out of the box; users who want background downloads on cellular can opt in via Settings |
+| Background download gating at call site, not in services | `ThumbnailPrefetchService` and `FeedIconService` remain network-agnostic; `FeedListViewModel` checks network before dispatching, keeping services reusable and testable |
+| `NWPathMonitor` with `@unchecked Sendable` class | Monitor delivers path updates on a private dispatch queue; `NSLock` guards the stored path for thread-safe reads from any isolation domain |
+| `isConstrained` check in addition to interface type | Respects Low Data Mode on WiFi connections, which users enable to reduce data usage even on WiFi |
 | Concrete `AppBadgeService` in `SettingsView` | Existential `any AppBadgeUpdating` property setters require mutable access, incompatible with SwiftUI's immutable view structs; protocol abstraction is used in `HomeViewModel` for testing |
 
 ## Test Coverage
 
-**56 test files: 38 test suites, 14 mock implementations, 4 shared helpers, 1 HTML fixture.**
+**60 test files: 41 test suites, 15 mock implementations, 4 shared helpers, 1 HTML fixture.**
 
-**Patterns:** Swift Testing (`@Suite`, `@Test`, `#expect`). Protocol-based dependency injection with 14 mocks (`MockFeedPersistenceService`, `MockFeedFetchingService`, `MockFeedIconService`, `MockArticleThumbnailService`, `MockThumbnailPrefetchService`, `MockOPMLService`, `MockClaudeAPIService`, `MockKeychainService`, `MockArticleExtractionService`, `MockContentExtractor`, `MockFeedStorageService`, `MockURLSessionBytesProvider`, `MockArticleRetentionService`, `MockAppBadgeService`). In-memory `ModelContainer` via `SwiftDataTestHelpers` for SwiftData integration tests. `WKWebView` integration tests via `WebViewTestHelpers` for DOM serialization and extraction pipeline. `MockURLSessionBytesProvider` with `URLProtocol` interception for `ClaudeAPIService.sendMessage` integration tests. Shared `TestFixtures` factory methods for `Article`, `RSSFeed`, `PersistentFeed`, `PersistentArticle`, and sample RSS XML.
+**Patterns:** Swift Testing (`@Suite`, `@Test`, `#expect`). Protocol-based dependency injection with 15 mocks (`MockFeedPersistenceService`, `MockFeedFetchingService`, `MockFeedIconService`, `MockArticleThumbnailService`, `MockThumbnailPrefetchService`, `MockOPMLService`, `MockClaudeAPIService`, `MockKeychainService`, `MockArticleExtractionService`, `MockContentExtractor`, `MockFeedStorageService`, `MockURLSessionBytesProvider`, `MockArticleRetentionService`, `MockAppBadgeService`, `MockNetworkMonitorService`). In-memory `ModelContainer` via `SwiftDataTestHelpers` for SwiftData integration tests. `WKWebView` integration tests via `WebViewTestHelpers` for DOM serialization and extraction pipeline. `MockURLSessionBytesProvider` with `URLProtocol` interception for `ClaudeAPIService.sendMessage` integration tests. Shared `TestFixtures` factory methods for `Article`, `RSSFeed`, `PersistentFeed`, `PersistentArticle`, and sample RSS XML.
 
 **Well-covered:** All models, services, and view models have test suites with mock injection — including happy paths, error paths, edge cases, and state transitions.
 
