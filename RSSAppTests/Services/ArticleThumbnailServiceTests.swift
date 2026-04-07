@@ -432,4 +432,21 @@ struct ArticleThumbnailServiceTests {
         // HTMLUtilities.extractOGImageURL resolves relative URLs using the baseURL.
         #expect(result == .found(URL(string: "https://example.com/images/hero.jpg")!))
     }
+
+    @Test("resolveOGImage maps non-HTTPURLResponse to .fetchFailed via -1 sentinel")
+    func resolveOGImageNonHTTPResponseReturnsFetchFailed() async throws {
+        // Issue #229 explicitly called out the non-HTTPURLResponse → .fetchFailed
+        // path as a required integration scenario. The service guards on
+        // `(response as? HTTPURLResponse)` and falls back to the -1 sentinel
+        // when the cast fails; -1 is treated as transient by `isPermanentHTTPFailure`,
+        // so the overall outcome must be `.fetchFailed` (worth retrying).
+        let mockSession = MockHTMLURLSessionProvider()
+        mockSession.useNonHTTPResponse = true
+        let service = ArticleThumbnailService(session: mockSession)
+        let articleLink = URL(string: "https://example.com/article-non-http")!
+
+        let result = try await service.resolveOGImage(from: articleLink)
+
+        #expect(result == .fetchFailed)
+    }
 }

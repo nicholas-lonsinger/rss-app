@@ -21,13 +21,20 @@ final class MockHTMLURLSessionProvider: URLSessionBytesProviding, @unchecked Sen
     /// HTTP status code for the mock response (default 200).
     var statusCode: Int = 200
 
+    /// When `true`, the protocol delivers a plain `URLResponse` instead of an
+    /// `HTTPURLResponse`. This drives the `(response as? HTTPURLResponse)` cast
+    /// failure branch in `resolveOGImage`, where the response can't be classified
+    /// and falls back to the `-1` sentinel for `isPermanentHTTPFailure`.
+    var useNonHTTPResponse: Bool = false
+
     func bytes(for request: URLRequest, delegate: (any URLSessionTaskDelegate)? = nil) async throws -> (URLSession.AsyncBytes, URLResponse) {
         let requestID = UUID().uuidString
 
         MockHTMLURLProtocol.store(
             requestID: requestID,
             payload: Data(htmlBody.utf8),
-            statusCode: statusCode
+            statusCode: statusCode,
+            useNonHTTPResponse: useNonHTTPResponse
         )
 
         var mutableRequest = request
@@ -54,6 +61,7 @@ final class MockHTMLURLProtocol: URLProtocol {
     private struct RequestData {
         let payload: Data
         let statusCode: Int
+        let useNonHTTPResponse: Bool
     }
 
     // RATIONALE: nonisolated(unsafe) is acceptable here because all access goes
@@ -61,9 +69,13 @@ final class MockHTMLURLProtocol: URLProtocol {
     nonisolated(unsafe) private static var requestStore: [String: RequestData] = [:]
     nonisolated(unsafe) private static let storeQueue = DispatchQueue(label: "MockHTMLURLProtocol.storeQueue")
 
-    static func store(requestID: String, payload: Data, statusCode: Int) {
+    static func store(requestID: String, payload: Data, statusCode: Int, useNonHTTPResponse: Bool = false) {
         storeQueue.sync {
-            requestStore[requestID] = RequestData(payload: payload, statusCode: statusCode)
+            requestStore[requestID] = RequestData(
+                payload: payload,
+                statusCode: statusCode,
+                useNonHTTPResponse: useNonHTTPResponse
+            )
         }
     }
 
@@ -97,15 +109,29 @@ final class MockHTMLURLProtocol: URLProtocol {
             client?.urlProtocol(self, didFailWithError: URLError(.badURL))
             return
         }
-        guard let response = HTTPURLResponse(
-            url: url,
-            statusCode: data.statusCode,
-            httpVersion: "HTTP/1.1",
-            headerFields: ["Content-Type": "text/html; charset=utf-8"]
-        ) else {
-            assertionFailure("MockHTMLURLProtocol: failed to create HTTPURLResponse")
-            client?.urlProtocol(self, didFailWithError: URLError(.unknown))
-            return
+        let response: URLResponse
+        if data.useNonHTTPResponse {
+            // Deliver a plain URLResponse so the `(response as? HTTPURLResponse)`
+            // cast in `resolveOGImage` fails and the service falls back to the
+            // -1 sentinel branch of `isPermanentHTTPFailure`.
+            response = URLResponse(
+                url: url,
+                mimeType: "text/html",
+                expectedContentLength: data.payload.count,
+                textEncodingName: "utf-8"
+            )
+        } else {
+            guard let httpResponse = HTTPURLResponse(
+                url: url,
+                statusCode: data.statusCode,
+                httpVersion: "HTTP/1.1",
+                headerFields: ["Content-Type": "text/html; charset=utf-8"]
+            ) else {
+                assertionFailure("MockHTMLURLProtocol: failed to create HTTPURLResponse")
+                client?.urlProtocol(self, didFailWithError: URLError(.unknown))
+                return
+            }
+            response = httpResponse
         }
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: data.payload)

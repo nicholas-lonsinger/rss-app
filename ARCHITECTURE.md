@@ -122,7 +122,7 @@ RSSAppTests/
 │   └── SubscribedFeedTests.swift       # updatingMetadata preserves identity, does not mutate
 ├── Services/
 │   ├── ArticleRetentionServiceTests.swift # ArticleLimit enum validation, retention enforcement, thumbnail cleanup, cross-feed global cleanup, error propagation
-│   ├── ArticleThumbnailServiceTests.swift # Thumbnail cache miss, delete safety, filename hashing, scheme/SVG rejection, cancellation propagation, isPermanentHTTPFailure boundary classification, resolveOGImage HTTP classification (404/403/410/400 → notFound; 408/429/5xx → fetchFailed; 200 + og:image → found)
+│   ├── ArticleThumbnailServiceTests.swift # Thumbnail cache miss, delete safety, filename hashing, scheme/SVG rejection, cancellation propagation, isPermanentHTTPFailure boundary classification, resolveOGImage HTTP classification (404/403/410/400 → notFound; 408/429/5xx → fetchFailed; non-HTTPURLResponse → fetchFailed; 200 + og:image → found)
 │   ├── CandidateScorerTests.swift      # Content node identification, scoring, pruning
 │   ├── ClaudeAPIServiceSendMessageTests.swift # sendMessage integration — consecutive decode failure counter, stream completion, SSE routing
 │   ├── ClaudeAPIServiceTests.swift     # Request encoding, SSE parsing, error handling
