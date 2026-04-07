@@ -81,6 +81,8 @@ struct AppBadgeServiceTests {
         let service = AppBadgeService()
         // New key takes precedence — legacy key is not migrated
         #expect(service.badgeEnabled == false)
+        // Legacy key must be left untouched when the new key already exists.
+        #expect(UserDefaults.standard.string(forKey: Self.legacyBadgeModeKey) == "on")
     }
 
     @Test("Migrates legacy 'unread' badge mode to enabled")
@@ -204,8 +206,8 @@ struct AppBadgeServiceTests {
         #expect(UserDefaults.standard.string(forKey: Self.legacyBadgeModeKey) == nil)
     }
 
-    @Test("Rapid back-to-back instantiation migrates exactly once")
-    func rapidInstantiationMigratesOnce() {
+    @Test("Rapid back-to-back instantiation converges to migrated state")
+    func rapidInstantiationConvergesToMigratedState() {
         UserDefaults.standard.set("unread", forKey: Self.legacyBadgeModeKey)
 
         // Creating many services in rapid succession on the main actor must
