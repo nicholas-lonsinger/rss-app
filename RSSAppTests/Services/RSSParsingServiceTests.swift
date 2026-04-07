@@ -415,6 +415,262 @@ struct RSSParsingServiceTests {
         #expect(feed.articles[1].author == "Bob")
     }
 
+    // MARK: - Date Parsing (Absolute Moment)
+
+    /// Builds a minimal RSS feed with a single item and a configurable pubDate string.
+    /// Used to exercise `parseDate` through the public `parse()` entry point.
+    private static func rssXML(pubDate: String) -> String {
+        """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <rss version="2.0">
+        <channel>
+            <title>Date Test Feed</title>
+            <link>https://example.com</link>
+            <description>Feed</description>
+            <item>
+                <title>Item</title>
+                <link>https://example.com/item</link>
+                <guid>item-1</guid>
+                <pubDate>\(pubDate)</pubDate>
+            </item>
+        </channel>
+        </rss>
+        """
+    }
+
+    /// Builds a minimal Atom feed with a single entry and a configurable published date.
+    private static func atomXML(published: String) -> String {
+        """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <feed xmlns="http://www.w3.org/2005/Atom">
+            <title>Date Test Atom Feed</title>
+            <link rel="alternate" href="https://example.com" />
+            <id>https://example.com/atom</id>
+            <updated>2026-04-06T00:00:00Z</updated>
+            <entry>
+                <title>Entry</title>
+                <link rel="alternate" href="https://example.com/entry" />
+                <id>entry-1</id>
+                <published>\(published)</published>
+                <summary>Body</summary>
+            </entry>
+        </feed>
+        """
+    }
+
+    /// Returns `(year, month, day, hour, minute, second)` for a `Date` in UTC, for
+    /// assertions that verify the absolute moment independent of the runner's timezone.
+    private static func utcComponents(_ date: Date) -> (Int, Int, Int, Int, Int, Int) {
+        let calendar = Calendar(identifier: .gregorian)
+        let components = calendar.dateComponents(in: TimeZone(identifier: "UTC")!, from: date)
+        return (
+            components.year ?? 0,
+            components.month ?? 0,
+            components.day ?? 0,
+            components.hour ?? 0,
+            components.minute ?? 0,
+            components.second ?? 0
+        )
+    }
+
+    @Test("RSS pubDate with numeric zone parses to correct absolute UTC moment")
+    func rssPubDateNumericZone() throws {
+        // 08:30 at -0700 = 15:30 UTC
+        let xml = Self.rssXML(pubDate: "Mon, 06 Apr 2026 08:30:00 -0700")
+        let feed = try service.parse(Data(xml.utf8))
+
+        let date = try #require(feed.articles[0].publishedDate)
+        let (y, m, d, hr, min, sec) = Self.utcComponents(date)
+        #expect(y == 2026)
+        #expect(m == 4)
+        #expect(d == 6)
+        #expect(hr == 15)
+        #expect(min == 30)
+        #expect(sec == 0)
+    }
+
+    @Test("RSS pubDate with colon-separated numeric zone parses to correct absolute UTC moment")
+    func rssPubDateColonNumericZone() throws {
+        // RFC 3339-style offset with colon ("-07:00") — not accepted by DateFormatter's Z
+        // specifier but accepted by the RFC 822 Z specifier because DateFormatter is lenient
+        // enough to match. This guards against regressions where the colon form is dropped.
+        let xml = Self.rssXML(pubDate: "Mon, 06 Apr 2026 08:30:00 -07:00")
+        let feed = try service.parse(Data(xml.utf8))
+
+        let date = try #require(feed.articles[0].publishedDate)
+        let (_, _, _, hr, min, _) = Self.utcComponents(date)
+        #expect(hr == 15)
+        #expect(min == 30)
+    }
+
+    @Test("RSS pubDate with named PDT zone parses to correct absolute UTC moment")
+    func rssPubDateNamedPDT() throws {
+        // 08:30 PDT = 15:30 UTC (daylight saving, UTC-7)
+        let xml = Self.rssXML(pubDate: "Mon, 06 Apr 2026 08:30:00 PDT")
+        let feed = try service.parse(Data(xml.utf8))
+
+        let date = try #require(feed.articles[0].publishedDate)
+        let (_, _, _, hr, min, _) = Self.utcComponents(date)
+        #expect(hr == 15)
+        #expect(min == 30)
+    }
+
+    @Test("RSS pubDate with named GMT zone parses to correct absolute UTC moment")
+    func rssPubDateNamedGMT() throws {
+        let xml = Self.rssXML(pubDate: "Mon, 06 Apr 2026 08:30:00 GMT")
+        let feed = try service.parse(Data(xml.utf8))
+
+        let date = try #require(feed.articles[0].publishedDate)
+        let (_, _, _, hr, min, _) = Self.utcComponents(date)
+        #expect(hr == 8)
+        #expect(min == 30)
+    }
+
+    @Test("RSS pubDate without seconds parses correctly")
+    func rssPubDateNoSeconds() throws {
+        let xml = Self.rssXML(pubDate: "Mon, 06 Apr 2026 08:30 +0000")
+        let feed = try service.parse(Data(xml.utf8))
+
+        let date = try #require(feed.articles[0].publishedDate)
+        let (_, _, _, hr, min, sec) = Self.utcComponents(date)
+        #expect(hr == 8)
+        #expect(min == 30)
+        #expect(sec == 0)
+    }
+
+    @Test("RSS pubDate without weekday parses correctly")
+    func rssPubDateNoWeekday() throws {
+        let xml = Self.rssXML(pubDate: "6 Apr 2026 08:30:00 +0000")
+        let feed = try service.parse(Data(xml.utf8))
+
+        let date = try #require(feed.articles[0].publishedDate)
+        let (y, m, d, hr, _, _) = Self.utcComponents(date)
+        #expect(y == 2026)
+        #expect(m == 4)
+        #expect(d == 6)
+        #expect(hr == 8)
+    }
+
+    @Test("Atom published date with colon-separated zone parses to correct absolute UTC moment")
+    func atomPublishedColonZone() throws {
+        // This is the format called out in the original parser comment; ensure it still works.
+        let xml = Self.atomXML(published: "2026-04-06T08:30:00-07:00")
+        let feed = try service.parse(Data(xml.utf8))
+
+        let date = try #require(feed.articles[0].publishedDate)
+        let (_, _, _, hr, min, _) = Self.utcComponents(date)
+        #expect(hr == 15)
+        #expect(min == 30)
+    }
+
+    @Test("Atom published date with fractional seconds and numeric zone parses correctly")
+    func atomPublishedFractionalSeconds() throws {
+        let xml = Self.atomXML(published: "2026-04-06T08:30:00.123-07:00")
+        let feed = try service.parse(Data(xml.utf8))
+
+        let date = try #require(feed.articles[0].publishedDate)
+        let (_, _, _, hr, min, _) = Self.utcComponents(date)
+        #expect(hr == 15)
+        #expect(min == 30)
+    }
+
+    @Test("Atom published date with 'Z' literal zone parses as UTC")
+    func atomPublishedZuluZone() throws {
+        let xml = Self.atomXML(published: "2026-04-06T08:30:00Z")
+        let feed = try service.parse(Data(xml.utf8))
+
+        let date = try #require(feed.articles[0].publishedDate)
+        let (_, _, _, hr, min, _) = Self.utcComponents(date)
+        #expect(hr == 8)
+        #expect(min == 30)
+    }
+
+    @Test("ISO 8601 with space separator and zone parses to correct absolute moment")
+    func isoSpaceSeparatorZoned() throws {
+        // Some SQL-flavored feeds emit "2026-04-06 08:30:00+0000" instead of the 'T' form.
+        let xml = Self.rssXML(pubDate: "2026-04-06 08:30:00+0000")
+        let feed = try service.parse(Data(xml.utf8))
+
+        let date = try #require(feed.articles[0].publishedDate)
+        let (y, m, d, hr, min, _) = Self.utcComponents(date)
+        #expect(y == 2026)
+        #expect(m == 4)
+        #expect(d == 6)
+        #expect(hr == 8)
+        #expect(min == 30)
+    }
+
+    @Test("Zone-less RFC 822 date is interpreted as UTC (documented fallback)")
+    func zonelessRFC822FallsBackToUTC() throws {
+        // Previously this input produced `nil`, hiding the article's timestamp from the UI.
+        // The fallback interprets zone-less dates as UTC and logs a warning. See issue #208.
+        let xml = Self.rssXML(pubDate: "Mon, 06 Apr 2026 08:30:00")
+        let feed = try service.parse(Data(xml.utf8))
+
+        let date = try #require(feed.articles[0].publishedDate)
+        let (y, m, d, hr, min, _) = Self.utcComponents(date)
+        #expect(y == 2026)
+        #expect(m == 4)
+        #expect(d == 6)
+        #expect(hr == 8)
+        #expect(min == 30)
+    }
+
+    @Test("Zone-less ISO 8601 date is interpreted as UTC (documented fallback)")
+    func zonelessISO8601FallsBackToUTC() throws {
+        let xml = Self.atomXML(published: "2026-04-06T08:30:00")
+        let feed = try service.parse(Data(xml.utf8))
+
+        let date = try #require(feed.articles[0].publishedDate)
+        let (_, _, _, hr, min, _) = Self.utcComponents(date)
+        #expect(hr == 8)
+        #expect(min == 30)
+    }
+
+    @Test("Zone-less date-only form is interpreted as midnight UTC")
+    func zonelessDateOnlyFallsBackToUTC() throws {
+        let xml = Self.rssXML(pubDate: "2026-04-06")
+        let feed = try service.parse(Data(xml.utf8))
+
+        let date = try #require(feed.articles[0].publishedDate)
+        let (y, m, d, hr, min, sec) = Self.utcComponents(date)
+        #expect(y == 2026)
+        #expect(m == 4)
+        #expect(d == 6)
+        #expect(hr == 0)
+        #expect(min == 0)
+        #expect(sec == 0)
+    }
+
+    @Test("Unparseable date string produces nil publishedDate")
+    func unparseableDateProducesNil() throws {
+        let xml = Self.rssXML(pubDate: "not a date at all")
+        let feed = try service.parse(Data(xml.utf8))
+
+        #expect(feed.articles[0].publishedDate == nil)
+    }
+
+    @Test("Zoned input produces the same absolute moment regardless of device timezone")
+    func zonedInputIsAbsoluteMoment() throws {
+        // Regression guard: the absolute `Date` for a zoned input must match the expected
+        // UTC moment exactly, so the cross-feed "Text(date, style: .relative)" display is
+        // correct no matter where the user is located. See issue #208.
+        let xml = Self.rssXML(pubDate: "Mon, 06 Apr 2026 08:30:00 -0700")
+        let feed = try service.parse(Data(xml.utf8))
+
+        let date = try #require(feed.articles[0].publishedDate)
+        // 08:30 at -0700 corresponds to exactly 15:30:00 UTC.
+        let expected = try #require(
+            Calendar(identifier: .gregorian).date(
+                from: DateComponents(
+                    timeZone: TimeZone(identifier: "UTC"),
+                    year: 2026, month: 4, day: 6, hour: 15, minute: 30, second: 0
+                )
+            )
+        )
+        #expect(date == expected)
+    }
+
     // MARK: - XHTML Content
 
     @Test("Atom XHTML content is reconstructed as HTML")

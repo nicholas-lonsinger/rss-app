@@ -501,36 +501,105 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
 
     // MARK: - Date Parsing
 
+    /// Parses a feed date string into an absolute `Date`, prioritizing formats with
+    /// explicit timezone information to avoid ambiguity.
+    ///
+    /// Parsing strategy, in order:
+    /// 1. `ISO8601DateFormatter` with `.withInternetDateTime` and/or `.withFractionalSeconds`
+    ///    — covers RFC 3339 / Atom formats. This runs first because it's the most constrained
+    ///    parser in the chain and rejects obviously wrong inputs fastest.
+    /// 2. A list of explicit `DateFormatter` patterns covering RFC 822 / RFC 2822 variants
+    ///    and their common real-world deviations (named zones, missing seconds, single-digit
+    ///    day, space separator instead of `T`, etc.) — all of which include an explicit zone.
+    /// 3. Zone-less fallback: the same patterns without a trailing zone specifier, interpreted
+    ///    as UTC with a `.warning` log. This produces *some* valid `Date` for feeds that emit
+    ///    ambiguous timestamps rather than silently discarding them. The alternative —
+    ///    returning `nil` — hides the feed's age entirely in the UI.
+    ///
+    /// See [issue #208](https://github.com/nicholas-lonsinger/rss-app/issues/208) for the
+    /// motivating bug report on incorrect article timestamps.
     private static func parseDate(_ dateString: String) -> Date? {
         let trimmed = dateString.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
 
+        // 1. ISO 8601 / RFC 3339 — most modern feeds use this. Handles `...Z`,
+        //    `...+0000`, `...-07:00`, and fractional-second variants.
+        if let date = ISO8601Formatters.standard.date(from: trimmed) {
+            return date
+        }
+        if let date = ISO8601Formatters.fractional.date(from: trimmed) {
+            return date
+        }
+
+        // 2. Explicit-zone DateFormatter patterns (RFC 822 / RFC 2822 and common variants).
+        //    Every format here must end in a zone specifier; zone-less formats are handled
+        //    in the fallback block below with clearly documented UTC assumption and logging.
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
 
-        let formats = [
-            "EEE, dd MMM yyyy HH:mm:ss Z",
-            "EEE, dd MMM yyyy HH:mm:ss zzz",
-            "dd MMM yyyy HH:mm:ss Z",
-            "yyyy-MM-dd'T'HH:mm:ssZ",
-            "yyyy-MM-dd'T'HH:mm:ss.SSSZ",
-        ]
-
-        for format in formats {
+        for format in Self.zonedDateFormats {
             formatter.dateFormat = format
             if let date = formatter.date(from: trimmed) {
                 return date
             }
         }
 
-        // Fallback: DateFormatter's Z specifier matches -0400 (RFC 822) but not the
-        // colon-separated -04:00 form required by RFC 3339/Atom. ISO8601DateFormatter
-        // with .withInternetDateTime handles the colon form (e.g., "2026-04-01T15:06:21-04:00").
-        if let date = ISO8601Formatters.standard.date(from: trimmed) {
-            return date
+        // 3. Zone-less fallback. The input doesn't match any explicit-zone format; the
+        //    publisher almost certainly omitted zone information. Interpreting as UTC is
+        //    a documented fallback — not a silent guess. We log a warning so these feeds
+        //    are visible in diagnostic output.
+        formatter.timeZone = TimeZone(identifier: "UTC")
+        for format in Self.zonelessDateFormats {
+            formatter.dateFormat = format
+            if let date = formatter.date(from: trimmed) {
+                Self.logger.warning(
+                    "Feed date '\(trimmed, privacy: .public)' had no timezone; interpreted as UTC (format '\(format, privacy: .public)')"
+                )
+                return date
+            }
         }
-        return ISO8601Formatters.fractional.date(from: trimmed)
+
+        Self.logger.warning(
+            "Feed date '\(trimmed, privacy: .public)' did not match any known format; returning nil"
+        )
+        return nil
     }
+
+    /// Date formats that include an explicit timezone specifier. Ordered from most-common
+    /// to least-common to minimize average parse cost.
+    private static let zonedDateFormats: [String] = [
+        // RFC 822 / RFC 2822 with numeric offset (most common in RSS)
+        "EEE, dd MMM yyyy HH:mm:ss Z",
+        // RFC 822 with named timezone (e.g., "GMT", "EST", "PDT")
+        "EEE, dd MMM yyyy HH:mm:ss zzz",
+        // Without weekday (seen in the wild)
+        "dd MMM yyyy HH:mm:ss Z",
+        "dd MMM yyyy HH:mm:ss zzz",
+        // Without seconds (RFC 822 permits this but it's rare)
+        "EEE, dd MMM yyyy HH:mm Z",
+        "EEE, dd MMM yyyy HH:mm zzz",
+        // ISO 8601 with 'T' separator and numeric zone. Catch-all for ISO 8601-ish feeds
+        // whose exact spacing or fractional-seconds shape trips up ISO8601DateFormatter.
+        "yyyy-MM-dd'T'HH:mm:ssZ",
+        "yyyy-MM-dd'T'HH:mm:ss.SSSZ",
+        // ISO 8601 with space separator instead of 'T' (common in SQL-flavored feeds)
+        "yyyy-MM-dd HH:mm:ssZ",
+        "yyyy-MM-dd HH:mm:ss Z",
+        "yyyy-MM-dd HH:mm:ss zzz",
+    ]
+
+    /// Date formats *without* a timezone specifier. These are attempted last, with the
+    /// formatter's `timeZone` forced to UTC. A warning is logged whenever one of these
+    /// matches because the resulting `Date` is necessarily an educated guess.
+    private static let zonelessDateFormats: [String] = [
+        "EEE, dd MMM yyyy HH:mm:ss",
+        "EEE, dd MMM yyyy HH:mm",
+        "dd MMM yyyy HH:mm:ss",
+        "yyyy-MM-dd'T'HH:mm:ss.SSS",
+        "yyyy-MM-dd'T'HH:mm:ss",
+        "yyyy-MM-dd HH:mm:ss",
+        "yyyy-MM-dd",
+    ]
 
     // RATIONALE: nonisolated(unsafe) is safe because these formatters are initialized
     // once via static let and never mutated after initialization — only date(from:) is called.
