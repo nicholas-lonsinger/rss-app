@@ -958,20 +958,23 @@ struct FeedViewModelTests {
         #expect(viewModel.errorMessage == nil)
     }
 
-    @Test("loadMoreAndReport appends new article that can subsequently be marked as read (pagination read-tracking)")
+    @Test("loadMoreAndReport appends new article at the expected next index")
     @MainActor
-    func loadMoreAndReportFeedsReaderMarkAsRead() async {
-        // Regression for the pagination boundary read-tracking bug: when the reader calls
-        // loadMore at the end of the current page, the newly-appended article must be present
-        // in the view model's articles array so the reader's `.onChange(of: article.articleID)`
-        // → markCurrentArticleAsRead() flow can find and mark it. This test exercises the
-        // view-model side of that contract without routing through SwiftUI.
+    func loadMoreAndReportAppendsNewArticleAtExpectedIndex() async {
+        // Verifies that after `loadMoreAndReport()` returns `.loaded`, the freshly appended
+        // article appears at the expected index in `viewModel.articles` (i.e. immediately
+        // after the previous last element). The pagination read-tracking semantics live in
+        // `ArticleReaderView`'s SwiftUI observer chain (`.onChange(of: article.articleID)`)
+        // and are exercised via the manual test plan, not unit tests.
         let feed = TestFixtures.makePersistentFeed(feedURL: URL(string: "https://example.com/feed")!)
         let mock = MockFeedFetchingService()
         let mockPersistence = MockFeedPersistenceService()
         mockPersistence.feeds = [feed]
 
         // Create pageSize + 1 articles so the second page contains exactly one new article.
+        // Descending publishedDate is intentional: the default fetch sort is newest-first,
+        // so the article order produced by the persistence layer matches the index order
+        // asserted below.
         let totalCount = FeedViewModel.pageSize + 1
         let articles = (0..<totalCount).map { i in
             TestFixtures.makeArticle(
@@ -988,21 +991,15 @@ struct FeedViewModelTests {
         #expect(viewModel.articles.count == FeedViewModel.pageSize)
         #expect(viewModel.hasMoreArticles == true)
 
-        // Simulate the reader being positioned on the last loaded article and then advancing
-        // past it. The reader increments its currentIndex from pageSize - 1 to pageSize after
-        // loadMore returns .loaded.
+        // The reader increments its currentIndex from pageSize - 1 to pageSize after
+        // loadMore returns .loaded; the new article must occupy that next slot.
         let indexBeforePagination = viewModel.articles.count - 1
         let result = viewModel.loadMoreAndReport()
         #expect(result == .loaded)
+        #expect(viewModel.articles.count == FeedViewModel.pageSize + 1)
 
         let newIndex = indexBeforePagination + 1
         #expect(viewModel.articles.indices.contains(newIndex))
-        let newlyVisibleArticle = viewModel.articles[newIndex]
-        #expect(newlyVisibleArticle.isRead == false)
-
-        // Simulate ArticleReaderView.markCurrentArticleAsRead() calling through to persistence.
-        try? mockPersistence.markArticleRead(newlyVisibleArticle, isRead: true)
-        #expect(newlyVisibleArticle.isRead == true)
     }
 
     @Test("loadMoreArticles succeeds on retry after transient error")
