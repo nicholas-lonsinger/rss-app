@@ -864,14 +864,16 @@ struct EmptyFeedEscalationTests {
 
     @Test("parse() logs .notice (not .error) when fallback produces non-empty articles")
     func unknownEncodingFallbackWithArticlesDoesNotEscalate() throws {
-        // When the fallback path is taken but the parse still yields articles,
-        // the outcome is acceptable and should NOT be escalated. Verify by
-        // confirming the feed parses successfully with articles present.
-        // (The `.notice` log goes to `os.Logger` directly and is not
-        // observable via DiagnosticRecorder; the absence of a throw is the
-        // best proxy we have.)
+        // Install a sink so we can directly observe that no .error events for
+        // "RSSParsingService" are emitted. The escalation branch only fires when
+        // isFallback && articles.isEmpty; a feed with articles must not trigger it.
+        let sink = RecordingDiagnosticSink()
+        DiagnosticRecorder.install(sink)
+        defer { DiagnosticRecorder.uninstall() }
+
+        let uniqueEncName = "x-noescape-301"
         let xml = """
-        <?xml version="1.0" encoding="x-noescape-273"?>
+        <?xml version="1.0" encoding="\(uniqueEncName)"?>
         <rss version="2.0">
           <channel>
             <title>Fallback With Articles</title>
@@ -885,6 +887,13 @@ struct EmptyFeedEscalationTests {
         let feed = try service.parse(Data(xml.utf8))
         #expect(feed.articles.count == 1,
                 "Fallback feed with one <item> should produce exactly one article")
+
+        // Direct negative control: parse() must not dual-emit a .error for
+        // "RSSParsingService" when the fallback produces non-empty articles.
+        let escalationErrors = sink.events(atLevel: .error)
+            .filter { $0.category == "RSSParsingService" }
+        #expect(escalationErrors.isEmpty,
+                "parse() must not escalate to .error when fallback yields articles; got: \(escalationErrors.map(\.message))")
     }
 
     @Test("parse() does not escalate when UTF-8 feed has zero articles")
