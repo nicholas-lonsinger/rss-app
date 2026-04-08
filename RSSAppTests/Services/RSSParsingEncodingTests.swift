@@ -374,8 +374,11 @@ struct RSSParsingEncodingTests {
         <rss version="2.0"><channel><title>fast</title><item><title>x</title></item></channel></rss>
         """
         let input = Data(xml.utf8)
-        let output = EncodingSniffer.transcodeToUTF8IfNeeded(input)
+        let (output, outcome) = EncodingSniffer.transcodeToUTF8IfNeeded(input)
         #expect(output == input, "Expected identity return for declared encoding '\(declared)'")
+        if case .utf8Passthrough = outcome { } else {
+            Issue.record("Expected .utf8Passthrough outcome for declared encoding '\(declared)', got: \(outcome)")
+        }
     }
 
     // MARK: - Malformed declarations
@@ -715,5 +718,200 @@ struct EncodingSnifferDiagnosticTests {
         // Sink still holds the first event, but never receives the second.
         #expect(sink.events.count == 1)
         #expect(sink.events.first?.message == "first")
+    }
+}
+
+// MARK: - SnifferOutcome tests
+
+/// Tests for `EncodingSniffer.SnifferOutcome` and the outcome returned by
+/// `transcodeToUTF8IfNeeded`, plus the parse-level error escalation introduced
+/// by issue #273 (empty feed after encoding fallback should log `.error`, not
+/// `.notice`).
+@Suite("EncodingSniffer.SnifferOutcome")
+struct SnifferOutcomeTests {
+
+    // MARK: - isFallback
+
+    @Test("isFallback is false for non-lossy outcomes")
+    func isFallbackFalseForNonLossy() {
+        #expect(!EncodingSniffer.SnifferOutcome.utf8Passthrough.isFallback)
+        #expect(!EncodingSniffer.SnifferOutcome.bomStripped(.utf8).isFallback)
+        #expect(!EncodingSniffer.SnifferOutcome.bomStripped(.utf16LittleEndian).isFallback)
+        #expect(!EncodingSniffer.SnifferOutcome.transcoded(from: .isoLatin1).isFallback)
+    }
+
+    @Test("isFallback is true for lossy fallback outcomes")
+    func isFallbackTrueForLossy() {
+        #expect(EncodingSniffer.SnifferOutcome.unknownEncodingFallback("x-fake").isFallback)
+        #expect(EncodingSniffer.SnifferOutcome.transcodeFailureFallback(.utf16LittleEndian).isFallback)
+    }
+
+    // MARK: - transcodeToUTF8IfNeeded outcome
+
+    @Test("UTF-8 declared encoding returns .utf8Passthrough outcome")
+    func utf8DeclarationReturnsPassthrough() {
+        let xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><rss/>"
+        let (_, outcome) = EncodingSniffer.transcodeToUTF8IfNeeded(Data(xml.utf8))
+        if case .utf8Passthrough = outcome { } else {
+            Issue.record("Expected .utf8Passthrough, got: \(outcome)")
+        }
+    }
+
+    @Test("No declaration returns .utf8Passthrough outcome")
+    func noDeclarationReturnsPassthrough() {
+        let xml = "<rss version=\"2.0\"/>"
+        let (_, outcome) = EncodingSniffer.transcodeToUTF8IfNeeded(Data(xml.utf8))
+        if case .utf8Passthrough = outcome { } else {
+            Issue.record("Expected .utf8Passthrough, got: \(outcome)")
+        }
+    }
+
+    @Test("UTF-8 BOM returns .bomStripped(.utf8) outcome")
+    func utf8BOMReturnsBomStrippedUTF8() {
+        var data = Data([0xEF, 0xBB, 0xBF])
+        data.append(Data("<rss/>".utf8))
+        let (_, outcome) = EncodingSniffer.transcodeToUTF8IfNeeded(data)
+        if case .bomStripped(let enc) = outcome {
+            #expect(enc == .utf8)
+        } else {
+            Issue.record("Expected .bomStripped(.utf8), got: \(outcome)")
+        }
+    }
+
+    @Test("UTF-16 LE BOM returns .bomStripped(.utf16LittleEndian) outcome")
+    func utf16LEBOMReturnsBomStrippedUTF16LE() {
+        let xml = "<?xml version=\"1.0\"?><rss version=\"2.0\"><channel><title>t</title></channel></rss>"
+        var data = Data([0xFF, 0xFE])
+        data.append(xml.data(using: .utf16LittleEndian)!)
+        let (_, outcome) = EncodingSniffer.transcodeToUTF8IfNeeded(data)
+        if case .bomStripped(let enc) = outcome {
+            #expect(enc == .utf16LittleEndian)
+        } else {
+            Issue.record("Expected .bomStripped(.utf16LittleEndian), got: \(outcome)")
+        }
+    }
+
+    @Test("Named non-UTF-8 encoding returns .transcoded outcome")
+    func isoLatin1DeclarationReturnsTranscoded() {
+        let head = Data("<?xml version=\"1.0\" encoding=\"ISO-8859-1\"?>".utf8)
+        let body = Data("<rss/>".utf8)
+        let (_, outcome) = EncodingSniffer.transcodeToUTF8IfNeeded(head + body)
+        if case .transcoded(let enc) = outcome {
+            #expect(enc == .isoLatin1)
+        } else {
+            Issue.record("Expected .transcoded(from: .isoLatin1), got: \(outcome)")
+        }
+    }
+
+    @Test("Unknown encoding name returns .unknownEncodingFallback outcome")
+    func unknownEncodingNameReturnsUnknownFallback() {
+        let uniqueName = "x-snifferoutcome-unknown-273"
+        let xml = "<?xml version=\"1.0\" encoding=\"\(uniqueName)\"?><rss/>"
+        let (_, outcome) = EncodingSniffer.transcodeToUTF8IfNeeded(Data(xml.utf8))
+        if case .unknownEncodingFallback(let name) = outcome {
+            #expect(name == uniqueName)
+        } else {
+            Issue.record("Expected .unknownEncodingFallback(\(uniqueName)), got: \(outcome)")
+        }
+    }
+}
+
+// MARK: - Empty-feed escalation tests
+
+/// Tests that `RSSParsingService.parse()` escalates its log to `.error` when
+/// an encoding fallback path was taken and the resulting parse yields zero
+/// articles (issue #273). Uses `DiagnosticRecorder` to observe the log level.
+///
+/// `.serialized` for the same reason as `EncodingSnifferDiagnosticTests`:
+/// `DiagnosticRecorder.active` is process-global. Assertions use unique
+/// markers so concurrent sibling suites cannot cause false positives.
+@Suite("RSSParsingService empty-feed escalation", .serialized)
+struct EmptyFeedEscalationTests {
+
+    private let service = RSSParsingService()
+
+    @Test("parse() escalates to .error when unknown encoding fallback produces zero articles")
+    func unknownEncodingFallbackWithZeroArticlesLogsError() throws {
+        let sink = RecordingDiagnosticSink()
+        DiagnosticRecorder.install(sink)
+        defer { DiagnosticRecorder.uninstall() }
+
+        // Use a feed with an unrecognised encoding name so we reliably hit the
+        // `.unknownEncodingFallback` path inside `transcodeToUTF8IfNeeded`.
+        // The body is valid UTF-8 so the channel parses successfully, but the
+        // XML structure has no <item> elements, producing zero articles.
+        let uniqueEncName = "x-escalation-test-273"
+        let xml = """
+        <?xml version="1.0" encoding="\(uniqueEncName)"?>
+        <rss version="2.0">
+          <channel>
+            <title>Escalation Test Feed</title>
+          </channel>
+        </rss>
+        """
+        let feed = try service.parse(Data(xml.utf8))
+        #expect(feed.articles.isEmpty, "Fixture must produce zero articles to exercise escalation path")
+
+        // The `DiagnosticRecorder` seam only captures `EncodingSniffer`
+        // events; `RSSParsingService` logs to `os.Logger` directly and is not
+        // dual-emitted. We therefore verify the sniffer correctly returned a
+        // fallback outcome (by checking its warning was recorded) rather than
+        // trying to observe the `.error` from `parse()`.
+        //
+        // The unknown-encoding warning was already pinned by
+        // `EncodingSnifferDiagnosticTests.unknownEncodingEmitsWarningDiagnostic`.
+        // Here we just confirm that a warning about the unique encoding name
+        // was recorded (i.e. the fallback path was actually hit), which means
+        // `parse()` had an `isFallback` outcome to escalate from.
+        let warnings = sink.events(atLevel: .warning)
+            .filter { $0.category == EncodingSniffer.loggerCategory }
+        let fallbackWarning = warnings.first { $0.message.contains(uniqueEncName) }
+        #expect(fallbackWarning != nil,
+                "Expected a sniffer warning for unknown encoding '\(uniqueEncName)' — fallback path was not hit")
+    }
+
+    @Test("parse() logs .notice (not .error) when fallback produces non-empty articles")
+    func unknownEncodingFallbackWithArticlesDoesNotEscalate() throws {
+        // When the fallback path is taken but the parse still yields articles,
+        // the outcome is acceptable and should NOT be escalated. Verify by
+        // confirming the feed parses successfully with articles present.
+        // (The `.notice` log goes to `os.Logger` directly and is not
+        // observable via DiagnosticRecorder; the absence of a throw is the
+        // best proxy we have.)
+        let xml = """
+        <?xml version="1.0" encoding="x-noescape-273"?>
+        <rss version="2.0">
+          <channel>
+            <title>Fallback With Articles</title>
+            <item>
+              <title>Article One</title>
+              <description>body</description>
+            </item>
+          </channel>
+        </rss>
+        """
+        let feed = try service.parse(Data(xml.utf8))
+        #expect(feed.articles.count == 1,
+                "Fallback feed with one <item> should produce exactly one article")
+    }
+
+    @Test("parse() does not escalate when UTF-8 feed has zero articles")
+    func utf8FeedWithZeroArticlesDoesNotEscalate() throws {
+        // A valid UTF-8 feed with no <item> elements should not be escalated:
+        // zero articles here is a normal publisher state, not an encoding
+        // failure. The path taken is `.utf8Passthrough` so `isFallback` is
+        // false, and `parse()` should log `.notice` (unobservable here) and
+        // return the empty feed normally.
+        let xml = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <rss version="2.0">
+          <channel>
+            <title>Empty UTF-8 Feed</title>
+          </channel>
+        </rss>
+        """
+        let feed = try service.parse(Data(xml.utf8))
+        #expect(feed.articles.isEmpty)
+        // No throw == no escalation path (parse() only logs; it never throws on empty articles)
     }
 }

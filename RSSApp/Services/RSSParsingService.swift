@@ -19,7 +19,7 @@ struct RSSParsingService: Sendable {
         // a UTF-16/UTF-32 BOM. XMLParser only reliably handles UTF-8 and ASCII, so
         // CJK publishers (big5, euc-kr, gb2312) and UTF-16-emitting systems would
         // otherwise fail outright. See `EncodingSniffer` below.
-        let parseData = EncodingSniffer.transcodeToUTF8IfNeeded(data)
+        let (parseData, snifferOutcome) = EncodingSniffer.transcodeToUTF8IfNeeded(data)
 
         let delegate = RSSParserDelegate()
         let parser = XMLParser(data: parseData)
@@ -29,7 +29,8 @@ struct RSSParsingService: Sendable {
 
         guard parser.parse() else {
             let errorDescription = parser.parserError?.localizedDescription ?? "Unknown parsing error"
-            Self.logger.error("XML parsing failed: \(errorDescription, privacy: .public)")
+            let encodingContext = snifferOutcome.diagnosticDescription
+            Self.logger.error("XML parsing failed: \(errorDescription, privacy: .public) (encoding: \(encodingContext, privacy: .public))")
             throw RSSParsingError.parsingFailed(description: errorDescription)
         }
 
@@ -58,7 +59,18 @@ struct RSSParsingService: Sendable {
             imageURL: imageURL
         )
 
-        Self.logger.notice("Feed parsed: '\(feed.title, privacy: .public)' with \(feed.articles.count, privacy: .public) articles")
+        // If the sniffer took a lossy fallback path and the parse produced zero
+        // articles, escalate from .notice to .error so the log clearly indicates
+        // a likely encoding failure rather than an empty feed from the publisher.
+        // This prevents a silent "feed up-to-date" when the real cause is a
+        // charset that couldn't be decoded.
+        if snifferOutcome.isFallback && feed.articles.isEmpty {
+            Self.logger.error(
+                "Feed parsed with zero articles after encoding fallback '\(snifferOutcome.diagnosticDescription, privacy: .public)' — encoding may have prevented content from being decoded: '\(feed.title, privacy: .public)'"
+            )
+        } else {
+            Self.logger.notice("Feed parsed: '\(feed.title, privacy: .public)' with \(feed.articles.count, privacy: .public) articles")
+        }
         return feed
     }
 }
@@ -113,28 +125,78 @@ enum EncodingSniffer {
     /// whitespace, but is short enough that ASCII decoding is trivial.
     static let prologScanWindow = 256
 
+    // MARK: - SnifferOutcome
+
+    /// Describes which path `transcodeToUTF8IfNeeded` took so `parse()` can
+    /// escalate its log level when a fallback was needed but produced no articles.
+    enum SnifferOutcome: Sendable {
+        /// Payload was already UTF-8 (or ASCII-compatible); returned as-is.
+        case utf8Passthrough
+        /// BOM was stripped and — for non-UTF-8 BOMs — the payload was transcoded.
+        case bomStripped(String.Encoding)
+        /// Payload was transcoded from the declared encoding to UTF-8.
+        case transcoded(from: String.Encoding)
+        /// The declared IANA encoding name was not recognised; prolog was stripped
+        /// and the payload passed through as-is (best-effort UTF-8 fallback).
+        case unknownEncodingFallback(String)
+        /// `String(data:encoding:)` returned nil; payload passed through unchanged.
+        case transcodeFailureFallback(String.Encoding)
+
+        /// `true` for any outcome that represents a lossy or best-effort fallback
+        /// — i.e. the bytes handed to XMLParser may not be correctly decoded.
+        var isFallback: Bool {
+            switch self {
+            case .utf8Passthrough, .bomStripped, .transcoded: return false
+            case .unknownEncodingFallback, .transcodeFailureFallback: return true
+            }
+        }
+
+        /// A short human-readable label for use in log messages.
+        var diagnosticDescription: String {
+            switch self {
+            case .utf8Passthrough:
+                return "utf8Passthrough"
+            case .bomStripped(let enc):
+                return "bomStripped(\(enc))"
+            case .transcoded(let enc):
+                return "transcoded(from: \(enc))"
+            case .unknownEncodingFallback(let name):
+                return "unknownEncodingFallback(\(name))"
+            case .transcodeFailureFallback(let enc):
+                return "transcodeFailureFallback(\(enc))"
+            }
+        }
+    }
+
     /// Inspects `data` and returns the same bytes if the payload is already UTF-8
     /// (the 95% case — no allocation), or a freshly-transcoded UTF-8 representation
-    /// otherwise. Never throws: on any detection or transcoding failure the original
-    /// bytes are returned unchanged, letting XMLParser produce its own error for the
-    /// caller to surface.
-    static func transcodeToUTF8IfNeeded(_ data: Data) -> Data {
-        guard !data.isEmpty else { return data }
+    /// otherwise, paired with a `SnifferOutcome` describing which path was taken.
+    /// Never throws: on any detection or transcoding failure the original bytes are
+    /// returned unchanged, letting XMLParser produce its own error for the caller
+    /// to surface.
+    static func transcodeToUTF8IfNeeded(_ data: Data) -> (Data, SnifferOutcome) {
+        guard !data.isEmpty else { return (data, .utf8Passthrough) }
 
         // 1. BOM check — authoritative.
         if let (encoding, bomLength) = detectBOM(data) {
             if encoding == .utf8 {
                 // UTF-8 BOM: strip it. XMLParser tolerates the BOM in practice but
                 // stripping makes the downstream byte stream canonical.
-                return data.subdata(in: bomLength..<data.count)
+                return (data.subdata(in: bomLength..<data.count), .bomStripped(.utf8))
             }
-            return transcode(data.subdata(in: bomLength..<data.count), from: encoding)
-                ?? data
+            let stripped = data.subdata(in: bomLength..<data.count)
+            if let transcoded = transcode(stripped, from: encoding) {
+                return (transcoded, .bomStripped(encoding))
+            }
+            return (data, .transcodeFailureFallback(encoding))
         }
 
         // 2. UTF-16 / UTF-32 without BOM — detect from first four bytes.
         if let encoding = detectWideEncodingWithoutBOM(data) {
-            return transcode(data, from: encoding) ?? data
+            if let transcoded = transcode(data, from: encoding) {
+                return (transcoded, .transcoded(from: encoding))
+            }
+            return (data, .transcodeFailureFallback(encoding))
         }
 
         // 3. ASCII-compatible: scan the declaration.
@@ -142,10 +204,13 @@ enum EncodingSniffer {
             let normalized = declaredName.lowercased()
             if normalized == "utf-8" || normalized == "utf8" || normalized == "us-ascii" || normalized == "ascii" {
                 // Already UTF-8-compatible; XMLParser handles this natively.
-                return data
+                return (data, .utf8Passthrough)
             }
             if let encoding = encodingFromIANAName(declaredName) {
-                return transcode(data, from: encoding) ?? data
+                if let transcoded = transcode(data, from: encoding) {
+                    return (transcoded, .transcoded(from: encoding))
+                }
+                return (data, .transcodeFailureFallback(encoding))
             }
             // Unknown encoding name: XMLParser would reject the declaration outright,
             // wasting any ASCII-compatible content in the body. Strip the prolog at
@@ -157,11 +222,11 @@ enum EncodingSniffer {
             // Dual-emit to the DiagnosticRecorder so tests can assert the fallback
             // path was hit. See `DiagnosticRecorder` for rationale. Issue #275.
             DiagnosticRecorder.record(category: loggerCategory, level: .warning, message: unknownEncodingMessage)
-            return stripProlog(data) ?? data
+            return (stripProlog(data) ?? data, .unknownEncodingFallback(declaredName))
         }
 
         // 4. No BOM, no declaration → UTF-8 default.
-        return data
+        return (data, .utf8Passthrough)
     }
 
     // MARK: - BOM detection
