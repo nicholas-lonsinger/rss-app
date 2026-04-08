@@ -414,6 +414,54 @@ struct FeedPersistenceServiceTests {
         #expect(afterIdempotent.wasUpdated == true)
     }
 
+    @Test("upsertArticles detection path clears readDate on a previously-read article (issue #283)")
+    @MainActor
+    func upsertArticlesDetectionClearsReadDate() throws {
+        // Focused regression pin for issue #283: the `existing.readDate = nil` reset
+        // on the `upsertArticles` update-detection path. The primary coverage in
+        // `upsertArticlesMutatesOnNewerUpdatedDate` above also asserts this, but
+        // that test mutates many fields at once — this test isolates the single
+        // sanctioned destructive transition called out in the `markArticleRead`
+        // doc comment so grepping for `#283` lands somewhere obvious.
+        //
+        // Priming is load-bearing: `PersistentArticle.readDate` defaults to nil on
+        // insert and `upsertArticles` never stamps it, so without the explicit
+        // `markArticleRead(_, isRead: true)` below, `readDate == nil` would hold
+        // vacuously and the assertion would not pin the regression.
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+
+        let baseline = Date(timeIntervalSince1970: 1_700_000_000)
+        try service.upsertArticles(
+            [TestFixtures.makeArticle(id: "u1", updatedDate: baseline)],
+            for: feed
+        )
+
+        // Prime: user reads the article. This stamps `readDate` to a non-nil value,
+        // which is the only state in which the `existing.readDate = nil` line on the
+        // detection path can be observed doing any work.
+        let seeded = try service.articles(for: feed)[0]
+        try service.markArticleRead(seeded, isRead: true)
+        let firstReadDate = try #require(seeded.readDate)
+
+        // Trigger detection with a strictly newer updatedDate.
+        try service.upsertArticles(
+            [TestFixtures.makeArticle(id: "u1", updatedDate: baseline.addingTimeInterval(3600))],
+            for: feed
+        )
+
+        // Detection must reset `readDate` (sanctioned destructive transition per
+        // the `markArticleRead` doc comment), flip `isRead` back to false, and
+        // set the `wasUpdated` badge.
+        let updated = try service.articles(for: feed)[0]
+        #expect(updated.readDate == nil)
+        #expect(updated.readDate != firstReadDate)
+        #expect(updated.isRead == false)
+        #expect(updated.wasUpdated == true)
+    }
+
     @Test("Re-fetch with older updatedDate is a no-op")
     @MainActor
     func upsertArticlesNoOpForOlderUpdatedDate() throws {
