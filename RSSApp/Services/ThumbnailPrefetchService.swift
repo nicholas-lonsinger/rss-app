@@ -209,10 +209,10 @@ private func downloadWithRetry(
             }
         }
 
-        // RATIONALE: `resolveAndCacheThumbnail` is `throws(CancellationError)`, so the only
-        // catch arm we need handles task cancellation. The compiler enforces that no other
-        // error type can escape, eliminating the need for a `catch { assertionFailure(...) }`
-        // safety net.
+        // RATIONALE: `resolveAndCacheThumbnail` is `throws(CancellationError)`, so the
+        // unqualified `catch` below only ever receives a CancellationError and no
+        // `catch { assertionFailure(...) }` safety net is needed. A `catch is
+        // CancellationError` pattern would be flagged as always-true by Swift 6.
         let result: ThumbnailCacheResult
         do {
             result = try await thumbnailService.resolveAndCacheThumbnail(
@@ -220,7 +220,7 @@ private func downloadWithRetry(
                 articleLink: articleLink,
                 articleID: articleID
             )
-        } catch is CancellationError {
+        } catch {
             // Task was cancelled — stop retrying immediately without incrementing retry counters.
             return ThumbnailDownloadResult(articleID: articleID, outcome: .cancelled)
         }

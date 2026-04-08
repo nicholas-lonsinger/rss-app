@@ -76,7 +76,12 @@ final class MockSlowHTMLURLSessionProvider: URLSessionBytesProviding, @unchecked
 /// delivers a small initial chunk followed by a configurable error
 /// (default `URLError(.cancelled)`), so the iterating caller observes
 /// the error from inside its `for try await byte in bytes` loop.
-final class MockSlowHTMLURLProtocol: URLProtocol, @unchecked Sendable {
+// RATIONALE: No explicit `@unchecked Sendable` — URLProtocol's Sendable
+// conformance is marked unavailable in the iOS 26 SDK, and re-declaring it on
+// the subclass emits a "conformance already unavailable" warning. The mock is
+// only used in single-threaded test contexts, so the subclass's lack of
+// Sendable conformance is acceptable.
+final class MockSlowHTMLURLProtocol: URLProtocol {
 
     static let requestIDHeader = "X-MockSlowHTML-RequestID"
 
@@ -169,9 +174,13 @@ final class MockSlowHTMLURLProtocol: URLProtocol, @unchecked Sendable {
         // the AsyncBytes iterator, which throws it from `next()`.
         let delayNanoseconds = config.failureDelayNanoseconds
         let error = config.midStreamError
-        deliveryQueue.asyncAfter(deadline: .now() + .nanoseconds(Int(min(UInt64(Int.max), delayNanoseconds)))) { [weak self] in
-            guard let self else { return }
-            self.client?.urlProtocol(self, didFailWithError: error)
+        // RATIONALE: `self` is non-Sendable (URLProtocol's Sendable conformance is
+        // marked unavailable under iOS 26), but DispatchQueue.asyncAfter requires a
+        // @Sendable closure. `nonisolated(unsafe)` bypasses the check; the mock is
+        // only used in single-threaded test contexts per the class-level RATIONALE.
+        nonisolated(unsafe) let capturedSelf = self
+        deliveryQueue.asyncAfter(deadline: .now() + .nanoseconds(Int(min(UInt64(Int.max), delayNanoseconds)))) {
+            capturedSelf.client?.urlProtocol(capturedSelf, didFailWithError: error)
         }
     }
 

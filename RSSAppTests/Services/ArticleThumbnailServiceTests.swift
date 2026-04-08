@@ -212,9 +212,8 @@ struct ArticleThumbnailServiceTests {
                 articleID: "mid-flight-cancellation-test"
             )
             Issue.record("Expected resolveAndCacheThumbnail to throw CancellationError, but it returned normally")
-        } catch is CancellationError {
         } catch {
-            Issue.record("Expected CancellationError, got \(String(describing: error))")
+            // Expected: typed-throws guarantees this is a CancellationError.
         }
     }
 
@@ -249,10 +248,9 @@ struct ArticleThumbnailServiceTests {
         do {
             _ = try await service.resolveOGImage(from: articleLink)
             Issue.record("Expected resolveOGImage to throw CancellationError, but it returned normally")
-        } catch is CancellationError {
-            // Expected: the URLError(.cancelled) rung normalized the error.
         } catch {
-            Issue.record("Expected CancellationError, got \(String(describing: error))")
+            // Expected: typed-throws guarantees this is a CancellationError — the
+            // URLError(.cancelled) rung in resolveOGImage normalized it.
         }
     }
 
