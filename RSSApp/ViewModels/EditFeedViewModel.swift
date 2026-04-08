@@ -111,12 +111,11 @@ final class EditFeedViewModel {
     /// User dismissed the Atom prompt by choosing to keep the RSS feed.
     /// Persists the feed already fetched during `saveFeed()`.
     ///
-    /// The caller (alert button action) must pass the `prompt` value captured
-    /// from the alert's `presenting:` closure rather than relying on
-    /// `atomAlternatePrompt` still being set. SwiftUI's `.alert(isPresented:)`
-    /// binding setter clears the prompt state as part of dismissing the
-    /// alert, so a deferred `Task` body that re-reads the view-model property
-    /// would race with that dismissal and often see nil.
+    /// The `prompt` parameter is passed explicitly by the caller rather than
+    /// re-read from `atomAlternatePrompt`. This keeps the shape symmetric with
+    /// `switchToAtomAlternate(from:)` — which genuinely requires the parameter
+    /// to avoid racing with SwiftUI's alert-dismissal binding clear — and
+    /// ensures both branches of the alert operate on the same captured value.
     func keepOriginalFeed(from prompt: AtomAlternatePrompt) {
         Self.logger.notice("User kept RSS feed \(prompt.originalURL.absoluteString, privacy: .public), declining Atom \(prompt.atomURL.absoluteString, privacy: .public)")
         atomAlternatePrompt = nil
@@ -134,13 +133,13 @@ final class EditFeedViewModel {
         Self.logger.notice("User switching to Atom \(prompt.atomURL.absoluteString, privacy: .public) from \(prompt.originalURL.absoluteString, privacy: .public)")
         let atomURL = prompt.atomURL
         atomAlternatePrompt = nil
-        urlInput = atomURL.absoluteString
 
         // The user may have switched to an Atom URL that matches the feed's
         // existing URL (e.g. they edited the RSS URL but the site advertises
         // the already-subscribed Atom URL as the alternate). Treat as no-op.
         if atomURL == feed.feedURL {
             Self.logger.debug("Atom URL matches existing feed URL, dismissing without save")
+            urlInput = atomURL.absoluteString
             didSave = true
             return
         }
@@ -163,12 +162,22 @@ final class EditFeedViewModel {
         let atomFeed: RSSFeed
         do {
             atomFeed = try await feedFetching.fetchFeed(from: atomURL)
+        } catch is CancellationError {
+            Self.logger.debug("Atom switch cancelled for \(atomURL, privacy: .public)")
+            return
+        } catch let urlError as URLError where urlError.code == .cancelled {
+            Self.logger.debug("Atom switch cancelled for \(atomURL, privacy: .public)")
+            return
         } catch {
             errorMessage = "Could not load feed. Check the URL and try again."
             Self.logger.error("Atom feed validation failed for \(atomURL, privacy: .public): \(error, privacy: .public)")
             return
         }
 
+        // The switch has now committed. Reflect the Atom URL in the input
+        // field *after* all failure paths above — if we fail earlier, the
+        // user's originally-typed URL remains in the field.
+        urlInput = atomURL.absoluteString
         persistEditedFeed(atomFeed, url: atomURL)
     }
 

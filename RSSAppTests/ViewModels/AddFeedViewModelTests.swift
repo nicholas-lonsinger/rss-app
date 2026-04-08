@@ -102,18 +102,26 @@ struct AddFeedViewModelTests {
         #expect(viewModel.isValidating == false)
     }
 
-    @Test("addFeed sets error on persistence failure")
+    @Test("addFeed sets distinct error copy on persistence failure")
     @MainActor
     func addFeedPersistenceError() async {
+        let mockFetching = MockFeedFetchingService()
+        mockFetching.feedToReturn = TestFixtures.makeFeed()
         let mockPersistence = MockFeedPersistenceService()
-        mockPersistence.errorToThrow = NSError(domain: "test", code: 1)
+        // Only fail `addFeed()`, not `feedExists()` — we want to test the
+        // persistence-failure branch of `persistFetchedFeed`, not the
+        // duplicate-check failure branch (which has its own copy).
+        mockPersistence.addFeedFailureAfterCount = 0
 
-        let viewModel = AddFeedViewModel(feedFetching: MockFeedFetchingService(), persistence: mockPersistence)
+        let viewModel = AddFeedViewModel(feedFetching: mockFetching, persistence: mockPersistence)
         viewModel.urlInput = "https://example.com/feed"
         await viewModel.addFeed()
 
         #expect(viewModel.didAddFeed == false)
-        #expect(viewModel.errorMessage != nil)
+        // Regression guard: the persistence-failure copy MUST differ from the
+        // fetch-failure copy so the user isn't told to "check the URL" when
+        // the URL worked fine and SwiftData is the problem.
+        #expect(viewModel.errorMessage == "Could not save the feed. Please try again.")
     }
 
     @Test("canSubmit returns false for empty input")
@@ -485,6 +493,10 @@ struct AddFeedViewModelTests {
         #expect(viewModel.didAddFeed == false)
         #expect(viewModel.errorMessage == "Could not load feed. Check the URL and try again.")
         #expect(mockPersistence.feeds.isEmpty)
+        // Regression guard: the user's originally-typed URL must remain in the
+        // input field when the Atom switch fails, so they don't have to re-type
+        // it to retry.
+        #expect(viewModel.urlInput == rssURL.absoluteString)
     }
 
     @Test("switchToAtomAlternate reports duplicate when Atom URL already subscribed")
@@ -514,5 +526,7 @@ struct AddFeedViewModelTests {
         #expect(viewModel.errorMessage == "You are already subscribed to this feed.")
         // Only the pre-existing Atom feed remains; no new feed was added.
         #expect(mockPersistence.feeds.count == 1)
+        // Regression guard (see switchToAtomAlternateHandlesFetchFailure).
+        #expect(viewModel.urlInput == rssURL.absoluteString)
     }
 }

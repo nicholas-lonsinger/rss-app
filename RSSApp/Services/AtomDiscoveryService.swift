@@ -59,6 +59,12 @@ struct AtomDiscoveryService: AtomDiscovering {
     }
 
     private func tryFetchAtom(at pageURL: URL, originalFeedURL: URL) async -> URL? {
+        // RATIONALE: Discovery is best-effort per the feature spec — any failure
+        // (non-2xx status, decode error, network error, task cancellation)
+        // returns nil so the caller proceeds with the RSS feed as-is. Expected
+        // failure paths (HTTP 4xx from subfolder probes, URLError from flaky
+        // networks, cancellation from sheet dismissal) log at `.debug` so they
+        // do not spam the persisted warning tier.
         do {
             let (data, response) = try await fetchData(pageURL)
 
@@ -67,7 +73,7 @@ struct AtomDiscoveryService: AtomDiscovering {
                 return nil
             }
             guard (200..<300).contains(http.statusCode) else {
-                Self.logger.warning("HTTP \(http.statusCode, privacy: .public) for \(pageURL.absoluteString, privacy: .public)")
+                Self.logger.debug("HTTP \(http.statusCode, privacy: .public) for \(pageURL.absoluteString, privacy: .public)")
                 return nil
             }
 
@@ -94,8 +100,14 @@ struct AtomDiscoveryService: AtomDiscovering {
 
             Self.logger.notice("Discovered Atom alternate \(candidate.absoluteString, privacy: .public) via \(pageURL.absoluteString, privacy: .public)")
             return candidate
+        } catch is CancellationError {
+            Self.logger.debug("Atom discovery cancelled for \(pageURL.absoluteString, privacy: .public)")
+            return nil
+        } catch let urlError as URLError where urlError.code == .cancelled {
+            Self.logger.debug("Atom discovery cancelled for \(pageURL.absoluteString, privacy: .public)")
+            return nil
         } catch {
-            Self.logger.warning("Atom discovery fetch failed for \(pageURL.absoluteString, privacy: .public): \(error, privacy: .public)")
+            Self.logger.debug("Atom discovery fetch failed for \(pageURL.absoluteString, privacy: .public): \(error, privacy: .public)")
             return nil
         }
     }

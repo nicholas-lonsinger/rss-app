@@ -104,12 +104,11 @@ final class AddFeedViewModel {
     /// Persists the feed that was already fetched in `addFeed()` so we avoid a
     /// second network round-trip.
     ///
-    /// The caller (alert button action) must pass the `prompt` value captured
-    /// from the alert's `presenting:` closure rather than relying on
-    /// `atomAlternatePrompt` still being set. SwiftUI's `.alert(isPresented:)`
-    /// binding setter clears the prompt state as part of dismissing the alert,
-    /// so by the time a deferred `Task` body runs, reading the view-model
-    /// property would race with that dismissal and often return nil.
+    /// The `prompt` parameter is passed explicitly by the caller rather than
+    /// re-read from `atomAlternatePrompt`. This keeps the shape symmetric with
+    /// `switchToAtomAlternate(from:)` — which genuinely requires the parameter
+    /// to avoid racing with SwiftUI's alert-dismissal binding clear — and
+    /// ensures both branches of the alert operate on the same captured value.
     func keepOriginalFeed(from prompt: AtomAlternatePrompt) {
         Self.logger.notice("User kept RSS feed \(prompt.originalURL.absoluteString, privacy: .public), declining Atom \(prompt.atomURL.absoluteString, privacy: .public)")
         atomAlternatePrompt = nil
@@ -127,7 +126,6 @@ final class AddFeedViewModel {
         Self.logger.notice("User switching to Atom \(prompt.atomURL.absoluteString, privacy: .public) from \(prompt.originalURL.absoluteString, privacy: .public)")
         let atomURL = prompt.atomURL
         atomAlternatePrompt = nil
-        urlInput = atomURL.absoluteString
 
         isValidating = true
         defer { isValidating = false }
@@ -147,12 +145,22 @@ final class AddFeedViewModel {
         let atomFeed: RSSFeed
         do {
             atomFeed = try await feedFetching.fetchFeed(from: atomURL)
+        } catch is CancellationError {
+            Self.logger.debug("Atom switch cancelled for \(atomURL, privacy: .public)")
+            return
+        } catch let urlError as URLError where urlError.code == .cancelled {
+            Self.logger.debug("Atom switch cancelled for \(atomURL, privacy: .public)")
+            return
         } catch {
             errorMessage = "Could not load feed. Check the URL and try again."
             Self.logger.error("Atom feed validation failed for \(atomURL, privacy: .public): \(error, privacy: .public)")
             return
         }
 
+        // The switch has now committed. Reflect the Atom URL in the input
+        // field *after* all failure paths above — if we fail earlier, the
+        // user's originally-typed URL remains in the field.
+        urlInput = atomURL.absoluteString
         persistFetchedFeed(atomFeed, url: atomURL)
     }
 
@@ -165,7 +173,7 @@ final class AddFeedViewModel {
         do {
             try persistence.addFeed(newFeed)
         } catch {
-            errorMessage = "Could not load feed. Check the URL and try again."
+            errorMessage = "Could not save the feed. Please try again."
             Self.logger.error("Failed to persist feed \(url, privacy: .public): \(error, privacy: .public)")
             return
         }
