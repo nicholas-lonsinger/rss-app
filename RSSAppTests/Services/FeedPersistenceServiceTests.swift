@@ -412,6 +412,9 @@ struct FeedPersistenceServiceTests {
         let afterIdempotent = try service.articles(for: feed)[0]
         #expect(afterIdempotent.sortDate == afterFirstMutationSort)
         #expect(afterIdempotent.wasUpdated == true)
+        // `readDate` must remain nil across the no-op — pins that the same-timestamp
+        // path does not accidentally stamp a fresh readDate. See issue #283.
+        #expect(afterIdempotent.readDate == nil)
     }
 
     @Test("Re-fetch with older updatedDate is a no-op")
@@ -644,6 +647,11 @@ struct FeedPersistenceServiceTests {
         #expect(updated.wasUpdated == true)
         #expect(updated.sortDate > willUpdateOriginalSort)
         #expect(noop.wasUpdated == false)
+        // Detection must also reset `readDate` on the updated row. See issue #283 —
+        // defense-in-depth for the `existing.readDate = nil` reset inside
+        // `upsertArticles`, alongside the primary coverage in
+        // `upsertArticlesMutatesOnNewerUpdatedDate`.
+        #expect(updated.readDate == nil)
     }
 
     @Test("markArticleRead toggles read status")
@@ -696,6 +704,12 @@ struct FeedPersistenceServiceTests {
         // only need the read-clear pre-conditions to be true.)
         #expect(updated.wasUpdated == true)
         #expect(updated.isRead == false)
+        // `readDate` must be nil post-detection. Defense-in-depth for the
+        // `existing.readDate = nil` reset in `upsertArticles` — if a refactor ever
+        // drops that line, asserting it here (in addition to the primary coverage in
+        // `upsertArticlesMutatesOnNewerUpdatedDate`) gives the regression a second
+        // trip wire. See issue #283.
+        #expect(updated.readDate == nil)
 
         // Acting on the read transition clears the flag.
         try service.markArticleRead(updated, isRead: true)
@@ -723,6 +737,9 @@ struct FeedPersistenceServiceTests {
         )
 
         let updated = try service.articles(for: feed)[0]
+        // Detection path must have reset readDate to nil along with isRead. See
+        // issue #283 — defense-in-depth for the `existing.readDate = nil` reset.
+        #expect(updated.readDate == nil)
         // Read it (clears wasUpdated), then mark unread again.
         try service.markArticleRead(updated, isRead: true)
         #expect(updated.wasUpdated == false)
@@ -763,10 +780,14 @@ struct FeedPersistenceServiceTests {
         let updated = try service.articles(for: feed)[0]
         #expect(updated.wasUpdated == true)
         #expect(updated.isRead == false)
+        // Detection path must have reset readDate to nil along with isRead. See
+        // issue #283 — defense-in-depth for the `existing.readDate = nil` reset.
+        #expect(updated.readDate == nil)
 
         try service.markArticleRead(updated, isRead: false)
         #expect(updated.isRead == false)
         #expect(updated.wasUpdated == true) // preserved — never read
+        #expect(updated.readDate == nil) // preserved — still never read
     }
 
     @Test("markArticleRead preserves the first-read timestamp on repeated isRead: true calls (issue #271)")
