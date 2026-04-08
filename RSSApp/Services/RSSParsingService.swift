@@ -140,7 +140,11 @@ struct RSSParsingService: Sendable {
 /// what each function documents locally, so widening access is benign.
 enum EncodingSniffer {
 
-    private static let logger = Logger(category: "EncodingSniffer")
+    /// Shared between the `os.Logger` category and `DiagnosticRecorder` events so
+    /// the test seam and the production log stream carry the same label.
+    static let loggerCategory = "EncodingSniffer"
+
+    private static let logger = Logger(category: loggerCategory)
 
     /// Maximum number of leading bytes scanned when looking for an XML declaration
     /// or stripping the prolog. 256 bytes comfortably fits any realistic
@@ -187,7 +191,11 @@ enum EncodingSniffer {
             // the byte level (leaving the rest of the bytes unchanged) and let
             // XMLParser try the default (UTF-8). Best-effort recovery for feeds that
             // typo their encoding attribute but are actually ASCII/UTF-8 underneath.
-            logger.warning("Unknown encoding name '\(declaredName, privacy: .public)' in XML declaration; stripping prolog and attempting UTF-8 fallback")
+            let unknownEncodingMessage = "Unknown encoding name '\(declaredName)' in XML declaration; stripping prolog and attempting UTF-8 fallback"
+            logger.warning("\(unknownEncodingMessage, privacy: .public)")
+            // Dual-emit to the DiagnosticRecorder so tests can assert the fallback
+            // path was hit. See `DiagnosticRecorder` for rationale. Issue #275.
+            DiagnosticRecorder.record(category: loggerCategory, level: .warning, message: unknownEncodingMessage)
             return stripProlog(data) ?? data
         }
 
@@ -321,12 +329,20 @@ enum EncodingSniffer {
     /// if decoding fails.
     static func transcode(_ data: Data, from encoding: String.Encoding) -> Data? {
         guard let decoded = String(data: data, encoding: encoding) else {
-            logger.warning("Failed to decode feed payload as \(String(describing: encoding), privacy: .public); passing through unchanged")
+            let decodeFailureMessage = "Failed to decode feed payload as \(String(describing: encoding)); passing through unchanged"
+            logger.warning("\(decodeFailureMessage, privacy: .public)")
+            // Dual-emit to the DiagnosticRecorder so tests can assert the fallback
+            // path was hit. See `DiagnosticRecorder` for rationale. Issue #275.
+            DiagnosticRecorder.record(category: loggerCategory, level: .warning, message: decodeFailureMessage)
             return nil
         }
         let stripped = stripXMLDeclaration(decoded)
         guard let utf8 = stripped.data(using: .utf8) else { return nil }
-        logger.notice("Transcoded \(data.count, privacy: .public) bytes from \(String(describing: encoding), privacy: .public) to \(utf8.count, privacy: .public) bytes UTF-8")
+        let transcodeSuccessMessage = "Transcoded \(data.count) bytes from \(String(describing: encoding)) to \(utf8.count) bytes UTF-8"
+        logger.notice("\(transcodeSuccessMessage, privacy: .public)")
+        // Dual-emit to the DiagnosticRecorder so tests can assert the success
+        // path was hit without reparsing the returned Data. Issue #275.
+        DiagnosticRecorder.record(category: loggerCategory, level: .notice, message: transcodeSuccessMessage)
         return utf8
     }
 

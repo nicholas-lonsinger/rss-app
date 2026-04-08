@@ -9,7 +9,9 @@ RSS App is an iOS application for reading and managing RSS feeds. It is built as
 ```
 RSSApp/
 ├── App/                                # App lifecycle
-│   └── RSSAppApp.swift                 # @main entry point — ModelContainer + WindowGroup with ContentView
+│   ├── RSSAppApp.swift                 # @main entry point — ModelContainer + WindowGroup with ContentView
+│   ├── Logger+Subsystem.swift          # `Logger.init(category:)` convenience that pins the project's `os.Logger` subsystem
+│   └── DiagnosticRecorder.swift         # DiagnosticEvent / DiagnosticSink / DiagnosticRecorder — complementary test seam for `os.Logger`. Production call sites that want their fallback-path log emissions asserted in tests dual-emit via `DiagnosticRecorder.record(...)` alongside their existing `logger.warning(...)` call. Tests install a `RecordingDiagnosticSink` to capture events. Currently adopted by `EncodingSniffer` (issue #275)
 ├── Models/                             # Data models
 │   ├── Article.swift                   # Article struct — transient parser output (Identifiable, Hashable, Sendable)
 │   ├── ArticleContent.swift            # Extracted article data — htmlContent + textContent
@@ -94,6 +96,7 @@ RSSAppTests/
 │   └── simple-blog.html               # HTML test fixture for DOM serialization and pipeline tests
 ├── Helpers/
 │   ├── DOMNodeTestHelpers.swift        # DOMNodeFactory — convenience builders for test DOM trees
+│   ├── RecordingDiagnosticSink.swift   # Thread-safe `DiagnosticSink` that records every `DiagnosticEvent` for assertion in tests; filter accessors for `events(atLevel:)` and `events(inCategory:)` (issue #275)
 │   ├── SwiftDataTestHelpers.swift      # In-memory ModelContainer factory for SwiftData tests
 │   ├── TestFixtures.swift              # Sample RSS XML, factory methods for Article/RSSFeed/PersistentFeed/PersistentArticle
 │   └── WebViewTestHelpers.swift        # WKWebView-based serialization helpers for integration tests
@@ -189,6 +192,8 @@ The directory tree annotations describe each file's purpose. This section covers
 
 **Article retention cleanup.** `ArticleRetentionService` (`ArticleRetaining` protocol) enforces a configurable article limit. The `ArticleLimit` enum defines seven options (1,000 to 25,000, default 10,000), persisted in UserDefaults under `articleRetentionLimit`. `enforceArticleLimit(persistence:thumbnailService:)` counts all articles, fetches the oldest exceeding the limit sorted by `sortDate` ascending (see "`sortDate` vs `publishedDate`" below), bulk-deletes the `PersistentArticle` records (cascade-deleting `PersistentArticleContent`) first, then deletes their cached thumbnail JPEG files via `ArticleThumbnailCaching.deleteCachedThumbnail(for:)`. DB-first ordering ensures articles still in the DB always have their thumbnail files intact on partial failure. Triggered by `FeedListViewModel.refreshAllFeeds()` after refresh results are committed and before thumbnail prefetch. The Settings page exposes an `ArticleLimitView` sub-screen for user configuration.
 
+**Logging and the `DiagnosticRecorder` test seam.** Every service, view model, and model that emits diagnostics declares a `private static let logger = Logger(category: "ComponentName")` via `Logger+Subsystem.swift`, which pins the `os.Logger` subsystem to `com.nicholas-lonsinger.rss-app`. Production diagnostics flow through `os.Logger` exclusively. Because `os.Logger` cannot be easily observed from unit tests (see the design decision below), call sites that need their warning/error paths to be asserted from tests **dual-emit** to `DiagnosticRecorder` alongside the existing `logger.warning(...)` / `logger.notice(...)` call. `DiagnosticRecorder.record(category:level:message:)` collapses to a single nil check on a lock-guarded slot when no sink is installed, so the production overhead is negligible. Tests install a `RecordingDiagnosticSink` via `DiagnosticRecorder.install(_:)`, exercise the code under test, and assert on the recorded `DiagnosticEvent`s. `EncodingSniffer`'s unknown-encoding and transcode-success paths are the first adopters (issue #275); future services that want the same guarantee should follow the dual-emission pattern and ensure their diagnostic-test suite is marked `.serialized` so parallel tests don't race against the global sink slot.
+
 ## Data Flow
 
 ```
@@ -269,10 +274,11 @@ RSSAppApp (@main)
 | `NWPathMonitor` with `@unchecked Sendable` class | Monitor delivers path updates on a private dispatch queue; `NSLock` guards the stored path for thread-safe reads from any isolation domain |
 | `isConstrained` check in addition to interface type | Respects Low Data Mode on WiFi connections, which users enable to reduce data usage even on WiFi |
 | Concrete `AppBadgeService` in `SettingsView` | Existential `any AppBadgeUpdating` property setters require mutable access, incompatible with SwiftUI's immutable view structs; protocol abstraction is used in `HomeViewModel` for testing |
+| `DiagnosticRecorder` dual-emission seam alongside `os.Logger` | Production-critical fallback paths (unknown encoding names, transcode failures) previously logged only via `os.Logger`, which cannot be asserted from unit tests without either granting `OSLogStore` entitlements (unreliable on iOS simulators) or wrapping `os.Logger` in a protocol (which would lose `OSLogMessage` privacy markers and zero-cost interpolation). Issue #275. Instead, `DiagnosticRecorder` provides a **complementary** recording channel: call sites that care about testability dual-emit to both `logger.warning(...)` and `DiagnosticRecorder.record(...)`. In production `DiagnosticRecorder.active` is always `nil` and `record(...)` collapses to a single lock-guarded nil check. Tests install a `RecordingDiagnosticSink` via `DiagnosticRecorder.install(_:)`, exercise the code under test, and assert on the recorded `DiagnosticEvent`s. First adopted by `EncodingSniffer`'s fallback paths; future services should follow the same dual-emission pattern. Suites with diagnostic tests are marked `.serialized` to avoid races against the global sink slot |
 
 ## Test Coverage
 
-**61 test files: 41 test suites, 17 mock implementations, 4 shared helpers, 1 HTML fixture.**
+**66 test files: 48 test suites, 17 mock implementations, 5 shared helpers, 1 HTML fixture.**
 
 **Patterns:** Swift Testing (`@Suite`, `@Test`, `#expect`). Protocol-based dependency injection with 17 mocks (`MockFeedPersistenceService`, `MockFeedFetchingService`, `MockFeedIconService`, `MockArticleThumbnailService`, `MockThumbnailPrefetchService`, `MockOPMLService`, `MockClaudeAPIService`, `MockKeychainService`, `MockArticleExtractionService`, `MockContentExtractor`, `MockFeedStorageService`, `MockURLSessionBytesProvider`, `MockHTMLURLSessionProvider`, `MockSlowHTMLURLSessionProvider`, `MockArticleRetentionService`, `MockAppBadgeService`, `MockNetworkMonitorService`). In-memory `ModelContainer` via `SwiftDataTestHelpers` for SwiftData integration tests. `WKWebView` integration tests via `WebViewTestHelpers` for DOM serialization and extraction pipeline. `MockURLSessionBytesProvider` with `URLProtocol` interception for `ClaudeAPIService.sendMessage` integration tests; `MockHTMLURLSessionProvider` with `URLProtocol` interception for `ArticleThumbnailService.resolveOGImage` HTTP-classification tests; `MockSlowHTMLURLSessionProvider` with `URLProtocol` interception that delivers an initial chunk and then surfaces a configurable mid-stream `URLError` (default `.cancelled`) for `resolveOGImage` cancellation-normalization tests. Shared `TestFixtures` factory methods for `Article`, `RSSFeed`, `PersistentFeed`, `PersistentArticle`, and sample RSS XML.
 
