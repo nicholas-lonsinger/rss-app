@@ -190,10 +190,13 @@ struct ArticleThumbnailServiceTests {
         // This test plugs `MockSlowHTMLURLSessionProvider` (which delivers a 200 OK,
         // an initial chunk, then `URLError(.cancelled)` from a private dispatch queue)
         // into the service and calls `resolveAndCacheThumbnail` end-to-end. We pass
-        // `thumbnailURL: nil` so the un-mockable `cacheThumbnail` step is skipped and
-        // the call goes straight through `resolveOGImage`, which uses the injected
-        // session. The mid-flight `URLError(.cancelled)` must be normalized to
-        // `CancellationError` by `resolveOGImage` and rethrown unchanged by
+        // `thumbnailURL: nil` so the Priority-1 `cacheThumbnail` call is skipped; the
+        // Priority-2 `cacheThumbnail` (on a resolved og:image URL) is also never reached
+        // because the mock makes `resolveOGImage` throw `CancellationError` from the
+        // mid-stream `URLError(.cancelled)` before it can return `.found`. Both
+        // `cacheThumbnail` invocations — which use the un-injected `URLSession.shared` —
+        // are therefore avoided. The mid-flight `URLError(.cancelled)` must be normalized
+        // to `CancellationError` by `resolveOGImage` and rethrown unchanged by
         // `resolveAndCacheThumbnail` — *not* swallowed and reported as
         // `.transientFailure`. If a future refactor accidentally catches the rethrow
         // somewhere along the integration path, this test fails.
@@ -210,8 +213,6 @@ struct ArticleThumbnailServiceTests {
             )
             Issue.record("Expected resolveAndCacheThumbnail to throw CancellationError, but it returned normally")
         } catch is CancellationError {
-            // Expected: the mid-flight URLError(.cancelled) was normalized to
-            // CancellationError by resolveOGImage and propagated by resolveAndCacheThumbnail.
         } catch {
             Issue.record("Expected CancellationError, got \(String(describing: error))")
         }
