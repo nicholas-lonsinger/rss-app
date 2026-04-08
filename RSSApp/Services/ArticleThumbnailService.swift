@@ -100,11 +100,9 @@ struct ArticleThumbnailService: ArticleThumbnailCaching {
             Self.logger.warning("Network error caching thumbnail for \(remoteURL.absoluteString, privacy: .public): \(urlError, privacy: .public)")
             return .transientFailure
         } catch {
-            // RATIONALE: Unknown non-URLError, non-CancellationError escapes from URLSession
-            // (e.g. a future framework surprise or wrapper we don't yet know about). Defaulting
-            // to .transientFailure is the conservative safe choice — "give up forever"
-            // (.permanentFailure) is wrong for an unknown error whose retryability is unclear.
-            // Logged at .error so any unexpected escape is immediately visible in persisted logs.
+            // RATIONALE: Unknown errors have unclear retryability; .transientFailure is the safer
+            // default over permanently blacklisting a URL we can't classify. Logged at .error so
+            // unexpected escapes remain visible in persisted logs.
             Self.logger.error("Unexpected error caching thumbnail for \(remoteURL.absoluteString, privacy: .public): \(error, privacy: .public)")
             return .transientFailure
         }
@@ -271,6 +269,8 @@ struct ArticleThumbnailService: ArticleThumbnailCaching {
             Self.logger.warning("Network error fetching article page for og:image from \(articleLink.absoluteString, privacy: .public): \(urlError, privacy: .public)")
             return .fetchFailed
         } catch {
+            // RATIONALE: Unknown errors have unclear retryability; .fetchFailed (transient) is the
+            // safer default over permanently blacklisting a URL we can't classify.
             Self.logger.warning("Failed to fetch article page for og:image from \(articleLink.absoluteString, privacy: .public): \(error, privacy: .public)")
             return .fetchFailed
         }
@@ -304,6 +304,8 @@ struct ArticleThumbnailService: ArticleThumbnailCaching {
             Self.logger.warning("Network error streaming article page for og:image from \(articleLink.absoluteString, privacy: .public): \(urlError, privacy: .public)")
             return .fetchFailed
         } catch {
+            // RATIONALE: Unknown errors have unclear retryability; .fetchFailed (transient) is the
+            // safer default over permanently blacklisting a URL we can't classify.
             Self.logger.warning("Failed to stream article page for og:image from \(articleLink.absoluteString, privacy: .public): \(error, privacy: .public)")
             return .fetchFailed
         }
