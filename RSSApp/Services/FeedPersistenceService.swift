@@ -489,11 +489,12 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
     ///    resurfaces as unread after a publisher revision).
     ///
     /// Bulk paths (`markAllArticlesRead(for:)`, `markAllArticlesRead()`) are not
-    /// destructive: their fetch predicates filter on `!$0.isRead` (so they only
-    /// ever touch rows whose `readDate` is already `nil`), and their loop bodies
-    /// also guard on `article.readDate == nil` before stamping — mirroring this
-    /// method. Both layers together mean the first-read contract cannot be broken
-    /// even if a future refactor loosens the predicate (issue #282).
+    /// destructive: their fetch predicates filter on `!$0.isRead` (and the
+    /// write-side invariant — every path clearing `isRead` also clears `readDate`
+    /// — means every fetched row arrives with `readDate == nil`), and their loop
+    /// bodies also guard on `article.readDate == nil` before stamping — mirroring
+    /// this method. Both layers together mean the first-read contract cannot be
+    /// broken even if a future refactor loosens the predicate (issue #282).
     ///
     /// Also clears the issue #74 `wasUpdated` flag on the read transition. See the
     /// doc comment on `PersistentArticle.wasUpdated` for the asymmetric-clear
@@ -552,9 +553,11 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
         for article in unreadArticles {
             article.isRead = true
             // Belt-and-suspenders guard mirroring `markArticleRead`: stamp `readDate`
-            // only when it is nil, even though the fetch predicate above already
-            // guarantees every row here has `readDate == nil`. If a future refactor
-            // loosens or drops the `!$0.isRead` predicate, this guard prevents
+            // only when it is nil. The `!$0.isRead` predicate does not filter on
+            // `readDate` directly, but the write-side invariant — every path that
+            // clears `isRead` also clears `readDate` — means every row fetched here
+            // has `readDate == nil` in practice. If a future write path breaks that
+            // invariant, or if the predicate is loosened, this guard prevents
             // silently clobbering existing first-read timestamps (issue #282).
             if article.readDate == nil {
                 article.readDate = now
@@ -582,11 +585,13 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
         for article in unreadArticles {
             article.isRead = true
             // Belt-and-suspenders guard mirroring `markArticleRead` and the per-feed
-            // bulk path above: stamp `readDate` only when nil. The `!$0.isRead`
-            // predicate already guarantees every row here has `readDate == nil`, but
-            // this guard makes the first-read contract locally self-enforcing so a
-            // future predicate change cannot silently overwrite existing timestamps
-            // (issue #282).
+            // bulk path above: stamp `readDate` only when it is nil. The `!$0.isRead`
+            // predicate does not filter on `readDate` directly, but the write-side
+            // invariant — every path that clears `isRead` also clears `readDate` —
+            // means every row fetched here has `readDate == nil` in practice. If a
+            // future write path breaks that invariant, or if the predicate is
+            // loosened, this guard prevents silently clobbering existing first-read
+            // timestamps (issue #282).
             if article.readDate == nil {
                 article.readDate = now
             }
