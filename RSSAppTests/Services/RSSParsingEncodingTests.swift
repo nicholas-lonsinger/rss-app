@@ -344,7 +344,8 @@ struct RSSParsingEncodingTests {
         // payload whose declaration *lies* and claims to be UTF-8 — the sniffer
         // must trust the BOM, transcode the bytes as UTF-16 LE, and produce a
         // parseable feed. A reordering refactor that consulted the declaration
-        // before the BOM would decode garbage and the parse would fail.
+        // before the BOM would miss the BOM's authority, hand XMLParser raw
+        // UTF-16 bytes under a UTF-8 assumption, and the parse would fail.
         let xml = """
         <?xml version="1.0" encoding="UTF-8"?>
         <rss version="2.0"><channel><title>BOM wins</title><item><title>대한민국</title><description>Hangul body</description></item></channel></rss>
@@ -379,13 +380,13 @@ struct RSSParsingEncodingTests {
 
     // MARK: - Malformed declarations
 
-    @Test("Declaration scanner returns nil when '=' is missing after encoding")
-    func scanMalformedMissingEqualsSign() {
+    @Test("Declaration scanner returns nil when no value follows the '=' after encoding")
+    func scanMalformedNoValueAfterEquals() {
         // `encoding=` followed immediately by `?>` — the `=` is present but the
-        // value is empty and there is no quote, so the scanner cannot extract a
-        // name. The current implementation skips whitespace, sees the `?` of `?>`,
-        // and bails out at the quote check. A future refactor that lazily defaults
-        // to "" or returns the empty string would slip past the rest of the suite.
+        // declaration ends immediately after it, so the post-`=` bounds check
+        // (`guard cursor < declaration.endIndex`) returns nil before any
+        // quote-handling runs. A future refactor that lazily defaults to "" or
+        // returns the empty string would slip past the rest of the suite.
         let data = Data("<?xml version=\"1.0\" encoding=?><rss/>".utf8)
         #expect(EncodingSniffer.scanEncodingDeclaration(data) == nil)
     }
@@ -423,15 +424,16 @@ struct RSSParsingEncodingTests {
     @Test("Declaration scanner finds an encoding attribute that ends just inside the 256-byte window")
     func scanEncodingNearWindowEdge() {
         // Pad the prolog with whitespace between `<?xml` and `encoding=` so the
-        // closing `?>` lands at roughly byte 250 — comfortably inside the
-        // 256-byte scan window. The scanner must still extract "Big5".
-        // Construction: "<?xml version=\"1.0\" " (20) + spaces (213) + "encoding=\"Big5\"?>" (17) = 250 bytes.
+        // closing `?>` lands at roughly byte 250 — inside the 256-byte scan
+        // window. The scanner must still extract "Big5".
+        // Construction: "<?xml version=\"1.0\" " (20) + spaces (213) + "encoding=\"Big5\"?>" (17) = 250 bytes,
+        // plus trailing "<rss/>" (6) = 256 bytes total.
         let head = "<?xml version=\"1.0\" "
         let tail = "encoding=\"Big5\"?>"
         let padCount = 250 - head.count - tail.count
         let prolog = head + String(repeating: " ", count: padCount) + tail + "<rss/>"
         let data = Data(prolog.utf8)
-        #expect(prolog.utf8.count >= head.count + tail.count + padCount)
+        #expect(prolog.utf8.count == 256)
         #expect(EncodingSniffer.scanEncodingDeclaration(data) == "Big5")
     }
 
@@ -449,6 +451,7 @@ struct RSSParsingEncodingTests {
         let padCount = 270 - head.count - tail.count
         let prolog = head + String(repeating: " ", count: padCount) + tail + "<rss/>"
         let data = Data(prolog.utf8)
+        #expect(prolog.utf8.count == 276)
         #expect(prolog.utf8.count > EncodingSniffer.prologScanWindow)
         #expect(EncodingSniffer.scanEncodingDeclaration(data) == nil)
     }
