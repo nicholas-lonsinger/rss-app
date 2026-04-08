@@ -836,14 +836,6 @@ struct EmptyFeedEscalationTests {
         DiagnosticRecorder.install(sink)
         defer { DiagnosticRecorder.uninstall() }
 
-        // A feed that declares an unrecognised encoding but whose body content
-        // cannot survive as UTF-8 because it is actually Big5 bytes. After the
-        // prolog is stripped the XML parser will see garbage and produce zero
-        // articles (or possibly fail). We construct the scenario conservatively:
-        // a valid-looking channel structure whose article title contains a
-        // non-ASCII Big5 sequence, so the stripped-and-passed-through body
-        // will parse the channel but garble the article.
-        //
         // Use a feed with an unrecognised encoding name so we reliably hit the
         // `.unknownEncodingFallback` path inside `transcodeToUTF8IfNeeded`.
         // The body is valid UTF-8 so the channel parses successfully, but the
