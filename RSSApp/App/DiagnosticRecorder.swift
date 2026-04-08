@@ -20,8 +20,10 @@ struct DiagnosticEvent: Sendable, Equatable {
     let level: Level
 
     /// Pre-formatted message. Call sites should include any interpolated values
-    /// directly in the string (the recorder is off the hot path in production,
-    /// so the formatting cost is only paid when tests are running).
+    /// directly in the string. Because the recorder is off the hot path in
+    /// production, the interpolation cost is amortized over rare fallback
+    /// events; do not adopt this seam on hot paths without introducing an
+    /// `@autoclosure` variant.
     let message: String
 
     enum Level: String, Sendable, Equatable {
@@ -90,12 +92,12 @@ protocol DiagnosticSink: Sendable {
 /// for code paths that run off the main actor.
 enum DiagnosticRecorder {
 
-    private static let slot = OSAllocatedUnfairLock<(any DiagnosticSink)?>(initialState: nil)
+    private static let active = OSAllocatedUnfairLock<(any DiagnosticSink)?>(initialState: nil)
 
     /// Records a diagnostic event. No-op (single lock + nil check) when no sink
     /// is installed, which is the production case.
     static func record(category: String, level: DiagnosticEvent.Level, message: String) {
-        let sink = slot.withLock { $0 }
+        let sink = active.withLock { $0 }
         guard let sink else { return }
         sink.record(DiagnosticEvent(category: category, level: level, message: message))
     }
@@ -105,7 +107,7 @@ enum DiagnosticRecorder {
     /// own sinks).
     @discardableResult
     static func install(_ sink: any DiagnosticSink) -> (any DiagnosticSink)? {
-        slot.withLock { state in
+        active.withLock { state in
             let previous = state
             state = sink
             return previous
@@ -116,7 +118,7 @@ enum DiagnosticRecorder {
     /// installed. Returns the removed sink, if any.
     @discardableResult
     static func uninstall() -> (any DiagnosticSink)? {
-        slot.withLock { state in
+        active.withLock { state in
             let previous = state
             state = nil
             return previous
