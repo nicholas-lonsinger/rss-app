@@ -269,10 +269,10 @@ struct ArticleThumbnailService: ArticleThumbnailCaching {
             Self.logger.warning("Network error fetching article page for og:image from \(articleLink.absoluteString, privacy: .public): \(urlError, privacy: .public)")
             return .fetchFailed
         } catch {
-            // RATIONALE: Unknown errors have unclear retryability; .fetchFailed (transient) is the
-            // safer default over permanently blacklisting a URL we can't classify. Logged at .error
+            // RATIONALE: Unknown errors have unclear retryability; .fetchFailed is the safer
+            // default over permanently blacklisting a URL we can't classify. Logged at .error
             // so unexpected escapes remain visible in persisted logs.
-            Self.logger.error("Failed to fetch article page for og:image from \(articleLink.absoluteString, privacy: .public): \(error, privacy: .public)")
+            Self.logger.error("Unexpected error fetching article page for og:image from \(articleLink.absoluteString, privacy: .public): \(error, privacy: .public)")
             return .fetchFailed
         }
 
@@ -305,10 +305,10 @@ struct ArticleThumbnailService: ArticleThumbnailCaching {
             Self.logger.warning("Network error streaming article page for og:image from \(articleLink.absoluteString, privacy: .public): \(urlError, privacy: .public)")
             return .fetchFailed
         } catch {
-            // RATIONALE: Unknown errors have unclear retryability; .fetchFailed (transient) is the
-            // safer default over permanently blacklisting a URL we can't classify. Logged at .error
+            // RATIONALE: Unknown errors have unclear retryability; .fetchFailed is the safer
+            // default over permanently blacklisting a URL we can't classify. Logged at .error
             // so unexpected escapes remain visible in persisted logs.
-            Self.logger.error("Failed to stream article page for og:image from \(articleLink.absoluteString, privacy: .public): \(error, privacy: .public)")
+            Self.logger.error("Unexpected error streaming article page for og:image from \(articleLink.absoluteString, privacy: .public): \(error, privacy: .public)")
             return .fetchFailed
         }
 
