@@ -71,7 +71,6 @@ struct ArticleThumbnailView: View {
             )
         } catch {
             // View task was cancelled (e.g., row scrolled off-screen) — bail out quietly.
-            // throws(CancellationError) guarantees the only escapable error is CancellationError.
             return
         }
         guard result == .cached, let fileURL = thumbnailService.cachedThumbnailFileURL(for: articleID) else {

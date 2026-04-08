@@ -30,8 +30,8 @@ import Foundation
 /// issue #228.
 ///
 /// Issue #248 tracked the missing test coverage for the load-bearing rung.
-// RATIONALE: @unchecked Sendable is safe because this mock is only used in
-// single-threaded test contexts where properties are set before the async call.
+// RATIONALE: @unchecked Sendable is safe because each test creates its own instance
+// and sets all mutable properties before the first await — no concurrent mutation of a shared instance.
 final class MockSlowHTMLURLSessionProvider: URLSessionBytesProviding, @unchecked Sendable {
 
     /// Initial bytes delivered to the URL loading client before the failure.
@@ -78,10 +78,11 @@ final class MockSlowHTMLURLSessionProvider: URLSessionBytesProviding, @unchecked
 /// the error from inside its `for try await byte in bytes` loop.
 final class MockSlowHTMLURLProtocol: URLProtocol {
 
-    // RATIONALE: URLProtocol.Sendable is @available(*, unavailable) in iOS 26 / Swift 6,
-    // so the subclass cannot use @unchecked Sendable directly. WeakBox carries the weak
-    // self reference across the asyncAfter @Sendable boundary without triggering either
-    // the "already unavailable" or "non-Sendable capture" warnings.
+    // RATIONALE: The Sendable conformance for URLProtocol is marked @available(*, unavailable)
+    // in iOS 26 / Swift 6, so the subclass cannot use @unchecked Sendable directly. WeakBox
+    // carries the weak self reference across the asyncAfter @Sendable boundary without
+    // triggering either the "already unavailable" or "non-Sendable capture" warnings.
+    // If Apple lifts this restriction, WeakBox can be removed and [weak self] capture restored.
     private final class WeakBox: @unchecked Sendable {
         weak var value: MockSlowHTMLURLProtocol?
         init(_ value: MockSlowHTMLURLProtocol) { self.value = value }
