@@ -653,9 +653,9 @@ struct ArticleThumbnailServiceTests {
     // MARK: - resolveOGImage Pre-Flight URLError Classification
     //
     // Coverage for issue #252: the generic `catch let urlError as URLError` arm
-    // in `resolveOGImage(from:)` (lines ~265-271) handles non-cancellation
-    // `URLError`s — DNS failures, timeouts, no-network — and maps them to
-    // `.fetchFailed` so the prefetcher can retry. The URLProtocol stub used by
+    // in `resolveOGImage(from:)` handles non-cancellation `URLError`s — DNS
+    // failures, timeouts, no-network — and maps them to `.fetchFailed` so the
+    // prefetcher can retry. The URLProtocol stub used by
     // `MockHTMLURLSessionProvider` always succeeds, so these branches were
     // unreachable until the mock gained a `thrownError` injection point that
     // makes `bytes(for:)` throw before any URL loading begins.
@@ -743,9 +743,10 @@ struct ArticleThumbnailServiceTests {
         // `extractOGImageURL` returns nil and the result is `.notFound`.
         //
         // The service uses `htmlHeadMaxBytes = 51_200` (50 KB) as the head cap.
-        // We pad the body to 52_000 bytes — ~800 bytes past the cap — to make
-        // the boundary impossible to miss even if the loop's append-then-check
-        // ordering ever shifts by one.
+        // We pad the body to 52_000 bytes — ~800 bytes past the cap — to leave
+        // headroom in case the cap constant grows modestly or the loop is
+        // refactored to buffer multiple bytes per iteration. This keeps the
+        // meta tag well outside any plausible future read window.
         let headCap = 51_200
         let openingComment = "<!--"
         let closingComment = "-->"
