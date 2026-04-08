@@ -644,6 +644,46 @@ struct RSSParsingServiceTests {
         #expect(feed.articles[1].updatedDate == nil)
     }
 
+    @Test("When multiple update signals appear on one item, the last one in source order wins")
+    func multipleUpdateSignalsLastWins() throws {
+        // Pins the "last-wins" accumulator semantics for itemUpdatedDate. The switch arm
+        // sets itemUpdatedDate unconditionally on every match, so the last encountered
+        // element in source order determines the final value. A future contributor might
+        // plausibly add an `if itemUpdatedDate.isEmpty` guard (mirroring the pubDate
+        // fallback pattern) which would silently flip the semantics to first-wins. That
+        // change would break update-detection logic (issue #74) without any other test
+        // failing. This test pins the contract explicitly.
+        let xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <rss version="2.0"
+                 xmlns:dc="http://purl.org/dc/elements/1.1/"
+                 xmlns:atom="http://www.w3.org/2005/Atom">
+            <channel>
+                <title>Multi Signal</title>
+                <link>https://example.com</link>
+                <description>desc</description>
+                <item>
+                    <title>Item</title>
+                    <link>https://example.com/multi</link>
+                    <description>d</description>
+                    <guid>multi-signal-guid</guid>
+                    <pubDate>Mon, 30 Mar 2026 12:00:00 +0000</pubDate>
+                    <dc:modified>2026-04-01T08:00:00Z</dc:modified>
+                    <atom:updated>2026-04-02T09:00:00Z</atom:updated>
+                </item>
+            </channel>
+            </rss>
+            """
+        let feed = try service.parse(Data(xml.utf8))
+
+        let updated = try #require(feed.articles[0].updatedDate)
+        let calendar = Calendar(identifier: .gregorian)
+        let day = calendar.component(.day, from: updated)
+        // atom:updated (Apr 2) appears after dc:modified (Apr 1) in source order, so it
+        // must win. If the semantics were first-wins, day would be 1 instead.
+        #expect(day == 2)
+    }
+
     // MARK: - Date Parsing (Absolute Moment)
 
     /// Builds a minimal RSS feed with a single item and a configurable pubDate string.
