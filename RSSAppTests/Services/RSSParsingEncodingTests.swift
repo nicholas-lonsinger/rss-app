@@ -334,4 +334,125 @@ struct RSSParsingEncodingTests {
         let stripped = EncodingSniffer.stripProlog(prolog + body)
         #expect(stripped == body)
     }
+
+    // MARK: - BOM precedence over declaration
+
+    @Test("UTF-16 LE BOM beats an in-body encoding=\"UTF-8\" declaration")
+    func bomBeatsInBandDeclaration() throws {
+        // The XML spec says a byte-order mark is authoritative and overrides any
+        // `encoding="..."` attribute in the declaration. Construct a UTF-16 LE
+        // payload whose declaration *lies* and claims to be UTF-8 — the sniffer
+        // must trust the BOM, transcode the bytes as UTF-16 LE, and produce a
+        // parseable feed. A reordering refactor that consulted the declaration
+        // before the BOM would miss the BOM's authority, hand XMLParser raw
+        // UTF-16 bytes under a UTF-8 assumption, and the parse would fail.
+        let xml = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <rss version="2.0"><channel><title>BOM wins</title><item><title>대한민국</title><description>Hangul body</description></item></channel></rss>
+        """
+        var data = Data([0xFF, 0xFE])
+        data.append(xml.data(using: .utf16LittleEndian)!)
+        let feed = try service.parse(data)
+        #expect(feed.title == "BOM wins")
+        #expect(feed.articles.first?.title == "대한민국")
+        #expect(feed.articles.first?.articleDescription == "Hangul body")
+    }
+
+    // MARK: - ASCII fast-path identity returns
+
+    @Test("ASCII-compatible declared encodings short-circuit and return identical bytes",
+          arguments: ["UTF-8", "utf-8", "utf8", "us-ascii", "US-ASCII", "ascii", "ASCII"])
+    func asciiFastPathReturnsIdentityBytes(declared: String) {
+        // `transcodeToUTF8IfNeeded` shortcuts on `utf-8`, `utf8`, `us-ascii`, and
+        // `ascii` (case-insensitive via `lowercased()`). For these names the function
+        // must return the *exact* input bytes — same length, same content — because
+        // XMLParser handles them natively and any allocation here is wasted work.
+        // Pinning the list as a parameterized test ensures a refactor that adds or
+        // removes a name is caught.
+        let xml = """
+        <?xml version="1.0" encoding="\(declared)"?>
+        <rss version="2.0"><channel><title>fast</title><item><title>x</title></item></channel></rss>
+        """
+        let input = Data(xml.utf8)
+        let output = EncodingSniffer.transcodeToUTF8IfNeeded(input)
+        #expect(output == input, "Expected identity return for declared encoding '\(declared)'")
+    }
+
+    // MARK: - Malformed declarations
+
+    @Test("Declaration scanner returns nil when no value follows the '=' after encoding")
+    func scanMalformedNoValueAfterEquals() {
+        // `encoding=` followed immediately by `?>` — the `=` is present but the
+        // declaration ends immediately after it, so the post-`=` bounds check
+        // (`guard cursor < declaration.endIndex`) returns nil before any
+        // quote-handling runs. A future refactor that lazily defaults to "" or
+        // returns the empty string would slip past the rest of the suite.
+        let data = Data("<?xml version=\"1.0\" encoding=?><rss/>".utf8)
+        #expect(EncodingSniffer.scanEncodingDeclaration(data) == nil)
+    }
+
+    @Test("Declaration scanner returns nil when the opening quote is never closed")
+    func scanMalformedUnclosedQuote() {
+        // `encoding="` opens a quoted value, but `?>` terminates the declaration
+        // before any matching `"` is seen. The scanner must return nil rather than
+        // greedily consuming bytes from the body.
+        let data = Data("<?xml version=\"1.0\" encoding=\"?><rss/>".utf8)
+        #expect(EncodingSniffer.scanEncodingDeclaration(data) == nil)
+    }
+
+    @Test("Declaration scanner returns nil for an empty quoted encoding name")
+    func scanMalformedEmptyName() {
+        // `encoding=""` parses cleanly through the quote-pair logic but yields an
+        // empty name. The function explicitly returns nil for this case so the
+        // caller falls through to the UTF-8 default rather than asking
+        // `CFStringConvertIANACharSetNameToEncoding` to look up "".
+        let data = Data("<?xml version=\"1.0\" encoding=\"\"?><rss/>".utf8)
+        #expect(EncodingSniffer.scanEncodingDeclaration(data) == nil)
+    }
+
+    @Test("Declaration scanner tolerates whitespace around the '=' in encoding attribute")
+    func scanWhitespaceAroundEquals() {
+        // The XML spec permits whitespace on either side of `=` in attribute
+        // assignments. The scanner consumes whitespace before and after the `=`,
+        // so this declaration must resolve to "Big5".
+        let data = Data("<?xml version=\"1.0\" encoding  =  \"Big5\"?><rss/>".utf8)
+        #expect(EncodingSniffer.scanEncodingDeclaration(data) == "Big5")
+    }
+
+    // MARK: - Prolog scan window boundary
+
+    @Test("Declaration scanner finds an encoding attribute that ends just inside the 256-byte window")
+    func scanEncodingNearWindowEdge() {
+        // Pad the prolog with whitespace between `<?xml` and `encoding=` so the
+        // closing `?>` lands at roughly byte 250 — inside the 256-byte scan
+        // window. The scanner must still extract "Big5".
+        // Construction: "<?xml version=\"1.0\" " (20) + spaces (213) + "encoding=\"Big5\"?>" (17) = 250 bytes,
+        // plus trailing "<rss/>" (6) = 256 bytes total.
+        let head = "<?xml version=\"1.0\" "
+        let tail = "encoding=\"Big5\"?>"
+        let padCount = 250 - head.count - tail.count
+        let prolog = head + String(repeating: " ", count: padCount) + tail + "<rss/>"
+        let data = Data(prolog.utf8)
+        #expect(prolog.utf8.count == 256)
+        #expect(EncodingSniffer.scanEncodingDeclaration(data) == "Big5")
+    }
+
+    @Test("Declaration scanner returns nil when the prolog spills past the 256-byte window")
+    func scanEncodingPastWindowEdge() {
+        // Same construction as above, but pad enough that the closing `?>` lands
+        // past byte 256. The scanner only inspects the first `prologScanWindow`
+        // (256) bytes, so `range(of: "?>")` cannot find the terminator and the
+        // function returns nil. This pins the 256 constant numerically: a
+        // refactor that tightened the window to 200 would still pass with the
+        // 250-byte test above but break here, while a refactor that loosened it
+        // to 1024 would silently start succeeding here — both are caught.
+        let head = "<?xml version=\"1.0\" "
+        let tail = "encoding=\"Big5\"?>"
+        let padCount = 270 - head.count - tail.count
+        let prolog = head + String(repeating: " ", count: padCount) + tail + "<rss/>"
+        let data = Data(prolog.utf8)
+        #expect(prolog.utf8.count == 276)
+        #expect(prolog.utf8.count > EncodingSniffer.prologScanWindow)
+        #expect(EncodingSniffer.scanEncodingDeclaration(data) == nil)
+    }
 }
