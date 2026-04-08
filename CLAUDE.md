@@ -57,6 +57,24 @@ When adding new functionality or modifying existing behavior, include unit tests
 - Reuse shared test helpers and factories rather than duplicating setup logic across test files
 - Run the full test suite before committing to ensure nothing is broken
 
+### Test Value Criteria
+
+Every test must earn its place. A test earns its place if either:
+
+- **It catches a realistic bug** — it would fail if a human (or an LLM writing code) made a plausible mistake that produced observably wrong behavior for a user.
+- **It documents a subtle invariant** — it fails when a refactor accidentally drops a non-obvious behavior the code relies on (concurrency ordering, state preservation across restarts, error normalization across layers).
+
+A test does **not** earn its place if it exists only to:
+
+- Cover an uncovered line, branch, or `catch` arm for coverage's sake
+- Pin a specific `Range<Int>` boundary (`(200...299)` vs `200..<299`), operator choice, or other implementation detail the compiler and type system already constrain
+- Pin "invariants" that would only change if someone deliberately rewrote the function (e.g. "DateFormatter is not mutated post-init")
+- Re-verify behavior already covered by an existing test at a different layer
+
+**Test seams in production code are a smell.** If a test requires adding an injection point, mock hook, or alternative code path to `RSSApp/` *solely* so the test can reach a branch, the right answer is usually to drop the test, not add the seam. Seams are justified only when the same seam has a non-test use (e.g. dependency injection that also enables previews or alternate backends).
+
+**Guidance for `/pr-review-toolkit:review-pr` and its `pr-test-analyzer` sub-agent:** When evaluating test coverage in this project, do NOT flag missing branch or line coverage as a finding unless the uncovered code has a realistic failure mode a user would observe. Rate coverage gaps against the "earns its place" rule above, not against completeness. If the only way to reach a branch is to add a production-code test seam, recommend closing the gap by deleting the unreachable branch, not by adding the test. Do not file `review-debt/test-gap` issues for branch-coverage fillers — they should be dismissed, not captured.
+
 ### Logging
 
 The app uses Apple's `os.Logger` (subsystem `com.nicholas-lonsinger.rss-app`) with per-component categories. Each service, view model, or model that logs declares a `private static let logger`. When adding or modifying functionality, include log calls at appropriate levels:
