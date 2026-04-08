@@ -56,7 +56,8 @@ struct RSSParsingService: Sendable {
             ),
             articles: delegate.articles,
             lastUpdated: delegate.channelUpdated,
-            imageURL: imageURL
+            imageURL: imageURL,
+            format: delegate.feedFormat ?? .rss
         )
 
         // If the sniffer took a lossy fallback path and the parse produced zero
@@ -450,6 +451,9 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
     private static let logger = Logger(category: "RSSParserDelegate")
 
     var foundChannel = false
+    /// Set when the root container element is first encountered. `<channel>` → `.rss`,
+    /// `<feed>` → `.atom`. Remains nil if neither element was seen (malformed feed).
+    var feedFormat: FeedFormat?
     var channelTitle = ""
     var channelLink = ""
     var channelDescription = ""
@@ -546,6 +550,13 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
         switch name {
         case "channel", "feed":
             foundChannel = true
+            // Capture the root container format the first time we see it. `<channel>`
+            // belongs to RSS 2.0 / RSS 0.9x; `<feed>` is the Atom root element. We
+            // guard on `feedFormat == nil` to avoid overwriting if both appear (rare
+            // but possible in deeply nested or malformed payloads).
+            if feedFormat == nil {
+                feedFormat = (name == "feed") ? .atom : .rss
+            }
 
         case "image":
             if !isInsideItem {

@@ -253,4 +253,198 @@ struct AddFeedViewModelTests {
         #expect(viewModel.errorMessage == nil)
         #expect(viewModel.didAddFeed == true)
     }
+
+    // MARK: - Atom Alternate Discovery
+
+    @Test("addFeed offers Atom alternate and defers persistence when RSS feed has one")
+    @MainActor
+    func addFeedOffersAtomAlternate() async {
+        let mockFetching = MockFeedFetchingService()
+        mockFetching.feedToReturn = TestFixtures.makeFeed(title: "My RSS Feed", format: .rss)
+        let mockPersistence = MockFeedPersistenceService()
+        let mockDiscovery = MockAtomDiscoveryService()
+        mockDiscovery.resultToReturn = URL(string: "https://example.com/atom.xml")
+
+        let viewModel = AddFeedViewModel(
+            feedFetching: mockFetching,
+            persistence: mockPersistence,
+            atomDiscovery: mockDiscovery
+        )
+        viewModel.urlInput = "https://example.com/feed"
+        await viewModel.addFeed()
+
+        // Flow should pause at the prompt — nothing persisted yet.
+        #expect(viewModel.atomAlternatePrompt != nil)
+        #expect(viewModel.atomAlternatePrompt?.atomURL.absoluteString == "https://example.com/atom.xml")
+        #expect(viewModel.atomAlternatePrompt?.originalURL.absoluteString == "https://example.com/feed")
+        #expect(viewModel.didAddFeed == false)
+        #expect(mockPersistence.feeds.isEmpty)
+        #expect(mockDiscovery.discoverCallCount == 1)
+    }
+
+    @Test("addFeed skips Atom discovery for Atom feeds")
+    @MainActor
+    func addFeedSkipsDiscoveryForAtom() async {
+        let mockFetching = MockFeedFetchingService()
+        mockFetching.feedToReturn = TestFixtures.makeFeed(title: "My Atom Feed", format: .atom)
+        let mockPersistence = MockFeedPersistenceService()
+        let mockDiscovery = MockAtomDiscoveryService()
+        mockDiscovery.resultToReturn = URL(string: "https://example.com/something.xml")
+
+        let viewModel = AddFeedViewModel(
+            feedFetching: mockFetching,
+            persistence: mockPersistence,
+            atomDiscovery: mockDiscovery
+        )
+        viewModel.urlInput = "https://example.com/atom"
+        await viewModel.addFeed()
+
+        #expect(mockDiscovery.discoverCallCount == 0)
+        #expect(viewModel.atomAlternatePrompt == nil)
+        #expect(viewModel.didAddFeed == true)
+        #expect(mockPersistence.feeds.count == 1)
+    }
+
+    @Test("addFeed proceeds immediately when discovery returns nil")
+    @MainActor
+    func addFeedProceedsWhenNoAtomFound() async {
+        let mockFetching = MockFeedFetchingService()
+        mockFetching.feedToReturn = TestFixtures.makeFeed(format: .rss)
+        let mockPersistence = MockFeedPersistenceService()
+        let mockDiscovery = MockAtomDiscoveryService()
+        mockDiscovery.resultToReturn = nil
+
+        let viewModel = AddFeedViewModel(
+            feedFetching: mockFetching,
+            persistence: mockPersistence,
+            atomDiscovery: mockDiscovery
+        )
+        viewModel.urlInput = "https://example.com/feed"
+        await viewModel.addFeed()
+
+        #expect(mockDiscovery.discoverCallCount == 1)
+        #expect(viewModel.atomAlternatePrompt == nil)
+        #expect(viewModel.didAddFeed == true)
+        #expect(mockPersistence.feeds.count == 1)
+    }
+
+    @Test("keepOriginalFeed persists the RSS feed that was already fetched")
+    @MainActor
+    func keepOriginalFeedPersistsFetchedFeed() async {
+        let mockFetching = MockFeedFetchingService()
+        mockFetching.feedToReturn = TestFixtures.makeFeed(title: "Original RSS", format: .rss)
+        let mockPersistence = MockFeedPersistenceService()
+        let mockDiscovery = MockAtomDiscoveryService()
+        mockDiscovery.resultToReturn = URL(string: "https://example.com/atom.xml")
+
+        let viewModel = AddFeedViewModel(
+            feedFetching: mockFetching,
+            persistence: mockPersistence,
+            atomDiscovery: mockDiscovery
+        )
+        viewModel.urlInput = "https://example.com/feed"
+        await viewModel.addFeed()
+        #expect(viewModel.atomAlternatePrompt != nil)
+
+        // User declines the switch.
+        let fetchesBefore = mockFetching.feedsByURL.count
+        viewModel.keepOriginalFeed()
+
+        #expect(viewModel.atomAlternatePrompt == nil)
+        #expect(viewModel.didAddFeed == true)
+        #expect(mockPersistence.feeds.count == 1)
+        #expect(mockPersistence.feeds[0].title == "Original RSS")
+        #expect(mockPersistence.feeds[0].feedURL == URL(string: "https://example.com/feed"))
+        // No second fetch — the already-fetched feed is reused.
+        #expect(mockFetching.feedsByURL.count == fetchesBefore)
+    }
+
+    @Test("switchToAtomAlternate fetches Atom URL and persists that feed")
+    @MainActor
+    func switchToAtomAlternatePersistsAtomFeed() async {
+        let rssURL = URL(string: "https://example.com/feed")!
+        let atomURL = URL(string: "https://example.com/atom.xml")!
+
+        let mockFetching = MockFeedFetchingService()
+        mockFetching.feedsByURL[rssURL] = TestFixtures.makeFeed(title: "RSS Version", format: .rss)
+        mockFetching.feedsByURL[atomURL] = TestFixtures.makeFeed(title: "Atom Version", format: .atom)
+        let mockPersistence = MockFeedPersistenceService()
+        let mockDiscovery = MockAtomDiscoveryService()
+        mockDiscovery.resultToReturn = atomURL
+
+        let viewModel = AddFeedViewModel(
+            feedFetching: mockFetching,
+            persistence: mockPersistence,
+            atomDiscovery: mockDiscovery
+        )
+        viewModel.urlInput = rssURL.absoluteString
+        await viewModel.addFeed()
+        #expect(viewModel.atomAlternatePrompt != nil)
+
+        // User accepts the switch.
+        await viewModel.switchToAtomAlternate()
+
+        #expect(viewModel.atomAlternatePrompt == nil)
+        #expect(viewModel.didAddFeed == true)
+        #expect(viewModel.urlInput == atomURL.absoluteString)
+        #expect(mockPersistence.feeds.count == 1)
+        #expect(mockPersistence.feeds[0].title == "Atom Version")
+        #expect(mockPersistence.feeds[0].feedURL == atomURL)
+    }
+
+    @Test("switchToAtomAlternate surfaces error when Atom fetch fails")
+    @MainActor
+    func switchToAtomAlternateHandlesFetchFailure() async {
+        let rssURL = URL(string: "https://example.com/feed")!
+        let atomURL = URL(string: "https://example.com/atom.xml")!
+
+        let mockFetching = MockFeedFetchingService()
+        mockFetching.feedsByURL[rssURL] = TestFixtures.makeFeed(title: "RSS Version", format: .rss)
+        mockFetching.errorsByURL[atomURL] = FeedFetchingError.invalidResponse(statusCode: 500)
+        let mockPersistence = MockFeedPersistenceService()
+        let mockDiscovery = MockAtomDiscoveryService()
+        mockDiscovery.resultToReturn = atomURL
+
+        let viewModel = AddFeedViewModel(
+            feedFetching: mockFetching,
+            persistence: mockPersistence,
+            atomDiscovery: mockDiscovery
+        )
+        viewModel.urlInput = rssURL.absoluteString
+        await viewModel.addFeed()
+        await viewModel.switchToAtomAlternate()
+
+        #expect(viewModel.atomAlternatePrompt == nil)
+        #expect(viewModel.didAddFeed == false)
+        #expect(viewModel.errorMessage == "Could not load feed. Check the URL and try again.")
+        #expect(mockPersistence.feeds.isEmpty)
+    }
+
+    @Test("switchToAtomAlternate reports duplicate when Atom URL already subscribed")
+    @MainActor
+    func switchToAtomAlternateDetectsDuplicate() async {
+        let rssURL = URL(string: "https://example.com/feed")!
+        let atomURL = URL(string: "https://example.com/atom.xml")!
+
+        let mockFetching = MockFeedFetchingService()
+        mockFetching.feedsByURL[rssURL] = TestFixtures.makeFeed(title: "RSS Version", format: .rss)
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [TestFixtures.makePersistentFeed(feedURL: atomURL)]
+        let mockDiscovery = MockAtomDiscoveryService()
+        mockDiscovery.resultToReturn = atomURL
+
+        let viewModel = AddFeedViewModel(
+            feedFetching: mockFetching,
+            persistence: mockPersistence,
+            atomDiscovery: mockDiscovery
+        )
+        viewModel.urlInput = rssURL.absoluteString
+        await viewModel.addFeed()
+        await viewModel.switchToAtomAlternate()
+
+        #expect(viewModel.didAddFeed == false)
+        #expect(viewModel.errorMessage == "You are already subscribed to this feed.")
+        // Only the pre-existing Atom feed remains; no new feed was added.
+        #expect(mockPersistence.feeds.count == 1)
+    }
 }

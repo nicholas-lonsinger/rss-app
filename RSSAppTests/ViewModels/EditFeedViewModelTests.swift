@@ -126,4 +126,142 @@ struct EditFeedViewModelTests {
 
         #expect(viewModel.urlInput == "https://example.com/feed")
     }
+
+    // MARK: - Atom Alternate Discovery
+
+    @Test("saveFeed skips Atom discovery when URL is unchanged")
+    @MainActor
+    func saveFeedSkipsDiscoveryWhenUnchanged() async {
+        let feed = TestFixtures.makePersistentFeed(feedURL: URL(string: "https://example.com/feed")!)
+        let mockDiscovery = MockAtomDiscoveryService()
+        mockDiscovery.resultToReturn = URL(string: "https://example.com/atom.xml")
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+
+        let viewModel = EditFeedViewModel(
+            feed: feed,
+            feedFetching: MockFeedFetchingService(),
+            persistence: mockPersistence,
+            atomDiscovery: mockDiscovery
+        )
+        // urlInput already equals feed.feedURL — no change.
+        await viewModel.saveFeed()
+
+        #expect(mockDiscovery.discoverCallCount == 0)
+        #expect(viewModel.didSave == true)
+        #expect(viewModel.atomAlternatePrompt == nil)
+    }
+
+    @Test("saveFeed offers Atom alternate and defers persistence when new URL is RSS")
+    @MainActor
+    func saveFeedOffersAtomAlternate() async {
+        let feed = TestFixtures.makePersistentFeed(feedURL: URL(string: "https://old.com/feed")!)
+        let mockFetching = MockFeedFetchingService()
+        mockFetching.feedToReturn = TestFixtures.makeFeed(title: "New RSS", format: .rss)
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+        let mockDiscovery = MockAtomDiscoveryService()
+        mockDiscovery.resultToReturn = URL(string: "https://new.com/atom.xml")
+
+        let viewModel = EditFeedViewModel(
+            feed: feed,
+            feedFetching: mockFetching,
+            persistence: mockPersistence,
+            atomDiscovery: mockDiscovery
+        )
+        viewModel.urlInput = "https://new.com/feed"
+        await viewModel.saveFeed()
+
+        #expect(viewModel.atomAlternatePrompt != nil)
+        #expect(viewModel.atomAlternatePrompt?.atomURL.absoluteString == "https://new.com/atom.xml")
+        #expect(viewModel.didSave == false)
+        // Persistence should not have been updated yet.
+        #expect(feed.feedURL == URL(string: "https://old.com/feed"))
+    }
+
+    @Test("saveFeed skips discovery for Atom feeds")
+    @MainActor
+    func saveFeedSkipsDiscoveryForAtomFormat() async {
+        let feed = TestFixtures.makePersistentFeed(feedURL: URL(string: "https://old.com/feed")!)
+        let mockFetching = MockFeedFetchingService()
+        mockFetching.feedToReturn = TestFixtures.makeFeed(title: "New Atom", format: .atom)
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+        let mockDiscovery = MockAtomDiscoveryService()
+        mockDiscovery.resultToReturn = URL(string: "https://anywhere/atom.xml")
+
+        let viewModel = EditFeedViewModel(
+            feed: feed,
+            feedFetching: mockFetching,
+            persistence: mockPersistence,
+            atomDiscovery: mockDiscovery
+        )
+        viewModel.urlInput = "https://new.com/atom"
+        await viewModel.saveFeed()
+
+        #expect(mockDiscovery.discoverCallCount == 0)
+        #expect(viewModel.didSave == true)
+        #expect(feed.feedURL == URL(string: "https://new.com/atom"))
+        #expect(feed.title == "New Atom")
+    }
+
+    @Test("keepOriginalFeed persists the RSS feed fetched during saveFeed")
+    @MainActor
+    func keepOriginalFeedPersistsRSS() async {
+        let feed = TestFixtures.makePersistentFeed(feedURL: URL(string: "https://old.com/feed")!)
+        let mockFetching = MockFeedFetchingService()
+        mockFetching.feedToReturn = TestFixtures.makeFeed(title: "New RSS", format: .rss)
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+        let mockDiscovery = MockAtomDiscoveryService()
+        mockDiscovery.resultToReturn = URL(string: "https://new.com/atom.xml")
+
+        let viewModel = EditFeedViewModel(
+            feed: feed,
+            feedFetching: mockFetching,
+            persistence: mockPersistence,
+            atomDiscovery: mockDiscovery
+        )
+        viewModel.urlInput = "https://new.com/feed"
+        await viewModel.saveFeed()
+        #expect(viewModel.atomAlternatePrompt != nil)
+
+        viewModel.keepOriginalFeed()
+
+        #expect(viewModel.atomAlternatePrompt == nil)
+        #expect(viewModel.didSave == true)
+        #expect(feed.feedURL == URL(string: "https://new.com/feed"))
+        #expect(feed.title == "New RSS")
+    }
+
+    @Test("switchToAtomAlternate fetches and persists the Atom URL")
+    @MainActor
+    func switchToAtomAlternatePersistsAtomURL() async {
+        let feed = TestFixtures.makePersistentFeed(feedURL: URL(string: "https://old.com/feed")!)
+        let rssURL = URL(string: "https://new.com/feed")!
+        let atomURL = URL(string: "https://new.com/atom.xml")!
+
+        let mockFetching = MockFeedFetchingService()
+        mockFetching.feedsByURL[rssURL] = TestFixtures.makeFeed(title: "New RSS", format: .rss)
+        mockFetching.feedsByURL[atomURL] = TestFixtures.makeFeed(title: "New Atom", format: .atom)
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+        let mockDiscovery = MockAtomDiscoveryService()
+        mockDiscovery.resultToReturn = atomURL
+
+        let viewModel = EditFeedViewModel(
+            feed: feed,
+            feedFetching: mockFetching,
+            persistence: mockPersistence,
+            atomDiscovery: mockDiscovery
+        )
+        viewModel.urlInput = rssURL.absoluteString
+        await viewModel.saveFeed()
+        await viewModel.switchToAtomAlternate()
+
+        #expect(viewModel.didSave == true)
+        #expect(viewModel.urlInput == atomURL.absoluteString)
+        #expect(feed.feedURL == atomURL)
+        #expect(feed.title == "New Atom")
+    }
 }

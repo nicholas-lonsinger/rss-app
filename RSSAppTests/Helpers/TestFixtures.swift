@@ -750,7 +750,8 @@ enum TestFixtures {
         feedDescription: String = "A test feed",
         articles: [Article] = [],
         lastUpdated: Date? = nil,
-        imageURL: URL? = nil
+        imageURL: URL? = nil,
+        format: FeedFormat = .rss
     ) -> RSSFeed {
         RSSFeed(
             title: title,
@@ -758,7 +759,8 @@ enum TestFixtures {
             feedDescription: feedDescription,
             articles: articles,
             lastUpdated: lastUpdated,
-            imageURL: imageURL
+            imageURL: imageURL,
+            format: format
         )
     }
 

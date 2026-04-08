@@ -62,6 +62,23 @@ struct AddFeedView: View {
             .onChange(of: viewModel.didAddFeed) { _, newValue in
                 if newValue { dismiss() }
             }
+            .alert(
+                "Atom feed available",
+                isPresented: Binding(
+                    get: { viewModel.atomAlternatePrompt != nil },
+                    set: { if !$0 { viewModel.atomAlternatePrompt = nil } }
+                ),
+                presenting: viewModel.atomAlternatePrompt
+            ) { prompt in
+                Button("Switch to Atom") {
+                    Task { await viewModel.switchToAtomAlternate() }
+                }
+                Button("Keep RSS", role: .cancel) {
+                    viewModel.keepOriginalFeed()
+                }
+            } message: { prompt in
+                Text("This site also publishes an Atom version of this feed at \(prompt.atomURL.absoluteString). Atom feeds often include richer metadata.")
+            }
         }
     }
 }
