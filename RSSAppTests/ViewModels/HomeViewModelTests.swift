@@ -1822,4 +1822,238 @@ struct HomeViewModelTests {
         #expect(retryResult == .loaded)
         #expect(viewModel.allArticlesList.count > countBeforeError)
     }
+
+    // MARK: - Article Identity Stability
+
+    /// Regression guard for #256. `ArticleReaderView` observes the displayed article's
+    /// `articleID` (`.onChange(of: article.articleID)`) to drive both extraction reset
+    /// and mark-as-read. That makes `articleID` stability across `loadAllArticles()`
+    /// load-bearing: if a reload produced different `articleID` values for the same
+    /// logical entries, the reader would fire spurious `.onChange` events and could
+    /// mark the wrong articles as read.
+    ///
+    /// This variant pre-populates persistence with `pageSize` all-articles entries and
+    /// asserts the first-page `articleID` prefix is unchanged after a subsequent
+    /// `loadAllArticles()` reload.
+    @Test("loadAllArticles preserves articleID prefix on reload")
+    @MainActor
+    func loadAllArticlesPreservesArticleIDPrefixOnReload() {
+        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
+        let feed = TestFixtures.makePersistentFeed()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+
+        // pageSize + 5 articles in descending publishedDate order so the first page
+        // is deterministic under the default newest-first sort.
+        let totalCount = HomeViewModel.pageSize + 5
+        let articles = (0..<totalCount).map { i in
+            let article = TestFixtures.makePersistentArticle(
+                articleID: "a\(i)",
+                publishedDate: Date(timeIntervalSince1970: Double(totalCount - i) * 1_000_000)
+            )
+            article.feed = feed
+            return article
+        }
+        mockPersistence.articlesByFeedID[feed.id] = articles
+
+        let viewModel = HomeViewModel(persistence: mockPersistence)
+        viewModel.loadAllArticles()
+
+        #expect(viewModel.allArticlesList.count == HomeViewModel.pageSize)
+        let prefixBefore = viewModel.allArticlesList.map(\.articleID)
+
+        viewModel.loadAllArticles()
+
+        let prefixAfter = Array(viewModel.allArticlesList.prefix(HomeViewModel.pageSize)).map(\.articleID)
+        #expect(prefixAfter == prefixBefore, "loadAllArticles must preserve articleID identity for the previously loaded prefix")
+
+        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
+    }
+
+    /// Regression guard for #256. Companion to `loadAllArticlesPreservesArticleIDPrefixOnReload`:
+    /// when `loadMoreAllArticlesAndReport()` returns `.loaded`, the previously loaded prefix must
+    /// keep stable `articleID` values even though new entries are appended.
+    @Test("loadMoreAllArticlesAndReport preserves articleID for previously loaded prefix")
+    @MainActor
+    func loadMoreAllArticlesAndReportPreservesArticleIDPrefix() {
+        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
+        let feed = TestFixtures.makePersistentFeed()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+
+        let totalCount = HomeViewModel.pageSize + 5
+        let articles = (0..<totalCount).map { i in
+            let article = TestFixtures.makePersistentArticle(
+                articleID: "a\(i)",
+                publishedDate: Date(timeIntervalSince1970: Double(totalCount - i) * 1_000_000)
+            )
+            article.feed = feed
+            return article
+        }
+        mockPersistence.articlesByFeedID[feed.id] = articles
+
+        let viewModel = HomeViewModel(persistence: mockPersistence)
+        viewModel.loadAllArticles()
+
+        #expect(viewModel.allArticlesList.count == HomeViewModel.pageSize)
+        let prefixBefore = viewModel.allArticlesList.map(\.articleID)
+
+        let result = viewModel.loadMoreAllArticlesAndReport()
+        #expect(result == .loaded)
+        #expect(viewModel.allArticlesList.count == totalCount)
+
+        let prefixAfter = Array(viewModel.allArticlesList.prefix(HomeViewModel.pageSize)).map(\.articleID)
+        #expect(prefixAfter == prefixBefore, "loadMoreAllArticlesAndReport must preserve articleID identity for the previously loaded prefix")
+
+        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
+    }
+
+    /// Regression guard for #256. Mirrors the all-articles variant for the unread pathway.
+    /// `ArticleReaderView` is presented from `UnreadArticlesView` and observes
+    /// `articleID` for the same load-bearing reasons.
+    @Test("loadUnreadArticles preserves articleID prefix on reload")
+    @MainActor
+    func loadUnreadArticlesPreservesArticleIDPrefixOnReload() {
+        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
+        let feed = TestFixtures.makePersistentFeed()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+
+        let totalCount = HomeViewModel.pageSize + 5
+        let articles = (0..<totalCount).map { i in
+            let article = TestFixtures.makePersistentArticle(
+                articleID: "u\(i)",
+                publishedDate: Date(timeIntervalSince1970: Double(totalCount - i) * 1_000_000),
+                isRead: false
+            )
+            article.feed = feed
+            return article
+        }
+        mockPersistence.articlesByFeedID[feed.id] = articles
+
+        let viewModel = HomeViewModel(persistence: mockPersistence)
+        viewModel.loadUnreadArticles()
+
+        #expect(viewModel.unreadArticlesList.count == HomeViewModel.pageSize)
+        let prefixBefore = viewModel.unreadArticlesList.map(\.articleID)
+
+        viewModel.loadUnreadArticles()
+
+        let prefixAfter = Array(viewModel.unreadArticlesList.prefix(HomeViewModel.pageSize)).map(\.articleID)
+        #expect(prefixAfter == prefixBefore, "loadUnreadArticles must preserve articleID identity for the previously loaded prefix")
+
+        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
+    }
+
+    /// Regression guard for #256. Companion to `loadUnreadArticlesPreservesArticleIDPrefixOnReload`:
+    /// when `loadMoreUnreadArticlesAndReport()` returns `.loaded`, the previously loaded prefix must
+    /// keep stable `articleID` values even though new entries are appended.
+    @Test("loadMoreUnreadArticlesAndReport preserves articleID for previously loaded prefix")
+    @MainActor
+    func loadMoreUnreadArticlesAndReportPreservesArticleIDPrefix() {
+        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
+        let feed = TestFixtures.makePersistentFeed()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+
+        let totalCount = HomeViewModel.pageSize + 5
+        let articles = (0..<totalCount).map { i in
+            let article = TestFixtures.makePersistentArticle(
+                articleID: "u\(i)",
+                publishedDate: Date(timeIntervalSince1970: Double(totalCount - i) * 1_000_000),
+                isRead: false
+            )
+            article.feed = feed
+            return article
+        }
+        mockPersistence.articlesByFeedID[feed.id] = articles
+
+        let viewModel = HomeViewModel(persistence: mockPersistence)
+        viewModel.loadUnreadArticles()
+
+        #expect(viewModel.unreadArticlesList.count == HomeViewModel.pageSize)
+        let prefixBefore = viewModel.unreadArticlesList.map(\.articleID)
+
+        let result = viewModel.loadMoreUnreadArticlesAndReport()
+        #expect(result == .loaded)
+        #expect(viewModel.unreadArticlesList.count == totalCount)
+
+        let prefixAfter = Array(viewModel.unreadArticlesList.prefix(HomeViewModel.pageSize)).map(\.articleID)
+        #expect(prefixAfter == prefixBefore, "loadMoreUnreadArticlesAndReport must preserve articleID identity for the previously loaded prefix")
+
+        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
+    }
+
+    /// Regression guard for #256. Mirrors the all-articles variant for the saved-articles pathway.
+    /// `ArticleReaderView` is presented from `SavedArticlesView` and observes
+    /// `articleID` for the same load-bearing reasons. Saved articles are always sorted
+    /// by `savedDate` descending (no ascending sort option), so no UserDefaults cleanup needed.
+    @Test("loadSavedArticles preserves articleID prefix on reload")
+    @MainActor
+    func loadSavedArticlesPreservesArticleIDPrefixOnReload() {
+        let feed = TestFixtures.makePersistentFeed()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+
+        let totalCount = HomeViewModel.pageSize + 5
+        let articles = (0..<totalCount).map { i in
+            let article = TestFixtures.makePersistentArticle(
+                articleID: "s\(i)",
+                publishedDate: Date(timeIntervalSince1970: Double(totalCount - i) * 1_000_000),
+                isSaved: true,
+                savedDate: Date(timeIntervalSince1970: Double(totalCount - i) * 1_000_000)
+            )
+            article.feed = feed
+            return article
+        }
+        mockPersistence.articlesByFeedID[feed.id] = articles
+
+        let viewModel = HomeViewModel(persistence: mockPersistence)
+        viewModel.loadSavedArticles()
+
+        #expect(viewModel.savedArticlesList.count == HomeViewModel.pageSize)
+        let prefixBefore = viewModel.savedArticlesList.map(\.articleID)
+
+        viewModel.loadSavedArticles()
+
+        let prefixAfter = Array(viewModel.savedArticlesList.prefix(HomeViewModel.pageSize)).map(\.articleID)
+        #expect(prefixAfter == prefixBefore, "loadSavedArticles must preserve articleID identity for the previously loaded prefix")
+    }
+
+    /// Regression guard for #256. Companion to `loadSavedArticlesPreservesArticleIDPrefixOnReload`:
+    /// when `loadMoreSavedArticlesAndReport()` returns `.loaded`, the previously loaded prefix must
+    /// keep stable `articleID` values even though new entries are appended.
+    @Test("loadMoreSavedArticlesAndReport preserves articleID for previously loaded prefix")
+    @MainActor
+    func loadMoreSavedArticlesAndReportPreservesArticleIDPrefix() {
+        let feed = TestFixtures.makePersistentFeed()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+
+        let totalCount = HomeViewModel.pageSize + 5
+        let articles = (0..<totalCount).map { i in
+            let article = TestFixtures.makePersistentArticle(
+                articleID: "s\(i)",
+                publishedDate: Date(timeIntervalSince1970: Double(totalCount - i) * 1_000_000),
+                isSaved: true,
+                savedDate: Date(timeIntervalSince1970: Double(totalCount - i) * 1_000_000)
+            )
+            article.feed = feed
+            return article
+        }
+        mockPersistence.articlesByFeedID[feed.id] = articles
+
+        let viewModel = HomeViewModel(persistence: mockPersistence)
+        viewModel.loadSavedArticles()
+
+        #expect(viewModel.savedArticlesList.count == HomeViewModel.pageSize)
+        let prefixBefore = viewModel.savedArticlesList.map(\.articleID)
+
+        let result = viewModel.loadMoreSavedArticlesAndReport()
+        #expect(result == .loaded)
+        #expect(viewModel.savedArticlesList.count == totalCount)
+
+        let prefixAfter = Array(viewModel.savedArticlesList.prefix(HomeViewModel.pageSize)).map(\.articleID)
+        #expect(prefixAfter == prefixBefore, "loadMoreSavedArticlesAndReport must preserve articleID identity for the previously loaded prefix")
+    }
 }
