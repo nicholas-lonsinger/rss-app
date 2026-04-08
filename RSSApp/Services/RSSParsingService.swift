@@ -65,9 +65,12 @@ struct RSSParsingService: Sendable {
         // This prevents a silent "feed up-to-date" when the real cause is a
         // charset that couldn't be decoded.
         if snifferOutcome.isFallback && feed.articles.isEmpty {
-            Self.logger.error(
-                "Feed parsed with zero articles after encoding fallback '\(snifferOutcome.diagnosticDescription, privacy: .public)' — encoding may have prevented content from being decoded: '\(feed.title, privacy: .public)'"
-            )
+            let escalationMessage = "Feed parsed with zero articles after encoding fallback '\(snifferOutcome.diagnosticDescription)' — encoding may have prevented content from being decoded: '\(feed.title)'"
+            Self.logger.error("\(escalationMessage, privacy: .public)")
+            // Dual-emit to the DiagnosticRecorder so tests can assert the escalation
+            // path was hit directly, rather than using the upstream sniffer warning as
+            // a proxy. See `DiagnosticRecorder` for rationale. Issue #301.
+            DiagnosticRecorder.record(category: "RSSParsingService", level: .error, message: escalationMessage)
         } else {
             Self.logger.notice("Feed parsed: '\(feed.title, privacy: .public)' with \(feed.articles.count, privacy: .public) articles")
         }

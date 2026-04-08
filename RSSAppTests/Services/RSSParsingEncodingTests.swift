@@ -852,22 +852,14 @@ struct EmptyFeedEscalationTests {
         let feed = try service.parse(Data(xml.utf8))
         #expect(feed.articles.isEmpty, "Fixture must produce zero articles to exercise escalation path")
 
-        // The `DiagnosticRecorder` seam only captures `EncodingSniffer`
-        // events; `RSSParsingService` logs to `os.Logger` directly and is not
-        // dual-emitted. We therefore verify the sniffer correctly returned a
-        // fallback outcome (by checking its warning was recorded) rather than
-        // trying to observe the `.error` from `parse()`.
-        //
-        // The unknown-encoding warning was already pinned by
-        // `EncodingSnifferDiagnosticTests.unknownEncodingEmitsWarningDiagnostic`.
-        // Here we just confirm that a warning about the unique encoding name
-        // was recorded (i.e. the fallback path was actually hit), which means
-        // `parse()` had an `isFallback` outcome to escalate from.
-        let warnings = sink.events(atLevel: .warning)
-            .filter { $0.category == EncodingSniffer.loggerCategory }
-        let fallbackWarning = warnings.first { $0.message.contains(uniqueEncName) }
-        #expect(fallbackWarning != nil,
-                "Expected a sniffer warning for unknown encoding '\(uniqueEncName)' — fallback path was not hit")
+        // Assert the escalation action directly: `parse()` dual-emits to
+        // `DiagnosticRecorder` at `.error` under category "RSSParsingService"
+        // when `isFallback && articles.isEmpty`. Issue #301.
+        let errors = sink.events(atLevel: .error)
+            .filter { $0.category == "RSSParsingService" }
+        let escalationError = errors.first { $0.message.contains(uniqueEncName) }
+        #expect(escalationError != nil,
+                "Expected a parse() escalation error for encoding fallback '\(uniqueEncName)' — dual-emit was not recorded")
     }
 
     @Test("parse() logs .notice (not .error) when fallback produces non-empty articles")
