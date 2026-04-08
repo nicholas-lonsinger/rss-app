@@ -270,8 +270,9 @@ struct ArticleThumbnailService: ArticleThumbnailCaching {
             return .fetchFailed
         } catch {
             // RATIONALE: Unknown errors have unclear retryability; .fetchFailed (transient) is the
-            // safer default over permanently blacklisting a URL we can't classify.
-            Self.logger.warning("Failed to fetch article page for og:image from \(articleLink.absoluteString, privacy: .public): \(error, privacy: .public)")
+            // safer default over permanently blacklisting a URL we can't classify. Logged at .error
+            // so unexpected escapes remain visible in persisted logs.
+            Self.logger.error("Failed to fetch article page for og:image from \(articleLink.absoluteString, privacy: .public): \(error, privacy: .public)")
             return .fetchFailed
         }
 
@@ -305,8 +306,9 @@ struct ArticleThumbnailService: ArticleThumbnailCaching {
             return .fetchFailed
         } catch {
             // RATIONALE: Unknown errors have unclear retryability; .fetchFailed (transient) is the
-            // safer default over permanently blacklisting a URL we can't classify.
-            Self.logger.warning("Failed to stream article page for og:image from \(articleLink.absoluteString, privacy: .public): \(error, privacy: .public)")
+            // safer default over permanently blacklisting a URL we can't classify. Logged at .error
+            // so unexpected escapes remain visible in persisted logs.
+            Self.logger.error("Failed to stream article page for og:image from \(articleLink.absoluteString, privacy: .public): \(error, privacy: .public)")
             return .fetchFailed
         }
 
