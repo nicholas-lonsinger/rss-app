@@ -649,4 +649,122 @@ struct ArticleThumbnailServiceTests {
 
         #expect(result == .fetchFailed)
     }
+
+    // MARK: - resolveOGImage Pre-Flight URLError Classification
+    //
+    // Coverage for issue #252: the generic `catch let urlError as URLError` arm
+    // in `resolveOGImage(from:)` (lines ~265-271) handles non-cancellation
+    // `URLError`s — DNS failures, timeouts, no-network — and maps them to
+    // `.fetchFailed` so the prefetcher can retry. The URLProtocol stub used by
+    // `MockHTMLURLSessionProvider` always succeeds, so these branches were
+    // unreachable until the mock gained a `thrownError` injection point that
+    // makes `bytes(for:)` throw before any URL loading begins.
+
+    @Test("resolveOGImage maps pre-flight URLError(.timedOut) to .fetchFailed")
+    func resolveOGImageMapsPreFlightTimeoutToFetchFailed() async throws {
+        // A timeout surfaced from `session.bytes(for:)` itself (before the
+        // `HTTPURLResponse` is received) hits the generic `catch let urlError`
+        // rung. It must be classified as `.fetchFailed` (transient) so the
+        // prefetcher retries on the next opportunity.
+        let mockSession = MockHTMLURLSessionProvider()
+        mockSession.thrownError = URLError(.timedOut)
+        let service = ArticleThumbnailService(session: mockSession)
+        let articleLink = URL(string: "https://example.com/article-timeout")!
+
+        let result = try await service.resolveOGImage(from: articleLink)
+
+        #expect(result == .fetchFailed)
+    }
+
+    @Test("resolveOGImage maps pre-flight URLError(.cannotFindHost) to .fetchFailed")
+    func resolveOGImageMapsPreFlightDNSFailureToFetchFailed() async throws {
+        // DNS failure is the canonical "host unreachable for now" error and
+        // hits the same generic `catch let urlError` rung as `.timedOut`.
+        // Locking it in here guards against a future refactor that narrows
+        // the catch arm to a specific `URLError.Code`.
+        let mockSession = MockHTMLURLSessionProvider()
+        mockSession.thrownError = URLError(.cannotFindHost)
+        let service = ArticleThumbnailService(session: mockSession)
+        let articleLink = URL(string: "https://example.com/article-dns")!
+
+        let result = try await service.resolveOGImage(from: articleLink)
+
+        #expect(result == .fetchFailed)
+    }
+
+    // MARK: - resolveOGImage 2xx Boundary
+    //
+    // Coverage for issue #252: `(200...299).contains(httpResponse.statusCode)`
+    // has an inclusive upper bound at 299. The pre-existing 200-OK tests don't
+    // exercise the upper boundary, leaving an off-by-one risk if a future
+    // refactor changes the range to `200..<299`. This test pins the contract.
+
+    @Test("resolveOGImage treats HTTP 299 as 2xx success and extracts og:image")
+    func resolveOGImageMaps299ToSuccess() async throws {
+        // 299 is the inclusive upper boundary of the 2xx success range. A
+        // response at exactly 299 with an og:image meta tag in the body must
+        // be treated as success and return `.found`. If the range is ever
+        // accidentally narrowed to `200..<299`, this test fails immediately.
+        let mockSession = MockHTMLURLSessionProvider()
+        mockSession.statusCode = 299
+        mockSession.htmlBody = """
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta property="og:image" content="https://cdn.example.com/boundary.jpg">
+        </head>
+        </html>
+        """
+        let service = ArticleThumbnailService(session: mockSession)
+        let articleLink = URL(string: "https://example.com/article-299")!
+
+        let result = try await service.resolveOGImage(from: articleLink)
+
+        #expect(result == .found(URL(string: "https://cdn.example.com/boundary.jpg")!))
+    }
+
+    // MARK: - resolveOGImage Head-Only Truncation Contract
+    //
+    // Coverage for issue #252: `resolveOGImage` only reads the first
+    // `htmlHeadMaxBytes` (50 KB) of the response body, breaking out of the
+    // byte loop once the buffer reaches that size. This is a load-bearing
+    // performance optimization (og:image is virtually always inside `<head>`)
+    // and any future refactor of the `for try await byte in bytes` loop must
+    // preserve it. This test pins the boundary by placing the og:image meta
+    // tag well past byte 51,200 and asserting the service returns `.notFound`
+    // — proving the tag was never decoded because the loop broke first.
+
+    @Test("resolveOGImage stops reading after htmlHeadMaxBytes and ignores og:image past the cap")
+    func resolveOGImageRespectsHeadByteCap() async throws {
+        // Construct a payload whose first ~52 KB is filler bytes (placed
+        // inside an HTML comment so the body is well-formed), then place a
+        // valid og:image meta tag past the 50 KB head cap. The service must
+        // break out of the byte loop before reaching the tag, so
+        // `extractOGImageURL` returns nil and the result is `.notFound`.
+        //
+        // The service uses `htmlHeadMaxBytes = 51_200` (50 KB) as the head cap.
+        // We pad the body to 52_000 bytes — ~800 bytes past the cap — to make
+        // the boundary impossible to miss even if the loop's append-then-check
+        // ordering ever shifts by one.
+        let headCap = 51_200
+        let openingComment = "<!--"
+        let closingComment = "-->"
+        let metaTag = "<meta property=\"og:image\" content=\"https://cdn.example.com/late.jpg\">"
+        let paddingByteCount = 52_000 - openingComment.utf8.count - closingComment.utf8.count
+        #expect(paddingByteCount + openingComment.utf8.count + closingComment.utf8.count > headCap)
+        let padding = String(repeating: "a", count: paddingByteCount)
+        let html = openingComment + padding + closingComment + metaTag
+
+        let mockSession = MockHTMLURLSessionProvider()
+        mockSession.statusCode = 200
+        mockSession.htmlBody = html
+        let service = ArticleThumbnailService(session: mockSession)
+        let articleLink = URL(string: "https://example.com/article-late-og-image")!
+
+        let result = try await service.resolveOGImage(from: articleLink)
+
+        // The og:image tag is past the 50 KB head cap, so the service never
+        // sees it and falls through to `.notFound`.
+        #expect(result == .notFound)
+    }
 }

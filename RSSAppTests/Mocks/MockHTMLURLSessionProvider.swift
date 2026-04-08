@@ -35,7 +35,20 @@ final class MockHTMLURLSessionProvider: URLSessionBytesProviding, @unchecked Sen
     /// and falls back to the `-1` sentinel for `isPermanentHTTPFailure`.
     var useNonHTTPResponse: Bool = false
 
+    /// When set, `bytes(for:)` throws this error instead of delegating to the
+    /// `URLProtocol` stub. This drives the pre-flight network catch arms in
+    /// `resolveOGImage` (e.g. the generic `URLError` rung that maps DNS / timeout
+    /// failures to `.fetchFailed`) without needing a real network round trip.
+    /// Use this to exercise non-cancellation `URLError` failures that the
+    /// URLProtocol stub cannot easily produce, since it always succeeds via the
+    /// in-memory request store.
+    var thrownError: Error?
+
     func bytes(for request: URLRequest, delegate: (any URLSessionTaskDelegate)? = nil) async throws -> (URLSession.AsyncBytes, URLResponse) {
+        if let thrownError {
+            throw thrownError
+        }
+
         let requestID = UUID().uuidString
 
         MockHTMLURLProtocol.store(
