@@ -80,6 +80,21 @@ struct EditFeedView: View {
             } message: { prompt in
                 Text("This site also publishes an Atom version of this feed at \(prompt.atomURL.absoluteString). Atom feeds often include richer metadata.")
             }
+            .alert(
+                "Atom feed unavailable",
+                isPresented: Binding(
+                    get: { viewModel.atomFallbackNotice != nil },
+                    // Acknowledging the notice both clears it and signals
+                    // the sheet to dismiss (didSave = true) so the
+                    // successfully-persisted RSS edit is committed.
+                    set: { if !$0 { viewModel.acknowledgeAtomFallbackNotice() } }
+                ),
+                presenting: viewModel.atomFallbackNotice
+            ) { atomURL in
+                Button("OK", role: .cancel) { }
+            } message: { atomURL in
+                Text("The Atom feed at \(atomURL.absoluteString) couldn't be loaded. The RSS version has been saved instead.")
+            }
         }
     }
 }

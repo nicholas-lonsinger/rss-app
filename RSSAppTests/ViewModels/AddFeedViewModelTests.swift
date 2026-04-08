@@ -466,9 +466,9 @@ struct AddFeedViewModelTests {
         #expect(mockPersistence.feeds[0].title == "Original RSS")
     }
 
-    @Test("switchToAtomAlternate surfaces error when Atom fetch fails")
+    @Test("switchToAtomAlternate falls back to RSS and surfaces notice when Atom fetch fails")
     @MainActor
-    func switchToAtomAlternateHandlesFetchFailure() async {
+    func switchToAtomAlternateFallsBackOnFetchFailure() async {
         let rssURL = URL(string: "https://example.com/feed")!
         let atomURL = URL(string: "https://example.com/atom.xml")!
 
@@ -489,14 +489,61 @@ struct AddFeedViewModelTests {
         let prompt = try! #require(viewModel.atomAlternatePrompt)
         await viewModel.switchToAtomAlternate(from: prompt)
 
+        // Fallback: the RSS feed (already fetched during addFeed) is persisted
+        // and a notice is surfaced. The sheet does NOT dismiss yet — the view
+        // waits for the user to acknowledge the notice, at which point
+        // didAddFeed flips to true.
         #expect(viewModel.atomAlternatePrompt == nil)
+        #expect(viewModel.atomFallbackNotice == atomURL)
         #expect(viewModel.didAddFeed == false)
-        #expect(viewModel.errorMessage == "Could not load feed. Check the URL and try again.")
-        #expect(mockPersistence.feeds.isEmpty)
-        // Regression guard: the user's originally-typed URL must remain in the
-        // input field when the Atom switch fails, so they don't have to re-type
-        // it to retry.
+        #expect(viewModel.errorMessage == nil)
+        #expect(mockPersistence.feeds.count == 1)
+        #expect(mockPersistence.feeds[0].title == "RSS Version")
+        #expect(mockPersistence.feeds[0].feedURL == rssURL)
+        // The user's original URL stays in the field while the notice is up.
         #expect(viewModel.urlInput == rssURL.absoluteString)
+
+        // Simulate the user tapping OK on the notice.
+        viewModel.acknowledgeAtomFallbackNotice()
+
+        #expect(viewModel.atomFallbackNotice == nil)
+        #expect(viewModel.didAddFeed == true)
+    }
+
+    @Test("Atom fallback is skipped when RSS persistence also fails")
+    @MainActor
+    func switchToAtomAlternateFallbackSkippedOnPersistenceFailure() async {
+        let rssURL = URL(string: "https://example.com/feed")!
+        let atomURL = URL(string: "https://example.com/atom.xml")!
+
+        let mockFetching = MockFeedFetchingService()
+        mockFetching.feedsByURL[rssURL] = TestFixtures.makeFeed(title: "RSS Version", format: .rss)
+        mockFetching.errorsByURL[atomURL] = FeedFetchingError.invalidResponse(statusCode: 500)
+        let mockPersistence = MockFeedPersistenceService()
+        // addFeed() succeeds on the first call (the initial save inside
+        // addFeed goes through, but that path returns on the prompt). After
+        // the Atom switch fails and we try to persist the fallback RSS feed,
+        // this makes the second addFeed call throw.
+        mockPersistence.addFeedFailureAfterCount = 0
+        let mockDiscovery = MockAtomDiscoveryService()
+        mockDiscovery.resultToReturn = atomURL
+
+        let viewModel = AddFeedViewModel(
+            feedFetching: mockFetching,
+            persistence: mockPersistence,
+            atomDiscovery: mockDiscovery
+        )
+        viewModel.urlInput = rssURL.absoluteString
+        await viewModel.addFeed()
+        let prompt = try! #require(viewModel.atomAlternatePrompt)
+        await viewModel.switchToAtomAlternate(from: prompt)
+
+        // Atom fetch failed → fallback persistence attempted → persistence
+        // throws → we surface the persistence error, not a fallback notice.
+        #expect(viewModel.atomFallbackNotice == nil)
+        #expect(viewModel.didAddFeed == false)
+        #expect(viewModel.errorMessage == "Could not save the feed. Please try again.")
+        #expect(mockPersistence.feeds.isEmpty)
     }
 
     @Test("switchToAtomAlternate reports duplicate when Atom URL already subscribed")

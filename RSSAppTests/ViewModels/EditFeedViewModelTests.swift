@@ -301,4 +301,93 @@ struct EditFeedViewModelTests {
         #expect(feed.feedURL == atomURL)
         #expect(feed.title == "New Atom")
     }
+
+    @Test("switchToAtomAlternate falls back to RSS when Atom fetch fails")
+    @MainActor
+    func switchToAtomAlternateFallsBackOnFetchFailure() async {
+        let feed = TestFixtures.makePersistentFeed(
+            title: "Original",
+            feedURL: URL(string: "https://old.com/feed")!
+        )
+        let rssURL = URL(string: "https://new.com/feed")!
+        let atomURL = URL(string: "https://new.com/atom.xml")!
+
+        let mockFetching = MockFeedFetchingService()
+        mockFetching.feedsByURL[rssURL] = TestFixtures.makeFeed(title: "New RSS", format: .rss)
+        mockFetching.errorsByURL[atomURL] = FeedFetchingError.invalidResponse(statusCode: 500)
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+        let mockDiscovery = MockAtomDiscoveryService()
+        mockDiscovery.resultToReturn = atomURL
+
+        let viewModel = EditFeedViewModel(
+            feed: feed,
+            feedFetching: mockFetching,
+            persistence: mockPersistence,
+            atomDiscovery: mockDiscovery
+        )
+        viewModel.urlInput = rssURL.absoluteString
+        await viewModel.saveFeed()
+        let prompt = try! #require(viewModel.atomAlternatePrompt)
+        await viewModel.switchToAtomAlternate(from: prompt)
+
+        // Fallback: the RSS edit is committed and a notice is surfaced.
+        // The sheet waits for acknowledgment before dismissing.
+        #expect(viewModel.atomFallbackNotice == atomURL)
+        #expect(viewModel.didSave == false)
+        #expect(viewModel.errorMessage == nil)
+        #expect(feed.feedURL == rssURL)
+        #expect(feed.title == "New RSS")
+        // The user's original (pre-edit) URL stays in the field while the
+        // notice is up — wait, actually they edited to rssURL, so rssURL
+        // is what they typed and should remain.
+        #expect(viewModel.urlInput == rssURL.absoluteString)
+
+        viewModel.acknowledgeAtomFallbackNotice()
+
+        #expect(viewModel.atomFallbackNotice == nil)
+        #expect(viewModel.didSave == true)
+    }
+
+    @Test("switchToAtomAlternate is a no-op when Atom URL matches the feed's current URL")
+    @MainActor
+    func switchToAtomAlternateIsNoOpWhenAtomMatchesCurrentFeed() async {
+        // Realistic scenario: user edits the RSS URL, but the site advertises
+        // the already-subscribed Atom URL as the alternate. We should dismiss
+        // without trying to update the feed (no network call, no persist).
+        let currentURL = URL(string: "https://example.com/atom.xml")!
+        let feed = TestFixtures.makePersistentFeed(
+            title: "Already Subscribed",
+            feedURL: currentURL
+        )
+        let rssURL = URL(string: "https://example.com/feed")!
+
+        let mockFetching = MockFeedFetchingService()
+        mockFetching.feedsByURL[rssURL] = TestFixtures.makeFeed(title: "New RSS", format: .rss)
+        // Atom fetch must not be called — this is a no-op path.
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+        let mockDiscovery = MockAtomDiscoveryService()
+        mockDiscovery.resultToReturn = currentURL
+
+        let viewModel = EditFeedViewModel(
+            feed: feed,
+            feedFetching: mockFetching,
+            persistence: mockPersistence,
+            atomDiscovery: mockDiscovery
+        )
+        viewModel.urlInput = rssURL.absoluteString
+        await viewModel.saveFeed()
+        let prompt = try! #require(viewModel.atomAlternatePrompt)
+        await viewModel.switchToAtomAlternate(from: prompt)
+
+        // Dismisses successfully without mutating the feed.
+        #expect(viewModel.didSave == true)
+        #expect(viewModel.errorMessage == nil)
+        #expect(feed.feedURL == currentURL)
+        #expect(feed.title == "Already Subscribed")
+        // urlInput reflects the matched URL so the sheet's text field isn't
+        // stale if the user stares at it during the dismissal animation.
+        #expect(viewModel.urlInput == currentURL.absoluteString)
+    }
 }

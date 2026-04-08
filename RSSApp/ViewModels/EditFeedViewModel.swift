@@ -13,6 +13,14 @@ final class EditFeedViewModel {
     private(set) var didSave = false
     var atomAlternatePrompt: AtomAlternatePrompt?
 
+    /// Set when `switchToAtomAlternate(from:)` fell back to persisting the
+    /// original RSS feed because the Atom fetch failed. Drives a follow-up
+    /// alert that explains the fallback. The edit has already been committed
+    /// at this point — the view model waits for the user to acknowledge the
+    /// notice (via `acknowledgeAtomFallbackNotice()`) before setting
+    /// `didSave = true` and allowing the sheet to dismiss.
+    var atomFallbackNotice: URL?
+
     var canSubmit: Bool {
         !urlInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isValidating
     }
@@ -102,7 +110,9 @@ final class EditFeedViewModel {
             return
         }
 
-        persistEditedFeed(rssFeed, url: url)
+        if persistEditedFeed(rssFeed, url: url) {
+            didSave = true
+        }
     }
 
     /// User dismissed the Atom prompt by choosing to keep the RSS feed.
@@ -116,7 +126,9 @@ final class EditFeedViewModel {
     func keepOriginalFeed(from prompt: AtomAlternatePrompt) {
         Self.logger.notice("User kept RSS feed \(prompt.originalURL.absoluteString, privacy: .public), declining Atom \(prompt.atomURL.absoluteString, privacy: .public)")
         atomAlternatePrompt = nil
-        persistEditedFeed(prompt.originalFeed, url: prompt.originalURL)
+        if persistEditedFeed(prompt.originalFeed, url: prompt.originalURL) {
+            didSave = true
+        }
     }
 
     /// User accepted the Atom prompt. Fetches the discovered Atom URL and
@@ -166,8 +178,14 @@ final class EditFeedViewModel {
             Self.logger.debug("Atom switch cancelled for \(atomURL, privacy: .public)")
             return
         } catch {
-            errorMessage = "Could not load feed. Check the URL and try again."
-            Self.logger.error("Atom feed validation failed for \(atomURL, privacy: .public): \(error, privacy: .public)")
+            // The Atom alternative was advertised but unreachable. We already
+            // have a successfully-fetched RSS feed from the prompt — persist
+            // it and surface a follow-up notice so the user knows why we
+            // didn't honor their "Switch" choice.
+            Self.logger.warning("Atom switch fetch failed for \(atomURL, privacy: .public), falling back to RSS: \(error, privacy: .public)")
+            if persistEditedFeed(prompt.originalFeed, url: prompt.originalURL) {
+                atomFallbackNotice = atomURL
+            }
             return
         }
 
@@ -175,20 +193,35 @@ final class EditFeedViewModel {
         // field *after* all failure paths above — if we fail earlier, the
         // user's originally-typed URL remains in the field.
         urlInput = atomURL.absoluteString
-        persistEditedFeed(atomFeed, url: atomURL)
+        if persistEditedFeed(atomFeed, url: atomURL) {
+            didSave = true
+        }
     }
 
-    private func persistEditedFeed(_ rssFeed: RSSFeed, url: URL) {
+    /// Called by the view after the user acknowledges the Atom-fallback
+    /// notice alert. Clears the notice state and signals the sheet to
+    /// dismiss now that the user has seen the message.
+    func acknowledgeAtomFallbackNotice() {
+        atomFallbackNotice = nil
+        didSave = true
+    }
+
+    /// Persists an edited feed. Returns true on success, false if persistence
+    /// failed (with `errorMessage` set). Does NOT toggle `didSave` — callers
+    /// decide when the sheet should dismiss. The fallback-notice path needs
+    /// to defer dismissal until the user acknowledges the notice, which is
+    /// why the signal is separated from the persistence step.
+    private func persistEditedFeed(_ rssFeed: RSSFeed, url: URL) -> Bool {
         do {
             try persistence.updateFeedURL(feed, newURL: url)
             try persistence.updateFeedMetadata(feed, title: rssFeed.title, description: rssFeed.feedDescription)
         } catch {
             errorMessage = "Unable to save changes. Please try again."
             Self.logger.error("Failed to persist edited feed: \(error, privacy: .public)")
-            return
+            return false
         }
 
-        didSave = true
         Self.logger.notice("Updated feed '\(rssFeed.title, privacy: .public)' URL to \(url, privacy: .public)")
+        return true
     }
 }

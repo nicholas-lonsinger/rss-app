@@ -13,6 +13,14 @@ final class AddFeedViewModel {
     var didAddFeed = false
     var atomAlternatePrompt: AtomAlternatePrompt?
 
+    /// Set when `switchToAtomAlternate(from:)` fell back to persisting the
+    /// original RSS feed because the Atom fetch failed. Drives a follow-up
+    /// alert that explains the fallback to the user. The RSS feed is already
+    /// persisted at this point — the view model waits for the user to
+    /// acknowledge the notice (via `acknowledgeAtomFallbackNotice()`) before
+    /// setting `didAddFeed = true` and allowing the sheet to dismiss.
+    var atomFallbackNotice: URL?
+
     var canSubmit: Bool {
         !urlInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isValidating
     }
@@ -97,7 +105,9 @@ final class AddFeedViewModel {
             return
         }
 
-        persistFetchedFeed(rssFeed, url: url)
+        if persistFetchedFeed(rssFeed, url: url) {
+            didAddFeed = true
+        }
     }
 
     /// User dismissed the Atom prompt by choosing to keep the RSS feed as-is.
@@ -112,7 +122,9 @@ final class AddFeedViewModel {
     func keepOriginalFeed(from prompt: AtomAlternatePrompt) {
         Self.logger.notice("User kept RSS feed \(prompt.originalURL.absoluteString, privacy: .public), declining Atom \(prompt.atomURL.absoluteString, privacy: .public)")
         atomAlternatePrompt = nil
-        persistFetchedFeed(prompt.originalFeed, url: prompt.originalURL)
+        if persistFetchedFeed(prompt.originalFeed, url: prompt.originalURL) {
+            didAddFeed = true
+        }
     }
 
     /// User accepted the Atom prompt. Fetches the discovered Atom URL and
@@ -152,8 +164,14 @@ final class AddFeedViewModel {
             Self.logger.debug("Atom switch cancelled for \(atomURL, privacy: .public)")
             return
         } catch {
-            errorMessage = "Could not load feed. Check the URL and try again."
-            Self.logger.error("Atom feed validation failed for \(atomURL, privacy: .public): \(error, privacy: .public)")
+            // The Atom alternative was advertised but unreachable. We already
+            // have a successfully-fetched RSS feed from the prompt — persist
+            // it and surface a follow-up notice so the user knows why we
+            // didn't honor their "Switch" choice.
+            Self.logger.warning("Atom switch fetch failed for \(atomURL, privacy: .public), falling back to RSS: \(error, privacy: .public)")
+            if persistFetchedFeed(prompt.originalFeed, url: prompt.originalURL) {
+                atomFallbackNotice = atomURL
+            }
             return
         }
 
@@ -161,10 +179,25 @@ final class AddFeedViewModel {
         // field *after* all failure paths above — if we fail earlier, the
         // user's originally-typed URL remains in the field.
         urlInput = atomURL.absoluteString
-        persistFetchedFeed(atomFeed, url: atomURL)
+        if persistFetchedFeed(atomFeed, url: atomURL) {
+            didAddFeed = true
+        }
     }
 
-    private func persistFetchedFeed(_ rssFeed: RSSFeed, url: URL) {
+    /// Called by the view after the user acknowledges the Atom-fallback
+    /// notice alert. Clears the notice state and signals the sheet to
+    /// dismiss now that the user has seen the message.
+    func acknowledgeAtomFallbackNotice() {
+        atomFallbackNotice = nil
+        didAddFeed = true
+    }
+
+    /// Persists a fetched feed. Returns true on success, false if persistence
+    /// failed (with `errorMessage` set). Does NOT toggle `didAddFeed` —
+    /// callers decide when the sheet should dismiss. The fallback-notice
+    /// path needs to defer dismissal until the user acknowledges the notice,
+    /// which is why the signal is separated from the persistence step.
+    private func persistFetchedFeed(_ rssFeed: RSSFeed, url: URL) -> Bool {
         let newFeed = PersistentFeed(
             title: rssFeed.title,
             feedURL: url,
@@ -175,9 +208,8 @@ final class AddFeedViewModel {
         } catch {
             errorMessage = "Could not save the feed. Please try again."
             Self.logger.error("Failed to persist feed \(url, privacy: .public): \(error, privacy: .public)")
-            return
+            return false
         }
-        didAddFeed = true
         Self.logger.notice("Added feed '\(rssFeed.title, privacy: .public)' from \(url, privacy: .public)")
 
         // Fire-and-forget icon resolution
@@ -199,5 +231,6 @@ final class AddFeedViewModel {
                 Self.logger.error("Failed to persist icon for '\(feedTitle, privacy: .public)': \(error, privacy: .public)")
             }
         }
+        return true
     }
 }
