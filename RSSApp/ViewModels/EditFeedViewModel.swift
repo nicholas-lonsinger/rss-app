@@ -7,15 +7,6 @@ final class EditFeedViewModel {
 
     private static let logger = Logger(category: "EditFeedViewModel")
 
-    /// Prompt payload surfaced when an Atom alternative is discovered for the
-    /// new RSS URL the user is trying to save. Mirrors the same mechanism as
-    /// `AddFeedViewModel.AtomAlternatePrompt`.
-    struct AtomAlternatePrompt {
-        let originalURL: URL
-        let atomURL: URL
-        let originalFeed: RSSFeed
-    }
-
     var urlInput: String
     private(set) var isValidating = false
     private(set) var errorMessage: String?
@@ -91,17 +82,23 @@ final class EditFeedViewModel {
             return
         }
 
-        // Offer an Atom alternative when the new URL is RSS and the site
-        // advertises one. The user resumes via keepOriginalFeed() or
-        // switchToAtomAlternate().
+        // Atom feeds have nothing to upgrade to — only offer the switch when
+        // the fetched feed is RSS and the site advertises an Atom alternative.
         if rssFeed.format == .rss,
            let atomURL = await atomDiscovery.discoverAtomAlternate(forFeedAt: url) {
             Self.logger.notice("Offering Atom alternate \(atomURL.absoluteString, privacy: .public) for \(url.absoluteString, privacy: .public)")
-            atomAlternatePrompt = AtomAlternatePrompt(
+            guard let prompt = AtomAlternatePrompt(
                 originalURL: url,
                 atomURL: atomURL,
                 originalFeed: rssFeed
-            )
+            ) else {
+                // See the companion guard in `AddFeedViewModel.addFeed()`.
+                Self.logger.fault("Failed to construct AtomAlternatePrompt despite upstream guards: url=\(url.absoluteString, privacy: .public) atomURL=\(atomURL.absoluteString, privacy: .public)")
+                assertionFailure("AtomAlternatePrompt invariants violated upstream")
+                persistEditedFeed(rssFeed, url: url)
+                return
+            }
+            atomAlternatePrompt = prompt
             return
         }
 

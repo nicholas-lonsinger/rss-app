@@ -7,16 +7,6 @@ final class AddFeedViewModel {
 
     private static let logger = Logger(category: "AddFeedViewModel")
 
-    /// Prompt payload surfaced when an Atom alternative is discovered for an
-    /// RSS feed the user is about to add. The view binds to this to drive a
-    /// two-button alert ("Switch to Atom" / "Keep RSS"); both branches resume
-    /// the add flow via `switchToAtomAlternate()` / `keepOriginalFeed()`.
-    struct AtomAlternatePrompt {
-        let originalURL: URL
-        let atomURL: URL
-        let originalFeed: RSSFeed
-    }
-
     var urlInput: String = ""
     var isValidating = false
     var errorMessage: String?
@@ -83,17 +73,27 @@ final class AddFeedViewModel {
             return
         }
 
-        // If the user picked an RSS feed and the site advertises an Atom
-        // alternative, pause here and let them choose. `keepOriginalFeed()` or
-        // `switchToAtomAlternate()` will complete the flow.
+        // Atom feeds have nothing to upgrade to — only offer the switch when
+        // the fetched feed is RSS and the site advertises an Atom alternative.
         if rssFeed.format == .rss,
            let atomURL = await atomDiscovery.discoverAtomAlternate(forFeedAt: url) {
             Self.logger.notice("Offering Atom alternate \(atomURL.absoluteString, privacy: .public) for \(url.absoluteString, privacy: .public)")
-            atomAlternatePrompt = AtomAlternatePrompt(
+            guard let prompt = AtomAlternatePrompt(
                 originalURL: url,
                 atomURL: atomURL,
                 originalFeed: rssFeed
-            )
+            ) else {
+                // AtomAlternatePrompt.init? refuses to build a prompt whose
+                // invariants are already established upstream (RSS format,
+                // distinct URLs). If we land here, an upstream refactor has
+                // broken one of those guarantees — crash in debug, degrade
+                // to the RSS-as-is path in release.
+                Self.logger.fault("Failed to construct AtomAlternatePrompt despite upstream guards: url=\(url.absoluteString, privacy: .public) atomURL=\(atomURL.absoluteString, privacy: .public)")
+                assertionFailure("AtomAlternatePrompt invariants violated upstream")
+                persistFetchedFeed(rssFeed, url: url)
+                return
+            }
+            atomAlternatePrompt = prompt
             return
         }
 
