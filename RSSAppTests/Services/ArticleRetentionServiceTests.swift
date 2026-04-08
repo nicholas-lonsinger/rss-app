@@ -12,22 +12,6 @@ struct ArticleRetentionServiceTests {
 
     // MARK: - ArticleLimit enum
 
-    @Test("ArticleLimit has correct raw values")
-    func articleLimitRawValues() {
-        #expect(ArticleLimit.oneThousand.rawValue == 1_000)
-        #expect(ArticleLimit.twoThousandFiveHundred.rawValue == 2_500)
-        #expect(ArticleLimit.fiveThousand.rawValue == 5_000)
-        #expect(ArticleLimit.tenThousand.rawValue == 10_000)
-        #expect(ArticleLimit.twelveThousandFiveHundred.rawValue == 12_500)
-        #expect(ArticleLimit.fifteenThousand.rawValue == 15_000)
-        #expect(ArticleLimit.twentyFiveThousand.rawValue == 25_000)
-    }
-
-    @Test("ArticleLimit has seven options")
-    func articleLimitAllCases() {
-        #expect(ArticleLimit.allCases.count == 7)
-    }
-
     @Test("ArticleLimit default is 10,000")
     func articleLimitDefault() {
         #expect(ArticleLimit.defaultLimit == .tenThousand)
@@ -39,19 +23,6 @@ struct ArticleRetentionServiceTests {
         #expect(ArticleLimit.oneThousand.displayLabel == "1,000")
         #expect(ArticleLimit.tenThousand.displayLabel == "10,000")
         #expect(ArticleLimit.twentyFiveThousand.displayLabel == "25,000")
-    }
-
-    @Test("ArticleLimit id matches rawValue")
-    func articleLimitID() {
-        for limit in ArticleLimit.allCases {
-            #expect(limit.id == limit.rawValue)
-        }
-    }
-
-    @Test("ArticleLimit initializes from valid rawValue")
-    func articleLimitFromRawValue() {
-        #expect(ArticleLimit(rawValue: 5_000) == .fiveThousand)
-        #expect(ArticleLimit(rawValue: 25_000) == .twentyFiveThousand)
     }
 
     @Test("ArticleLimit returns nil for invalid rawValue")

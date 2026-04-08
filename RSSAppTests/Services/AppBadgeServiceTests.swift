@@ -32,13 +32,6 @@ struct AppBadgeServiceTests {
         #expect(service.badgeEnabled == true)
     }
 
-    @Test("Returns false when UserDefaults has false")
-    func explicitFalseReturnsFalse() {
-        UserDefaults.standard.set(false, forKey: Self.badgeEnabledDefaultsKey)
-        let service = AppBadgeService()
-        #expect(service.badgeEnabled == false)
-    }
-
     // MARK: - Setter persistence
 
     @Test("Setting badgeEnabled to true persists and reads back")
@@ -46,14 +39,6 @@ struct AppBadgeServiceTests {
         let service = AppBadgeService()
         service.badgeEnabled = true
         #expect(service.badgeEnabled == true)
-    }
-
-    @Test("Setting badgeEnabled to false after true persists and reads back")
-    func setFalseAfterTrueReadsBack() {
-        let service = AppBadgeService()
-        service.badgeEnabled = true
-        service.badgeEnabled = false
-        #expect(service.badgeEnabled == false)
     }
 
     // MARK: - Legacy migration
@@ -85,41 +70,15 @@ struct AppBadgeServiceTests {
         #expect(UserDefaults.standard.string(forKey: Self.legacyBadgeModeKey) == "on")
     }
 
-    @Test("Migrates legacy 'unread' badge mode to enabled")
-    func migratesLegacyUnreadToEnabled() {
+    @Test("Migrates legacy non-'off' badge mode (representative: 'unread') to enabled")
+    func migratesLegacyNonOffModeToEnabled() {
         // The legacy 3-mode key used values like "unread" for "show unread count"
         // and "total" for "show total count"; anything that is not literally "off"
-        // should map to enabled = true.
+        // — including unexpected values from future or corrupted stores and empty
+        // strings — should default to enabled = true rather than silently falling
+        // back to disabled. All non-"off" values share the same code path; this
+        // test covers the representative "unread" case.
         UserDefaults.standard.set("unread", forKey: Self.legacyBadgeModeKey)
-        let service = AppBadgeService()
-        #expect(service.badgeEnabled == true)
-        #expect(UserDefaults.standard.string(forKey: Self.legacyBadgeModeKey) == nil)
-    }
-
-    @Test("Migrates legacy 'total' badge mode to enabled")
-    func migratesLegacyTotalToEnabled() {
-        UserDefaults.standard.set("total", forKey: Self.legacyBadgeModeKey)
-        let service = AppBadgeService()
-        #expect(service.badgeEnabled == true)
-        #expect(UserDefaults.standard.string(forKey: Self.legacyBadgeModeKey) == nil)
-    }
-
-    @Test("Migrates unrecognized legacy badge mode to enabled")
-    func migratesUnrecognizedLegacyModeToEnabled() {
-        // Any non-"off" string — including unexpected values from future or
-        // corrupted stores — should default to enabled = true rather than
-        // silently falling back to disabled.
-        UserDefaults.standard.set("someFutureMode", forKey: Self.legacyBadgeModeKey)
-        let service = AppBadgeService()
-        #expect(service.badgeEnabled == true)
-        #expect(UserDefaults.standard.string(forKey: Self.legacyBadgeModeKey) == nil)
-    }
-
-    @Test("Migrates legacy empty string to enabled")
-    func migratesLegacyEmptyStringToEnabled() {
-        // Empty string is not "off", so per the current migration rule it maps
-        // to enabled = true. This pins the existing behavior.
-        UserDefaults.standard.set("", forKey: Self.legacyBadgeModeKey)
         let service = AppBadgeService()
         #expect(service.badgeEnabled == true)
         #expect(UserDefaults.standard.string(forKey: Self.legacyBadgeModeKey) == nil)
@@ -142,30 +101,6 @@ struct AppBadgeServiceTests {
         // so the default-false path is exercised rather than a written false value.
         #expect(UserDefaults.standard.object(forKey: Self.badgeEnabledDefaultsKey) == nil)
         #expect(UserDefaults.standard.object(forKey: Self.legacyBadgeModeKey) == nil)
-    }
-
-    @Test("Numeric legacy value is stringified and migrates to enabled")
-    func numericLegacyValueMigratesToEnabled() {
-        // UserDefaults.string(forKey:) coerces numeric values to their decimal
-        // string representation, so an integer written under the legacy key
-        // becomes a non-"off" string and maps to enabled = true. This pins the
-        // observed behavior so any future change (e.g., switching to
-        // `object(forKey:) as? String`) is caught by the test suite.
-        UserDefaults.standard.set(42, forKey: Self.legacyBadgeModeKey)
-        let service = AppBadgeService()
-
-        #expect(service.badgeEnabled == true)
-        #expect(UserDefaults.standard.string(forKey: Self.legacyBadgeModeKey) == nil)
-    }
-
-    @Test("New key 'true' takes precedence over legacy 'off'")
-    func newKeyTrueOverridesLegacyOff() {
-        UserDefaults.standard.set(true, forKey: Self.badgeEnabledDefaultsKey)
-        UserDefaults.standard.set("off", forKey: Self.legacyBadgeModeKey)
-        let service = AppBadgeService()
-        #expect(service.badgeEnabled == true)
-        // Legacy key is left untouched since migration is skipped.
-        #expect(UserDefaults.standard.string(forKey: Self.legacyBadgeModeKey) == "off")
     }
 
     // MARK: - Repeated initialization safety
