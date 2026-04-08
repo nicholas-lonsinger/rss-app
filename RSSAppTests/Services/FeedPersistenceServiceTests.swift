@@ -958,6 +958,83 @@ struct FeedPersistenceServiceTests {
         #expect(bAfter[0].wasUpdated == false)
     }
 
+    @Test("markAllArticlesRead(for:) preserves the first-read timestamp on already-read articles (issue #271)")
+    @MainActor
+    func markAllArticlesReadForFeedPreservesFirstReadDate() async throws {
+        // Pins the predicate-based safety documented in `PersistentArticle.readDate`:
+        // the `!$0.isRead` fetch predicate in `markAllArticlesRead(for:)` must never
+        // touch articles whose `readDate` is already set. A future refactor that drops
+        // the predicate would silently overwrite first-read timestamps on already-read
+        // articles — this test would catch that regression immediately.
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+        try service.upsertArticles(
+            [
+                TestFixtures.makeArticle(id: "already-read"),
+                TestFixtures.makeArticle(id: "still-unread"),
+            ],
+            for: feed
+        )
+
+        let articles = try service.articles(for: feed)
+        let alreadyRead = try #require(articles.first { $0.articleID == "already-read" })
+        try service.markArticleRead(alreadyRead, isRead: true)
+        let originalReadDate = try #require(alreadyRead.readDate)
+
+        // Sleep long enough that a re-stamp would be observable. `Date()` has
+        // sub-millisecond resolution on iOS, so 10ms is generous headroom.
+        try await Task.sleep(nanoseconds: 10_000_000)
+
+        try service.markAllArticlesRead(for: feed)
+
+        // Already-read article: readDate must be unchanged (predicate excluded it).
+        #expect(alreadyRead.readDate == originalReadDate)
+
+        // Previously-unread sibling: must now have a fresh stamp after originalReadDate.
+        let stillUnread = try #require(try service.articles(for: feed).first { $0.articleID == "still-unread" })
+        let freshStamp = try #require(stillUnread.readDate)
+        #expect(freshStamp > originalReadDate)
+    }
+
+    @Test("markAllArticlesRead() (global) preserves the first-read timestamp on already-read articles (issue #271)")
+    @MainActor
+    func markAllArticlesReadGlobalPreservesFirstReadDate() async throws {
+        // Same contract as the per-feed variant: the global `!$0.isRead` predicate
+        // must exclude already-read articles so their first-read timestamps survive
+        // the bulk operation.
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+        try service.upsertArticles(
+            [
+                TestFixtures.makeArticle(id: "already-read"),
+                TestFixtures.makeArticle(id: "still-unread"),
+            ],
+            for: feed
+        )
+
+        let articles = try service.articles(for: feed)
+        let alreadyRead = try #require(articles.first { $0.articleID == "already-read" })
+        try service.markArticleRead(alreadyRead, isRead: true)
+        let originalReadDate = try #require(alreadyRead.readDate)
+
+        // Sleep long enough that a re-stamp would be observable.
+        try await Task.sleep(nanoseconds: 10_000_000)
+
+        try service.markAllArticlesRead()
+
+        // Already-read article: readDate must be unchanged (predicate excluded it).
+        #expect(alreadyRead.readDate == originalReadDate)
+
+        // Previously-unread sibling: must now have a fresh stamp after originalReadDate.
+        let stillUnread = try #require(try service.articles(for: feed).first { $0.articleID == "still-unread" })
+        let freshStamp = try #require(stillUnread.readDate)
+        #expect(freshStamp > originalReadDate)
+    }
+
     @Test("unreadCount returns correct count")
     @MainActor
     func unreadCountCorrect() throws {
