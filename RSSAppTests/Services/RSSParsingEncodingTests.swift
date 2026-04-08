@@ -461,266 +461,6 @@ struct RSSParsingEncodingTests {
 
 }
 
-/// Diagnostic-emission tests for the `EncodingSniffer` fallback paths.
-///
-/// These tests pin down the dual-emission (`os.Logger` + `DiagnosticRecorder`)
-/// contract introduced by issue #275. Without them, a refactor that silently
-/// removes a `logger.warning(...)` or `DiagnosticRecorder.record(...)` from a
-/// fallback path would make the fallback invisible in production AND pass the
-/// rest of the suite. The recorder-backed assertions below catch that
-/// regression.
-///
-/// The suite is `.serialized` because `DiagnosticRecorder.active` is
-/// process-global state: parallel tests *within this suite* installing their
-/// own sinks would race and cross-pollute one another's recorded events.
-///
-/// **Important caveat:** Swift Testing's `.serialized` trait only serializes
-/// tests **within** this suite; it does NOT prevent parallel execution against
-/// sibling suites such as `RSSParsingEncodingTests`, which also exercise
-/// `EncodingSniffer` fallback paths and will concurrently land events on the
-/// same global sink. Because of that, assertions in this suite must NOT rely
-/// on event *counts* — use `contains(where:)` pinned to the specific input
-/// signature (unique encoding name, unique byte pattern, etc.) so unrelated
-/// events from parallel suites cannot flake the test. The UTF-8 fast-path
-/// test additionally scopes its "no emission" assertion to its own unique
-/// feed title to avoid false positives from sibling suites.
-@Suite("EncodingSniffer diagnostic emission", .serialized)
-struct EncodingSnifferDiagnosticTests {
-
-    @Test("Unknown encoding name fallback emits a warning diagnostic with the offending name")
-    func unknownEncodingEmitsWarningDiagnostic() {
-        let sink = RecordingDiagnosticSink()
-        DiagnosticRecorder.install(sink)
-        defer { DiagnosticRecorder.uninstall() }
-
-        // Exercise `EncodingSniffer.transcodeToUTF8IfNeeded` directly so the
-        // test only observes events the sniffer itself emits. Going through
-        // `RSSParsingService.parse()` would introduce additional log
-        // categories (e.g. `RSSParsingService`) in the sink that we'd have to
-        // filter out. A unique fake encoding name is used below so any events
-        // produced concurrently by sibling (non-serialized) parsing suites
-        // cannot match our `contains(where:)` assertion.
-        let uniqueName = "x-encseam-unknown-warn-278"
-        let xml = """
-        <?xml version="1.0" encoding="\(uniqueName)"?>
-        <rss version="2.0"><channel><title>fallback</title><item><title>x</title><description>body</description></item></channel></rss>
-        """
-        _ = EncodingSniffer.transcodeToUTF8IfNeeded(Data(xml.utf8))
-
-        // Pin the assertion to the unique name rather than counting events.
-        // `.serialized` only serializes tests within this suite; sibling suites
-        // (RSSParsingEncodingTests) run in parallel and land EncodingSniffer
-        // events on the same global sink, so a count-based check would flake.
-        let warnings = sink.events(atLevel: .warning)
-            .filter { $0.category == EncodingSniffer.loggerCategory }
-        let matching = warnings.filter { $0.message.contains(uniqueName) }
-        #expect(!matching.isEmpty,
-                "Expected a warning diagnostic mentioning the unique unknown encoding name, got: \(warnings.map(\.message))")
-        // The offending name and the "fallback" recovery hint must both appear
-        // in the message so production log consumers (Console.app, post-mortem
-        // reviewers) can diagnose which feed declared a charset the system
-        // didn't recognize.
-        #expect(matching.contains(where: { $0.message.contains("fallback") }))
-    }
-
-    @Test("Transcode success path emits a notice diagnostic with byte counts")
-    func transcodeSuccessEmitsNoticeDiagnostic() {
-        let sink = RecordingDiagnosticSink()
-        DiagnosticRecorder.install(sink)
-        defer { DiagnosticRecorder.uninstall() }
-
-        // Exercise `EncodingSniffer.transcode` directly so the success path
-        // is unambiguous: pass a `.isoLatin1` input (which is byte-total, so
-        // decoding always succeeds) and assert the notice event was recorded.
-        // Calling `transcode` directly — rather than `transcodeToUTF8IfNeeded`
-        // — also isolates the emission contract from the sniffer's dispatch
-        // logic above it.
-        //
-        // The byte sequence below is chosen so the resulting success message
-        // ("Transcoded <N> bytes from isoLatin1 to <M> bytes UTF-8") contains
-        // a deterministic byte count that no other suite's payload is likely
-        // to match, which lets us pin the assertion via `contains(where:)`
-        // rather than relying on a count of "exactly one" event. (`.serialized`
-        // only serializes within-suite; sibling parsing suites run in parallel
-        // and land events on the same global sink.)
-        let latin1Bytes: [UInt8] = [
-            0x3C, 0x72, 0x73, 0x73, 0x3E,          // "<rss>"
-            0xA3,                                   // £ in latin-1
-            0x3C, 0x2F, 0x72, 0x73, 0x73, 0x3E     // "</rss>"
-        ]
-        let input = Data(latin1Bytes)
-        let output = EncodingSniffer.transcode(input, from: .isoLatin1)
-
-        #expect(output != nil, "transcode should succeed for a byte-total latin-1 input")
-
-        // The success message has the form:
-        //   "Transcoded <inputByteCount> bytes from <encoding-description> to <outputByteCount> bytes UTF-8"
-        // where `<encoding-description>` is `String(describing: encoding)`.
-        // (In practice `String.Encoding`'s CustomStringConvertible rendering
-        // is empty on iOS — see RATIONALE below — so we do not assert on
-        // it. Instead, we pin to the exact input/output byte counts: 12
-        // input bytes, and "£" encodes to 2 UTF-8 bytes so the
-        // stripped-and-re-encoded output is 13 bytes ("<rss>£</rss>" in
-        // UTF-8). The two byte counts together form a signature no other
-        // suite's payload is likely to match.)
-        //
-        // RATIONALE: `String(describing: String.Encoding.isoLatin1)` renders
-        // as an empty string on iOS 26 — `String.Encoding` is an opaque
-        // struct with no CustomStringConvertible conformance and Swift's
-        // default `String(describing:)` prints nothing useful for raw
-        // NSStringEncoding values. A follow-up could pre-format the name
-        // at emission time, but the diagnostic is still actionable because
-        // the byte counts identify the failing payload uniquely. Not fixed
-        // in this PR to keep the scope focused on the test seam itself.
-        let notices = sink.events(atLevel: .notice)
-            .filter { $0.category == EncodingSniffer.loggerCategory }
-        let match = notices.first(where: {
-            $0.message.lowercased().contains("transcoded")
-                && $0.message.contains("12 bytes")
-                && $0.message.contains("13 bytes")
-                && $0.message.contains("UTF-8")
-        })
-        #expect(match != nil,
-                "Expected a notice diagnostic matching the byte-count signature of the latin-1 input, got: \(notices.map(\.message))")
-    }
-
-    @Test("Successful UTF-8 fast path emits no diagnostics for the sniffer")
-    func utf8FastPathEmitsNoDiagnostics() {
-        let sink = RecordingDiagnosticSink()
-        DiagnosticRecorder.install(sink)
-        defer { DiagnosticRecorder.uninstall() }
-
-        // Direct sniffer invocation (see rationale above) — the UTF-8 fast
-        // path should short-circuit inside `transcodeToUTF8IfNeeded` and emit
-        // nothing. The input payload is tagged with a unique marker so any
-        // events emitted concurrently by sibling (non-serialized) parsing
-        // suites can be excluded from the assertion; this avoids flakes from
-        // cross-suite pollution of the global sink while still catching a
-        // regression that would make the fast path start emitting its own
-        // events.
-        let uniqueMarker = "x-encseam-utf8-fast-278"
-        let xml = """
-        <?xml version="1.0" encoding="UTF-8"?>
-        <rss version="2.0"><channel><title>\(uniqueMarker)</title><item><title>x</title></item></channel></rss>
-        """
-        let input = Data(xml.utf8)
-        _ = EncodingSniffer.transcodeToUTF8IfNeeded(input)
-
-        // The fast-path emits no events that could plausibly mention the
-        // marker (production code has no reason to reflect arbitrary payload
-        // bytes into its diagnostic messages). If any event *does* mention the
-        // marker, the fast-path has started emitting and that's a regression.
-        // If any cross-suite event lands in the sink, it will not mention the
-        // marker and will be filtered out here.
-        let snifferEvents = sink.events(inCategory: EncodingSniffer.loggerCategory)
-        let markerMatches = snifferEvents.filter { $0.message.contains(uniqueMarker) }
-        #expect(markerMatches.isEmpty,
-                "Expected no sniffer diagnostics on the UTF-8 fast path, got: \(markerMatches.map(\.message))")
-    }
-
-    @Test("Transcode decode-failure path emits a warning diagnostic for stray UTF-8 continuation bytes")
-    func transcodeDecodeFailureEmitsWarningDiagnostic() {
-        let sink = RecordingDiagnosticSink()
-        DiagnosticRecorder.install(sink)
-        defer { DiagnosticRecorder.uninstall() }
-
-        // `0xC3 0x28` is a stray UTF-8 continuation byte sequence: `0xC3`
-        // announces a two-byte sequence but `0x28` is not a valid
-        // continuation byte (continuations must be `10xxxxxx`, i.e. in the
-        // 0x80..0xBF range). Foundation's `String(data:encoding: .utf8)`
-        // reliably returns nil for this pattern, so we can force the
-        // decode-failure fallback inside `EncodingSniffer.transcode` without
-        // depending on any edge case of a more exotic encoding.
-        let input = Data([0xC3, 0x28])
-        let output = EncodingSniffer.transcode(input, from: .utf8)
-
-        #expect(output == nil,
-                "transcode(_:from:.utf8) should return nil for a stray continuation-byte pair")
-
-        // Pin the assertion to a phrase that only appears in the
-        // decode-failure message so unrelated events from sibling suites
-        // cannot match. The production message reads:
-        //   "Failed to decode feed payload as <encoding>; passing through unchanged"
-        let warnings = sink.events(atLevel: .warning)
-            .filter { $0.category == EncodingSniffer.loggerCategory }
-        let match = warnings.first(where: {
-            $0.message.contains("Failed to decode")
-                && $0.message.contains("passing through unchanged")
-        })
-        #expect(match != nil,
-                "Expected a decode-failure warning diagnostic, got: \(warnings.map(\.message))")
-    }
-
-    // MARK: - DiagnosticRecorder seam contract
-
-    @Test("DiagnosticRecorder is a no-op when no sink is installed")
-    func recorderIsNoOpWithoutSink() {
-        // Clear any leaked installation from prior tests in the same process.
-        DiagnosticRecorder.uninstall()
-
-        // Recording without an installed sink must not crash. There is no
-        // observable state to assert — the point is that the call is cheap
-        // and side-effect-free in production.
-        DiagnosticRecorder.record(category: "NoSink", level: .warning, message: "should be dropped")
-
-        // Install a fresh sink and verify the prior event is *not* remembered
-        // (i.e. there is no buffering when no sink is installed).
-        let sink = RecordingDiagnosticSink()
-        DiagnosticRecorder.install(sink)
-        defer { DiagnosticRecorder.uninstall() }
-        #expect(sink.events.isEmpty)
-    }
-
-    @Test("DiagnosticRecorder.install replaces the previously installed sink")
-    func recorderInstallReplacesPreviousSink() {
-        DiagnosticRecorder.uninstall()
-
-        let first = RecordingDiagnosticSink()
-        let second = RecordingDiagnosticSink()
-
-        // The slot was cleared above, so installing `first` should report
-        // no prior sink. (We do not compare the returned existential by
-        // identity — `DiagnosticSink` is not AnyObject-constrained and
-        // bridging to AnyObject for identity checks is fragile under Swift
-        // 6 strict concurrency. Routing behavior is the real contract we
-        // care about, asserted below.)
-        #expect(DiagnosticRecorder.install(first) == nil)
-
-        // Route an event to `first` to prove it is wired up.
-        DiagnosticRecorder.record(category: "Route", level: .warning, message: "first")
-        #expect(first.events.count == 1)
-        #expect(first.events.first?.message == "first")
-
-        // Install `second` — `install(_:)` returns the prior sink, but we
-        // only assert that routing switches to `second`. The prior-sink
-        // return value is documented so callers can restore nested scopes;
-        // the routing effect is what users observe.
-        _ = DiagnosticRecorder.install(second)
-        DiagnosticRecorder.record(category: "Route", level: .warning, message: "second")
-        #expect(first.events.count == 1, "first sink should not receive events after being replaced")
-        #expect(second.events.count == 1)
-        #expect(second.events.first?.message == "second")
-
-        DiagnosticRecorder.uninstall()
-    }
-
-    @Test("DiagnosticRecorder.uninstall removes the sink and stops routing events")
-    func recorderUninstallStopsRouting() {
-        let sink = RecordingDiagnosticSink()
-        DiagnosticRecorder.install(sink)
-
-        DiagnosticRecorder.record(category: "Cat", level: .warning, message: "first")
-        #expect(sink.events.count == 1)
-
-        DiagnosticRecorder.uninstall()
-
-        DiagnosticRecorder.record(category: "Cat", level: .warning, message: "second")
-        // Sink still holds the first event, but never receives the second.
-        #expect(sink.events.count == 1)
-        #expect(sink.events.first?.message == "first")
-    }
-}
-
 // MARK: - SnifferOutcome tests
 
 /// Tests for `EncodingSniffer.SnifferOutcome` and the outcome returned by
@@ -816,103 +556,391 @@ struct SnifferOutcomeTests {
     }
 }
 
-// MARK: - Empty-feed escalation tests
+// MARK: - DiagnosticRecorder-backed tests
 
-/// Tests that `RSSParsingService.parse()` escalates its log to `.error` when
-/// an encoding fallback path was taken and the resulting parse yields zero
-/// articles (issue #273). Uses `DiagnosticRecorder` to observe the log level.
+/// Top-level container that serializes all suites that manipulate the
+/// process-global `DiagnosticRecorder.active` sink.
 ///
-/// `.serialized` for the same reason as `EncodingSnifferDiagnosticTests`:
-/// `DiagnosticRecorder.active` is process-global. Assertions use unique
-/// markers so concurrent sibling suites cannot cause false positives.
-@Suite("RSSParsingService empty-feed escalation", .serialized)
-struct EmptyFeedEscalationTests {
+/// ## Why this wrapper exists
+///
+/// `DiagnosticRecorder.active` is a single process-global slot. Tests that
+/// call `DiagnosticRecorder.install` or `.uninstall` must not run concurrently
+/// with one another, otherwise one test can evict another test's sink mid-flight
+/// — causing recorded events to land in the wrong sink or be dropped entirely.
+///
+/// Swift Testing's `.serialized` trait only serializes tests **within** the
+/// suite it is applied to; it does not constrain parallel execution against
+/// *sibling* suites at the same nesting level. Applying `.serialized` to each
+/// inner suite individually (`EncodingSnifferDiagnosticTests`,
+/// `EmptyFeedEscalationTests`) prevents races among tests *within* each suite,
+/// but still allows the two suites to run concurrently with each other.
+///
+/// Wrapping both under this single `.serialized` parent forces Swift Testing to
+/// run every test in the hierarchy sequentially, eliminating the cross-suite
+/// sink-eviction race described in issue #310.
+///
+/// **Residual concurrency:** `RSSParsingEncodingTests` runs outside this
+/// wrapper and exercises `EncodingSniffer` code paths that emit to
+/// `DiagnosticRecorder` whenever a sink is installed. This is handled in the
+/// inner suites by pinning assertions to unique encoding names and byte
+/// patterns rather than event counts — so stray emissions from
+/// `RSSParsingEncodingTests` cannot produce false positives or false negatives.
+@Suite("DiagnosticRecorder-backed tests", .serialized)
+struct DiagnosticRecorderTests {
 
-    private let service = RSSParsingService()
+    // MARK: - EncodingSniffer diagnostic emission
 
-    @Test("parse() escalates to .error when unknown encoding fallback produces zero articles")
-    func unknownEncodingFallbackWithZeroArticlesLogsError() throws {
-        let sink = RecordingDiagnosticSink()
-        DiagnosticRecorder.install(sink)
-        defer { DiagnosticRecorder.uninstall() }
+    /// Diagnostic-emission tests for the `EncodingSniffer` fallback paths.
+    ///
+    /// These tests pin down the dual-emission (`os.Logger` + `DiagnosticRecorder`)
+    /// contract introduced by issue #275. Without them, a refactor that silently
+    /// removes a `logger.warning(...)` or `DiagnosticRecorder.record(...)` from a
+    /// fallback path would make the fallback invisible in production AND pass the
+    /// rest of the suite. The recorder-backed assertions below catch that
+    /// regression.
+    ///
+    /// The suite is `.serialized` to prevent races among tests within this suite.
+    /// Cross-suite serialization against `EmptyFeedEscalationTests` is enforced by
+    /// the enclosing `DiagnosticRecorderTests` wrapper (issue #310).
+    ///
+    /// Assertions use `contains(where:)` pinned to unique encoding names and byte
+    /// patterns rather than event counts so that stray emissions from the
+    /// concurrently running `RSSParsingEncodingTests` suite cannot flake the test.
+    @Suite("EncodingSniffer diagnostic emission", .serialized)
+    struct EncodingSnifferDiagnosticTests {
 
-        // Use a feed with an unrecognised encoding name so we reliably hit the
-        // `.unknownEncodingFallback` path inside `transcodeToUTF8IfNeeded`.
-        // The body is valid UTF-8 so the channel parses successfully, but the
-        // XML structure has no <item> elements, producing zero articles.
-        let uniqueEncName = "x-escalation-test-273"
-        let xml = """
-        <?xml version="1.0" encoding="\(uniqueEncName)"?>
-        <rss version="2.0">
-          <channel>
-            <title>Escalation Test Feed</title>
-          </channel>
-        </rss>
-        """
-        let feed = try service.parse(Data(xml.utf8))
-        #expect(feed.articles.isEmpty, "Fixture must produce zero articles to exercise escalation path")
+        @Test("Unknown encoding name fallback emits a warning diagnostic with the offending name")
+        func unknownEncodingEmitsWarningDiagnostic() {
+            let sink = RecordingDiagnosticSink()
+            DiagnosticRecorder.install(sink)
+            defer { DiagnosticRecorder.uninstall() }
 
-        // Assert the escalation action directly: `parse()` dual-emits to
-        // `DiagnosticRecorder` at `.error` under category "RSSParsingService"
-        // when `isFallback && articles.isEmpty`. Issue #301.
-        let errors = sink.events(atLevel: .error)
-            .filter { $0.category == "RSSParsingService" }
-        let escalationError = errors.first { $0.message.contains(uniqueEncName) }
-        #expect(escalationError != nil,
-                "Expected a parse() escalation error for encoding fallback '\(uniqueEncName)' — dual-emit was not recorded")
+            // Exercise `EncodingSniffer.transcodeToUTF8IfNeeded` directly so the
+            // test only observes events the sniffer itself emits. Going through
+            // `RSSParsingService.parse()` would introduce additional log
+            // categories (e.g. `RSSParsingService`) in the sink that we'd have to
+            // filter out. A unique fake encoding name is used below so any events
+            // produced concurrently by sibling (non-serialized) parsing suites
+            // cannot match our `contains(where:)` assertion.
+            let uniqueName = "x-encseam-unknown-warn-278"
+            let xml = """
+            <?xml version="1.0" encoding="\(uniqueName)"?>
+            <rss version="2.0"><channel><title>fallback</title><item><title>x</title><description>body</description></item></channel></rss>
+            """
+            _ = EncodingSniffer.transcodeToUTF8IfNeeded(Data(xml.utf8))
+
+            // Pin the assertion to the unique name rather than counting events.
+            // The enclosing `.serialized` wrapper (DiagnosticRecorderTests) prevents
+            // EmptyFeedEscalationTests from racing with this suite. The
+            // RSSParsingEncodingTests suite still runs concurrently and can land
+            // EncodingSniffer events on the same global sink — the unique name
+            // guard here ensures those events cannot match.
+            let warnings = sink.events(atLevel: .warning)
+                .filter { $0.category == EncodingSniffer.loggerCategory }
+            let matching = warnings.filter { $0.message.contains(uniqueName) }
+            #expect(!matching.isEmpty,
+                    "Expected a warning diagnostic mentioning the unique unknown encoding name, got: \(warnings.map(\.message))")
+            // The offending name and the "fallback" recovery hint must both appear
+            // in the message so production log consumers (Console.app, post-mortem
+            // reviewers) can diagnose which feed declared a charset the system
+            // didn't recognize.
+            #expect(matching.contains(where: { $0.message.contains("fallback") }))
+        }
+
+        @Test("Transcode success path emits a notice diagnostic with byte counts")
+        func transcodeSuccessEmitsNoticeDiagnostic() {
+            let sink = RecordingDiagnosticSink()
+            DiagnosticRecorder.install(sink)
+            defer { DiagnosticRecorder.uninstall() }
+
+            // Exercise `EncodingSniffer.transcode` directly so the success path
+            // is unambiguous: pass a `.isoLatin1` input (which is byte-total, so
+            // decoding always succeeds) and assert the notice event was recorded.
+            // Calling `transcode` directly — rather than `transcodeToUTF8IfNeeded`
+            // — also isolates the emission contract from the sniffer's dispatch
+            // logic above it.
+            //
+            // The byte sequence below is chosen so the resulting success message
+            // ("Transcoded <N> bytes from isoLatin1 to <M> bytes UTF-8") contains
+            // a deterministic byte count that no other suite's payload is likely
+            // to match, which lets us pin the assertion via `contains(where:)`
+            // rather than relying on a count of "exactly one" event.
+            let latin1Bytes: [UInt8] = [
+                0x3C, 0x72, 0x73, 0x73, 0x3E,          // "<rss>"
+                0xA3,                                   // £ in latin-1
+                0x3C, 0x2F, 0x72, 0x73, 0x73, 0x3E     // "</rss>"
+            ]
+            let input = Data(latin1Bytes)
+            let output = EncodingSniffer.transcode(input, from: .isoLatin1)
+
+            #expect(output != nil, "transcode should succeed for a byte-total latin-1 input")
+
+            // The success message has the form:
+            //   "Transcoded <inputByteCount> bytes from <encoding-description> to <outputByteCount> bytes UTF-8"
+            // where `<encoding-description>` is `String(describing: encoding)`.
+            // (In practice `String.Encoding`'s CustomStringConvertible rendering
+            // is empty on iOS — see RATIONALE below — so we do not assert on
+            // it. Instead, we pin to the exact input/output byte counts: 12
+            // input bytes, and "£" encodes to 2 UTF-8 bytes so the
+            // stripped-and-re-encoded output is 13 bytes ("<rss>£</rss>" in
+            // UTF-8). The two byte counts together form a signature no other
+            // suite's payload is likely to match.)
+            //
+            // RATIONALE: `String(describing: String.Encoding.isoLatin1)` renders
+            // as an empty string on iOS 26 — `String.Encoding` is an opaque
+            // struct with no CustomStringConvertible conformance and Swift's
+            // default `String(describing:)` prints nothing useful for raw
+            // NSStringEncoding values. A follow-up could pre-format the name
+            // at emission time, but the diagnostic is still actionable because
+            // the byte counts identify the failing payload uniquely. Not fixed
+            // in this PR to keep the scope focused on the test seam itself.
+            let notices = sink.events(atLevel: .notice)
+                .filter { $0.category == EncodingSniffer.loggerCategory }
+            let match = notices.first(where: {
+                $0.message.lowercased().contains("transcoded")
+                    && $0.message.contains("12 bytes")
+                    && $0.message.contains("13 bytes")
+                    && $0.message.contains("UTF-8")
+            })
+            #expect(match != nil,
+                    "Expected a notice diagnostic matching the byte-count signature of the latin-1 input, got: \(notices.map(\.message))")
+        }
+
+        @Test("Successful UTF-8 fast path emits no diagnostics for the sniffer")
+        func utf8FastPathEmitsNoDiagnostics() {
+            let sink = RecordingDiagnosticSink()
+            DiagnosticRecorder.install(sink)
+            defer { DiagnosticRecorder.uninstall() }
+
+            // Direct sniffer invocation (see rationale above) — the UTF-8 fast
+            // path should short-circuit inside `transcodeToUTF8IfNeeded` and emit
+            // nothing. The input payload is tagged with a unique marker so any
+            // events emitted concurrently by sibling (non-serialized) parsing
+            // suites can be excluded from the assertion; this avoids flakes from
+            // cross-suite pollution of the global sink while still catching a
+            // regression that would make the fast path start emitting its own
+            // events.
+            let uniqueMarker = "x-encseam-utf8-fast-278"
+            let xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <rss version="2.0"><channel><title>\(uniqueMarker)</title><item><title>x</title></item></channel></rss>
+            """
+            let input = Data(xml.utf8)
+            _ = EncodingSniffer.transcodeToUTF8IfNeeded(input)
+
+            // The fast-path emits no events that could plausibly mention the
+            // marker (production code has no reason to reflect arbitrary payload
+            // bytes into its diagnostic messages). If any event *does* mention the
+            // marker, the fast-path has started emitting and that's a regression.
+            // If any cross-suite event lands in the sink, it will not mention the
+            // marker and will be filtered out here.
+            let snifferEvents = sink.events(inCategory: EncodingSniffer.loggerCategory)
+            let markerMatches = snifferEvents.filter { $0.message.contains(uniqueMarker) }
+            #expect(markerMatches.isEmpty,
+                    "Expected no sniffer diagnostics on the UTF-8 fast path, got: \(markerMatches.map(\.message))")
+        }
+
+        @Test("Transcode decode-failure path emits a warning diagnostic for stray UTF-8 continuation bytes")
+        func transcodeDecodeFailureEmitsWarningDiagnostic() {
+            let sink = RecordingDiagnosticSink()
+            DiagnosticRecorder.install(sink)
+            defer { DiagnosticRecorder.uninstall() }
+
+            // `0xC3 0x28` is a stray UTF-8 continuation byte sequence: `0xC3`
+            // announces a two-byte sequence but `0x28` is not a valid
+            // continuation byte (continuations must be `10xxxxxx`, i.e. in the
+            // 0x80..0xBF range). Foundation's `String(data:encoding: .utf8)`
+            // reliably returns nil for this pattern, so we can force the
+            // decode-failure fallback inside `EncodingSniffer.transcode` without
+            // depending on any edge case of a more exotic encoding.
+            let input = Data([0xC3, 0x28])
+            let output = EncodingSniffer.transcode(input, from: .utf8)
+
+            #expect(output == nil,
+                    "transcode(_:from:.utf8) should return nil for a stray continuation-byte pair")
+
+            // Pin the assertion to a phrase that only appears in the
+            // decode-failure message so unrelated events from sibling suites
+            // cannot match. The production message reads:
+            //   "Failed to decode feed payload as <encoding>; passing through unchanged"
+            let warnings = sink.events(atLevel: .warning)
+                .filter { $0.category == EncodingSniffer.loggerCategory }
+            let match = warnings.first(where: {
+                $0.message.contains("Failed to decode")
+                    && $0.message.contains("passing through unchanged")
+            })
+            #expect(match != nil,
+                    "Expected a decode-failure warning diagnostic, got: \(warnings.map(\.message))")
+        }
+
+        // MARK: - DiagnosticRecorder seam contract
+
+        @Test("DiagnosticRecorder is a no-op when no sink is installed")
+        func recorderIsNoOpWithoutSink() {
+            // Clear any leaked installation from prior tests in the same process.
+            DiagnosticRecorder.uninstall()
+
+            // Recording without an installed sink must not crash. There is no
+            // observable state to assert — the point is that the call is cheap
+            // and side-effect-free in production.
+            DiagnosticRecorder.record(category: "NoSink", level: .warning, message: "should be dropped")
+
+            // Install a fresh sink and verify the prior event is *not* remembered
+            // (i.e. there is no buffering when no sink is installed).
+            let sink = RecordingDiagnosticSink()
+            DiagnosticRecorder.install(sink)
+            defer { DiagnosticRecorder.uninstall() }
+            #expect(sink.events.isEmpty)
+        }
+
+        @Test("DiagnosticRecorder.install replaces the previously installed sink")
+        func recorderInstallReplacesPreviousSink() {
+            DiagnosticRecorder.uninstall()
+
+            let first = RecordingDiagnosticSink()
+            let second = RecordingDiagnosticSink()
+
+            // The slot was cleared above, so installing `first` should report
+            // no prior sink. (We do not compare the returned existential by
+            // identity — `DiagnosticSink` is not AnyObject-constrained and
+            // bridging to AnyObject for identity checks is fragile under Swift
+            // 6 strict concurrency. Routing behavior is the real contract we
+            // care about, asserted below.)
+            #expect(DiagnosticRecorder.install(first) == nil)
+
+            // Route an event to `first` to prove it is wired up.
+            DiagnosticRecorder.record(category: "Route", level: .warning, message: "first")
+            #expect(first.events.count == 1)
+            #expect(first.events.first?.message == "first")
+
+            // Install `second` — `install(_:)` returns the prior sink, but we
+            // only assert that routing switches to `second`. The prior-sink
+            // return value is documented so callers can restore nested scopes;
+            // the routing effect is what users observe.
+            _ = DiagnosticRecorder.install(second)
+            DiagnosticRecorder.record(category: "Route", level: .warning, message: "second")
+            #expect(first.events.count == 1, "first sink should not receive events after being replaced")
+            #expect(second.events.count == 1)
+            #expect(second.events.first?.message == "second")
+
+            DiagnosticRecorder.uninstall()
+        }
+
+        @Test("DiagnosticRecorder.uninstall removes the sink and stops routing events")
+        func recorderUninstallStopsRouting() {
+            let sink = RecordingDiagnosticSink()
+            DiagnosticRecorder.install(sink)
+
+            DiagnosticRecorder.record(category: "Cat", level: .warning, message: "first")
+            #expect(sink.events.count == 1)
+
+            DiagnosticRecorder.uninstall()
+
+            DiagnosticRecorder.record(category: "Cat", level: .warning, message: "second")
+            // Sink still holds the first event, but never receives the second.
+            #expect(sink.events.count == 1)
+            #expect(sink.events.first?.message == "first")
+        }
     }
 
-    @Test("parse() logs .notice (not .error) when fallback produces non-empty articles")
-    func unknownEncodingFallbackWithArticlesDoesNotEscalate() throws {
-        // Install a sink so we can directly observe that no .error events for
-        // "RSSParsingService" are emitted. The escalation branch only fires when
-        // isFallback && articles.isEmpty; a feed with articles must not trigger it.
-        let sink = RecordingDiagnosticSink()
-        DiagnosticRecorder.install(sink)
-        defer { DiagnosticRecorder.uninstall() }
+    // MARK: - Empty-feed escalation tests
 
-        let uniqueEncName = "x-noescape-301"
-        let xml = """
-        <?xml version="1.0" encoding="\(uniqueEncName)"?>
-        <rss version="2.0">
-          <channel>
-            <title>Fallback With Articles</title>
-            <item>
-              <title>Article One</title>
-              <description>body</description>
-            </item>
-          </channel>
-        </rss>
-        """
-        let feed = try service.parse(Data(xml.utf8))
-        #expect(feed.articles.count == 1,
-                "Fallback feed with one <item> should produce exactly one article")
+    /// Tests that `RSSParsingService.parse()` escalates its log to `.error` when
+    /// an encoding fallback path was taken and the resulting parse yields zero
+    /// articles (issue #273). Uses `DiagnosticRecorder` to observe the log level.
+    ///
+    /// The suite is `.serialized` to prevent races among tests within this suite.
+    /// Cross-suite serialization against `EncodingSnifferDiagnosticTests` is
+    /// enforced by the enclosing `DiagnosticRecorderTests` wrapper (issue #310).
+    @Suite("RSSParsingService empty-feed escalation", .serialized)
+    struct EmptyFeedEscalationTests {
 
-        // Direct negative control: parse() must not dual-emit a .error for
-        // "RSSParsingService" when the fallback produces non-empty articles.
-        let escalationErrors = sink.events(atLevel: .error)
-            .filter { $0.category == "RSSParsingService" }
-        #expect(escalationErrors.isEmpty,
-                "parse() must not escalate to .error when fallback yields articles; got: \(escalationErrors.map(\.message))")
-    }
+        private let service = RSSParsingService()
 
-    @Test("parse() does not escalate when UTF-8 feed has zero articles")
-    func utf8FeedWithZeroArticlesDoesNotEscalate() throws {
-        // A valid UTF-8 feed with no <item> elements should not be escalated:
-        // zero articles here is a normal publisher state, not an encoding
-        // failure. The path taken is `.utf8Passthrough` so `isFallback` is
-        // false, and `parse()` should log `.notice` (unobservable here) and
-        // return the empty feed normally.
-        let xml = """
-        <?xml version="1.0" encoding="UTF-8"?>
-        <rss version="2.0">
-          <channel>
-            <title>Empty UTF-8 Feed</title>
-          </channel>
-        </rss>
-        """
-        let feed = try service.parse(Data(xml.utf8))
-        #expect(feed.articles.isEmpty)
-        // No throw == no escalation path (parse() only logs; it never throws on empty articles)
+        @Test("parse() escalates to .error when unknown encoding fallback produces zero articles")
+        func unknownEncodingFallbackWithZeroArticlesLogsError() throws {
+            let sink = RecordingDiagnosticSink()
+            DiagnosticRecorder.install(sink)
+            defer { DiagnosticRecorder.uninstall() }
+
+            // Use a feed with an unrecognised encoding name so we reliably hit the
+            // `.unknownEncodingFallback` path inside `transcodeToUTF8IfNeeded`.
+            // The body is valid UTF-8 so the channel parses successfully, but the
+            // XML structure has no <item> elements, producing zero articles.
+            let uniqueEncName = "x-escalation-test-273"
+            let xml = """
+            <?xml version="1.0" encoding="\(uniqueEncName)"?>
+            <rss version="2.0">
+              <channel>
+                <title>Escalation Test Feed</title>
+              </channel>
+            </rss>
+            """
+            let feed = try service.parse(Data(xml.utf8))
+            #expect(feed.articles.isEmpty, "Fixture must produce zero articles to exercise escalation path")
+
+            // Assert the escalation action directly: `parse()` dual-emits to
+            // `DiagnosticRecorder` at `.error` under category "RSSParsingService"
+            // when `isFallback && articles.isEmpty`. Issue #301.
+            let errors = sink.events(atLevel: .error)
+                .filter { $0.category == "RSSParsingService" }
+            let escalationError = errors.first { $0.message.contains(uniqueEncName) }
+            #expect(escalationError != nil,
+                    "Expected a parse() escalation error for encoding fallback '\(uniqueEncName)' — dual-emit was not recorded")
+        }
+
+        @Test("parse() logs .notice (not .error) when fallback produces non-empty articles")
+        func unknownEncodingFallbackWithArticlesDoesNotEscalate() throws {
+            // Install a sink so we can directly observe that no .error events for
+            // "RSSParsingService" are emitted. The escalation branch only fires when
+            // isFallback && articles.isEmpty; a feed with articles must not trigger it.
+            let sink = RecordingDiagnosticSink()
+            DiagnosticRecorder.install(sink)
+            defer { DiagnosticRecorder.uninstall() }
+
+            let uniqueEncName = "x-noescape-301"
+            let xml = """
+            <?xml version="1.0" encoding="\(uniqueEncName)"?>
+            <rss version="2.0">
+              <channel>
+                <title>Fallback With Articles</title>
+                <item>
+                  <title>Article One</title>
+                  <description>body</description>
+                </item>
+              </channel>
+            </rss>
+            """
+            let feed = try service.parse(Data(xml.utf8))
+            #expect(feed.articles.count == 1,
+                    "Fallback feed with one <item> should produce exactly one article")
+
+            // Direct negative control: parse() must not dual-emit a .error for
+            // "RSSParsingService" when the fallback produces non-empty articles.
+            let escalationErrors = sink.events(atLevel: .error)
+                .filter { $0.category == "RSSParsingService" }
+            #expect(escalationErrors.isEmpty,
+                    "parse() must not escalate to .error when fallback yields articles; got: \(escalationErrors.map(\.message))")
+        }
+
+        @Test("parse() does not escalate when UTF-8 feed has zero articles")
+        func utf8FeedWithZeroArticlesDoesNotEscalate() throws {
+            // A valid UTF-8 feed with no <item> elements should not be escalated:
+            // zero articles here is a normal publisher state, not an encoding
+            // failure. The path taken is `.utf8Passthrough` so `isFallback` is
+            // false, and `parse()` should log `.notice` (unobservable here) and
+            // return the empty feed normally.
+            let xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <rss version="2.0">
+              <channel>
+                <title>Empty UTF-8 Feed</title>
+              </channel>
+            </rss>
+            """
+            let feed = try service.parse(Data(xml.utf8))
+            #expect(feed.articles.isEmpty)
+            // No throw == no escalation path (parse() only logs; it never throws on empty articles)
+        }
     }
 }
