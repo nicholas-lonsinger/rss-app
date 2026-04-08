@@ -110,8 +110,14 @@ final class EditFeedViewModel {
 
     /// User dismissed the Atom prompt by choosing to keep the RSS feed.
     /// Persists the feed already fetched during `saveFeed()`.
-    func keepOriginalFeed() {
-        guard let prompt = atomAlternatePrompt else { return }
+    ///
+    /// The caller (alert button action) must pass the `prompt` value captured
+    /// from the alert's `presenting:` closure rather than relying on
+    /// `atomAlternatePrompt` still being set. SwiftUI's `.alert(isPresented:)`
+    /// binding setter clears the prompt state as part of dismissing the
+    /// alert, so a deferred `Task` body that re-reads the view-model property
+    /// would race with that dismissal and often see nil.
+    func keepOriginalFeed(from prompt: AtomAlternatePrompt) {
         Self.logger.notice("User kept RSS feed \(prompt.originalURL.absoluteString, privacy: .public), declining Atom \(prompt.atomURL.absoluteString, privacy: .public)")
         atomAlternatePrompt = nil
         persistEditedFeed(prompt.originalFeed, url: prompt.originalURL)
@@ -119,8 +125,12 @@ final class EditFeedViewModel {
 
     /// User accepted the Atom prompt. Fetches the discovered Atom URL and
     /// persists that feed as the new URL for this subscription.
-    func switchToAtomAlternate() async {
-        guard let prompt = atomAlternatePrompt else { return }
+    ///
+    /// See the note on `keepOriginalFeed(from:)` — the prompt must be passed
+    /// in by the caller rather than re-read from `atomAlternatePrompt`, which
+    /// will have been cleared by the alert's dismissal binding by the time
+    /// this task runs.
+    func switchToAtomAlternate(from prompt: AtomAlternatePrompt) async {
         Self.logger.notice("User switching to Atom \(prompt.atomURL.absoluteString, privacy: .public) from \(prompt.originalURL.absoluteString, privacy: .public)")
         let atomURL = prompt.atomURL
         atomAlternatePrompt = nil

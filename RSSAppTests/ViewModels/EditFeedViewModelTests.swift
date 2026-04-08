@@ -224,9 +224,9 @@ struct EditFeedViewModelTests {
         )
         viewModel.urlInput = "https://new.com/feed"
         await viewModel.saveFeed()
-        #expect(viewModel.atomAlternatePrompt != nil)
+        let prompt = try! #require(viewModel.atomAlternatePrompt)
 
-        viewModel.keepOriginalFeed()
+        viewModel.keepOriginalFeed(from: prompt)
 
         #expect(viewModel.atomAlternatePrompt == nil)
         #expect(viewModel.didSave == true)
@@ -257,10 +257,47 @@ struct EditFeedViewModelTests {
         )
         viewModel.urlInput = rssURL.absoluteString
         await viewModel.saveFeed()
-        await viewModel.switchToAtomAlternate()
+        let prompt = try! #require(viewModel.atomAlternatePrompt)
+        await viewModel.switchToAtomAlternate(from: prompt)
 
         #expect(viewModel.didSave == true)
         #expect(viewModel.urlInput == atomURL.absoluteString)
+        #expect(feed.feedURL == atomURL)
+        #expect(feed.title == "New Atom")
+    }
+
+    @Test("switchToAtomAlternate completes even after the alert-binding clears atomAlternatePrompt")
+    @MainActor
+    func switchToAtomAlternateSurvivesAlertBindingRace() async {
+        // Regression guard — see AddFeedViewModelTests for the full rationale.
+        let feed = TestFixtures.makePersistentFeed(feedURL: URL(string: "https://old.com/feed")!)
+        let rssURL = URL(string: "https://new.com/feed")!
+        let atomURL = URL(string: "https://new.com/atom.xml")!
+
+        let mockFetching = MockFeedFetchingService()
+        mockFetching.feedsByURL[rssURL] = TestFixtures.makeFeed(title: "New RSS", format: .rss)
+        mockFetching.feedsByURL[atomURL] = TestFixtures.makeFeed(title: "New Atom", format: .atom)
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+        let mockDiscovery = MockAtomDiscoveryService()
+        mockDiscovery.resultToReturn = atomURL
+
+        let viewModel = EditFeedViewModel(
+            feed: feed,
+            feedFetching: mockFetching,
+            persistence: mockPersistence,
+            atomDiscovery: mockDiscovery
+        )
+        viewModel.urlInput = rssURL.absoluteString
+        await viewModel.saveFeed()
+        let prompt = try! #require(viewModel.atomAlternatePrompt)
+
+        // Simulate SwiftUI's alert dismissal clearing the prompt before the
+        // Task body runs.
+        viewModel.atomAlternatePrompt = nil
+        await viewModel.switchToAtomAlternate(from: prompt)
+
+        #expect(viewModel.didSave == true)
         #expect(feed.feedURL == atomURL)
         #expect(feed.title == "New Atom")
     }

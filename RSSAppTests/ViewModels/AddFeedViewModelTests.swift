@@ -344,11 +344,11 @@ struct AddFeedViewModelTests {
         )
         viewModel.urlInput = "https://example.com/feed"
         await viewModel.addFeed()
-        #expect(viewModel.atomAlternatePrompt != nil)
+        let prompt = try! #require(viewModel.atomAlternatePrompt)
 
         // User declines the switch.
         let fetchesBefore = mockFetching.feedsByURL.count
-        viewModel.keepOriginalFeed()
+        viewModel.keepOriginalFeed(from: prompt)
 
         #expect(viewModel.atomAlternatePrompt == nil)
         #expect(viewModel.didAddFeed == true)
@@ -379,10 +379,10 @@ struct AddFeedViewModelTests {
         )
         viewModel.urlInput = rssURL.absoluteString
         await viewModel.addFeed()
-        #expect(viewModel.atomAlternatePrompt != nil)
+        let prompt = try! #require(viewModel.atomAlternatePrompt)
 
         // User accepts the switch.
-        await viewModel.switchToAtomAlternate()
+        await viewModel.switchToAtomAlternate(from: prompt)
 
         #expect(viewModel.atomAlternatePrompt == nil)
         #expect(viewModel.didAddFeed == true)
@@ -390,6 +390,72 @@ struct AddFeedViewModelTests {
         #expect(mockPersistence.feeds.count == 1)
         #expect(mockPersistence.feeds[0].title == "Atom Version")
         #expect(mockPersistence.feeds[0].feedURL == atomURL)
+    }
+
+    @Test("switchToAtomAlternate completes even after the alert-binding clears atomAlternatePrompt")
+    @MainActor
+    func switchToAtomAlternateSurvivesAlertBindingRace() async {
+        // Regression guard: SwiftUI's `.alert(isPresented:)` binding setter
+        // clears the view-model prompt property as part of dismissing the
+        // alert. If `switchToAtomAlternate` re-reads that property instead of
+        // receiving the prompt as a parameter, it sees nil by the time the
+        // spawned `Task` runs and silently no-ops — leaving the sheet stuck
+        // open with nothing persisted. This test simulates that clear
+        // between prompt capture and method invocation.
+        let rssURL = URL(string: "https://example.com/feed")!
+        let atomURL = URL(string: "https://example.com/atom.xml")!
+
+        let mockFetching = MockFeedFetchingService()
+        mockFetching.feedsByURL[rssURL] = TestFixtures.makeFeed(title: "RSS Version", format: .rss)
+        mockFetching.feedsByURL[atomURL] = TestFixtures.makeFeed(title: "Atom Version", format: .atom)
+        let mockPersistence = MockFeedPersistenceService()
+        let mockDiscovery = MockAtomDiscoveryService()
+        mockDiscovery.resultToReturn = atomURL
+
+        let viewModel = AddFeedViewModel(
+            feedFetching: mockFetching,
+            persistence: mockPersistence,
+            atomDiscovery: mockDiscovery
+        )
+        viewModel.urlInput = rssURL.absoluteString
+        await viewModel.addFeed()
+        let prompt = try! #require(viewModel.atomAlternatePrompt)
+
+        // Simulate the alert dismissal clearing the prompt state *before*
+        // the Task body runs.
+        viewModel.atomAlternatePrompt = nil
+        await viewModel.switchToAtomAlternate(from: prompt)
+
+        #expect(viewModel.didAddFeed == true)
+        #expect(mockPersistence.feeds.count == 1)
+        #expect(mockPersistence.feeds[0].feedURL == atomURL)
+    }
+
+    @Test("keepOriginalFeed completes even after the alert-binding clears atomAlternatePrompt")
+    @MainActor
+    func keepOriginalFeedSurvivesAlertBindingRace() async {
+        // Companion regression guard to the switch variant above.
+        let mockFetching = MockFeedFetchingService()
+        mockFetching.feedToReturn = TestFixtures.makeFeed(title: "Original RSS", format: .rss)
+        let mockPersistence = MockFeedPersistenceService()
+        let mockDiscovery = MockAtomDiscoveryService()
+        mockDiscovery.resultToReturn = URL(string: "https://example.com/atom.xml")
+
+        let viewModel = AddFeedViewModel(
+            feedFetching: mockFetching,
+            persistence: mockPersistence,
+            atomDiscovery: mockDiscovery
+        )
+        viewModel.urlInput = "https://example.com/feed"
+        await viewModel.addFeed()
+        let prompt = try! #require(viewModel.atomAlternatePrompt)
+
+        viewModel.atomAlternatePrompt = nil
+        viewModel.keepOriginalFeed(from: prompt)
+
+        #expect(viewModel.didAddFeed == true)
+        #expect(mockPersistence.feeds.count == 1)
+        #expect(mockPersistence.feeds[0].title == "Original RSS")
     }
 
     @Test("switchToAtomAlternate surfaces error when Atom fetch fails")
@@ -412,7 +478,8 @@ struct AddFeedViewModelTests {
         )
         viewModel.urlInput = rssURL.absoluteString
         await viewModel.addFeed()
-        await viewModel.switchToAtomAlternate()
+        let prompt = try! #require(viewModel.atomAlternatePrompt)
+        await viewModel.switchToAtomAlternate(from: prompt)
 
         #expect(viewModel.atomAlternatePrompt == nil)
         #expect(viewModel.didAddFeed == false)
@@ -440,7 +507,8 @@ struct AddFeedViewModelTests {
         )
         viewModel.urlInput = rssURL.absoluteString
         await viewModel.addFeed()
-        await viewModel.switchToAtomAlternate()
+        let prompt = try! #require(viewModel.atomAlternatePrompt)
+        await viewModel.switchToAtomAlternate(from: prompt)
 
         #expect(viewModel.didAddFeed == false)
         #expect(viewModel.errorMessage == "You are already subscribed to this feed.")
