@@ -56,11 +56,11 @@ struct ArticleRowDateLine: View {
             // so the label remains stable when `upsertArticles` bumps `sortDate` on
             // update detection — see the RATIONALE on `PersistentArticle.sortDate`
             // for why these are now distinct.
-            Text(article.displayedPublishedDate.formatted(.relative(presentation: .named)))
+            Text(article.displayedPublishedDate, format: .relative(presentation: .named))
 
             if article.shouldShowUpdatedSuffix, let updated = article.updatedDate {
                 Text("\u{00B7}")
-                Text("Updated \(updated.formatted(.relative(presentation: .named)))")
+                Text("Updated \(updated, format: .relative(presentation: .named))")
             }
 
             if article.wasUpdated {
