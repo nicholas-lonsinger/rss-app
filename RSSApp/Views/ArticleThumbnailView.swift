@@ -58,10 +58,11 @@ struct ArticleThumbnailView: View {
             return
         }
 
-        // RATIONALE: `resolveAndCacheThumbnail` is `throws(CancellationError)`, so the only
-        // catch arm we need handles task cancellation. The compiler enforces that no other
-        // error type can escape, eliminating the need for a `catch { assertionFailure(...) }`
-        // safety net.
+        // RATIONALE: `resolveAndCacheThumbnail` is `throws(CancellationError)`, so the
+        // unqualified `catch` below only ever receives a CancellationError and no
+        // `catch { assertionFailure(...) }` safety net is needed. A `catch is
+        // CancellationError` pattern would be flagged as always-true given the
+        // typed-throws signature already guarantees the error type.
         let result: ThumbnailCacheResult
         do {
             result = try await thumbnailService.resolveAndCacheThumbnail(
@@ -69,7 +70,7 @@ struct ArticleThumbnailView: View {
                 articleLink: articleLink,
                 articleID: articleID
             )
-        } catch is CancellationError {
+        } catch {
             // View task was cancelled (e.g., row scrolled off-screen) — bail out quietly.
             return
         }
