@@ -100,8 +100,13 @@ struct ArticleThumbnailService: ArticleThumbnailCaching {
             Self.logger.warning("Network error caching thumbnail for \(remoteURL.absoluteString, privacy: .public): \(urlError, privacy: .public)")
             return .transientFailure
         } catch {
-            Self.logger.warning("Failed to cache thumbnail for \(remoteURL.absoluteString, privacy: .public): \(error, privacy: .public)")
-            return .permanentFailure
+            // RATIONALE: Unknown non-URLError, non-CancellationError escapes from URLSession
+            // (e.g. a future framework surprise or wrapper we don't yet know about). Defaulting
+            // to .transientFailure is the conservative safe choice — "give up forever"
+            // (.permanentFailure) is wrong for an unknown error whose retryability is unclear.
+            // Logged at .error so any unexpected escape is immediately visible in persisted logs.
+            Self.logger.error("Unexpected error caching thumbnail for \(remoteURL.absoluteString, privacy: .public): \(error, privacy: .public)")
+            return .transientFailure
         }
 
         guard let httpResponse = response as? HTTPURLResponse,
