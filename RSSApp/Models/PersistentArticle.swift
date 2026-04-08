@@ -45,10 +45,14 @@ final class PersistentArticle {
     /// (`upsertArticles`); the clear paths above all set it to `false` only on a
     /// read transition.
     ///
-    /// **Destructive transition:** the update path resets `isRead = false` and
-    /// `readDate = nil`. The original "first read" timestamp is NOT preserved across
-    /// detection. If a future feature needs "read-before-update" history, this
-    /// decision must be revisited.
+    /// **Destructive transitions:** the upsert update-detection path resets
+    /// `isRead = false` and `readDate = nil`. `readDate` also has a second
+    /// destructive transition — `FeedPersistenceService.markArticleRead(_:isRead: false)`
+    /// clears it when the user explicitly marks the article unread. The original
+    /// "first read" timestamp is NOT preserved across either transition. If a
+    /// future feature needs "read-before-update" history, this decision must be
+    /// revisited. See the `readDate` doc comment below for the full first-read
+    /// contract (issue #271), including which bulk paths are safe from clobbering.
     ///
     /// Existing rows persisted before this field was added deserialize as `false` via
     /// SwiftData's implicit schema migration, matching the default for fresh inserts.
@@ -69,8 +73,15 @@ final class PersistentArticle {
     /// `isRead = false` (which clears `readDate = nil`) lets a subsequent read
     /// stamp a new timestamp. The bulk `markAllArticlesRead` variants only touch
     /// rows whose `isRead == false`, so they never clobber an existing first-read
-    /// timestamp. The `upsertArticles` update-detection path clears `readDate`
-    /// alongside `isRead`, which is the only sanctioned destructive transition.
+    /// timestamp.
+    ///
+    /// **Destructive transitions** are limited to two paths:
+    /// 1. *User-initiated* — `markArticleRead(_:isRead: false)` clears `readDate`
+    ///    when the user explicitly toggles the article back to unread.
+    /// 2. *System-initiated* — `upsertArticles`'s update-detection path clears
+    ///    `readDate` alongside `isRead` when a publisher revision resurfaces the
+    ///    row. This is the only *involuntary* destructive transition — i.e., the
+    ///    one the user did not directly request.
     var readDate: Date?
 
     // MARK: - Saved status
