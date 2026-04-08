@@ -570,21 +570,22 @@ struct SnifferOutcomeTests {
 ///
 /// Swift Testing's `.serialized` trait only serializes tests **within** the
 /// suite it is applied to; it does not constrain parallel execution against
-/// *sibling* suites at the same nesting level. Applying `.serialized` to each
+/// *sibling* suites at the same nesting level. A `.serialized` trait on each
 /// inner suite individually (`EncodingSnifferDiagnosticTests`,
-/// `EmptyFeedEscalationTests`) prevents races among tests *within* each suite,
-/// but still allows the two suites to run concurrently with each other.
+/// `EmptyFeedEscalationTests`) would prevent races among tests *within* each
+/// suite, but still allow the two suites to run concurrently with each other.
 ///
 /// Wrapping both under this single `.serialized` parent forces Swift Testing to
 /// run every test in the hierarchy sequentially, eliminating the cross-suite
-/// sink-eviction race described in issue #310.
+/// sink-eviction race described in issue #310. Because the trait is inherited by
+/// nested suites, the inner suites do not need their own `.serialized` annotation.
 ///
 /// **Residual concurrency:** `RSSParsingEncodingTests` runs outside this
 /// wrapper and exercises `EncodingSniffer` code paths that emit to
-/// `DiagnosticRecorder` whenever a sink is installed. This is handled in the
-/// inner suites by pinning assertions to unique encoding names and byte
-/// patterns rather than event counts — so stray emissions from
-/// `RSSParsingEncodingTests` cannot produce false positives or false negatives.
+/// `DiagnosticRecorder`. If a sink is installed by a concurrently running test
+/// in `EncodingSnifferDiagnosticTests`, those emissions will land in that sink.
+/// This is mitigated by pinning assertions to unique encoding names and byte
+/// patterns rather than event counts.
 @Suite("DiagnosticRecorder-backed tests", .serialized)
 struct DiagnosticRecorderTests {
 
@@ -599,14 +600,15 @@ struct DiagnosticRecorderTests {
     /// rest of the suite. The recorder-backed assertions below catch that
     /// regression.
     ///
-    /// The suite is `.serialized` to prevent races among tests within this suite.
-    /// Cross-suite serialization against `EmptyFeedEscalationTests` is enforced by
-    /// the enclosing `DiagnosticRecorderTests` wrapper (issue #310).
+    /// The enclosing `DiagnosticRecorderTests` wrapper is `.serialized`, so all
+    /// tests in this suite run serially — both within the suite and against other
+    /// suites like `EmptyFeedEscalationTests` (in addition to the cross-suite
+    /// serialization enforced by the parent wrapper, issue #310).
     ///
     /// Assertions use `contains(where:)` pinned to unique encoding names and byte
     /// patterns rather than event counts so that stray emissions from the
     /// concurrently running `RSSParsingEncodingTests` suite cannot flake the test.
-    @Suite("EncodingSniffer diagnostic emission", .serialized)
+    @Suite("EncodingSniffer diagnostic emission")
     struct EncodingSnifferDiagnosticTests {
 
         @Test("Unknown encoding name fallback emits a warning diagnostic with the offending name")
@@ -620,8 +622,9 @@ struct DiagnosticRecorderTests {
             // `RSSParsingService.parse()` would introduce additional log
             // categories (e.g. `RSSParsingService`) in the sink that we'd have to
             // filter out. A unique fake encoding name is used below so any events
-            // produced concurrently by sibling (non-serialized) parsing suites
-            // cannot match our `contains(where:)` assertion.
+            // produced concurrently by `RSSParsingEncodingTests` (which runs outside
+            // the `DiagnosticRecorderTests` wrapper) cannot match our
+            // `contains(where:)` assertion.
             let uniqueName = "x-encseam-unknown-warn-278"
             let xml = """
             <?xml version="1.0" encoding="\(uniqueName)"?>
@@ -715,11 +718,11 @@ struct DiagnosticRecorderTests {
             // Direct sniffer invocation (see rationale above) — the UTF-8 fast
             // path should short-circuit inside `transcodeToUTF8IfNeeded` and emit
             // nothing. The input payload is tagged with a unique marker so any
-            // events emitted concurrently by sibling (non-serialized) parsing
-            // suites can be excluded from the assertion; this avoids flakes from
-            // cross-suite pollution of the global sink while still catching a
-            // regression that would make the fast path start emitting its own
-            // events.
+            // events emitted concurrently by `RSSParsingEncodingTests` (which runs
+            // outside the `DiagnosticRecorderTests` wrapper) can be excluded from
+            // the assertion; this avoids flakes from cross-suite pollution of the
+            // global sink while still catching a regression that would make the
+            // fast path start emitting its own events.
             let uniqueMarker = "x-encseam-utf8-fast-278"
             let xml = """
             <?xml version="1.0" encoding="UTF-8"?>
@@ -847,12 +850,14 @@ struct DiagnosticRecorderTests {
 
     /// Tests that `RSSParsingService.parse()` escalates its log to `.error` when
     /// an encoding fallback path was taken and the resulting parse yields zero
-    /// articles (issue #273). Uses `DiagnosticRecorder` to observe the log level.
+    /// articles (issues #273 and #301). The dual-emit to `DiagnosticRecorder`
+    /// introduced by #301 is what makes these assertions possible.
+    /// Uses `DiagnosticRecorder` to observe the log level.
     ///
-    /// The suite is `.serialized` to prevent races among tests within this suite.
-    /// Cross-suite serialization against `EncodingSnifferDiagnosticTests` is
-    /// enforced by the enclosing `DiagnosticRecorderTests` wrapper (issue #310).
-    @Suite("RSSParsingService empty-feed escalation", .serialized)
+    /// The suite is serialized because the enclosing `DiagnosticRecorderTests`
+    /// wrapper has the `.serialized` trait. This prevents races among tests within
+    /// this suite and against `EncodingSnifferDiagnosticTests` (issue #310).
+    @Suite("RSSParsingService empty-feed escalation")
     struct EmptyFeedEscalationTests {
 
         private let service = RSSParsingService()
