@@ -463,10 +463,10 @@ struct RSSParsingEncodingTests {
 
 // MARK: - SnifferOutcome tests
 
-/// Tests for `EncodingSniffer.SnifferOutcome` and the outcome returned by
-/// `transcodeToUTF8IfNeeded`, plus the parse-level error escalation introduced
-/// by issue #273 (empty feed after encoding fallback should log `.error`, not
-/// `.notice`).
+/// Tests for `EncodingSniffer.SnifferOutcome` enum behavior and the outcome
+/// returned by `transcodeToUTF8IfNeeded`. Parse-level error escalation
+/// (empty feed after encoding fallback should log `.error`, not `.notice`) is
+/// covered by `EmptyFeedEscalationTests`, not this suite.
 @Suite("EncodingSniffer.SnifferOutcome")
 struct SnifferOutcomeTests {
 
