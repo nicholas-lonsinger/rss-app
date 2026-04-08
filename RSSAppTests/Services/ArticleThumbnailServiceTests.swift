@@ -176,6 +176,47 @@ struct ArticleThumbnailServiceTests {
         #expect(thrown is CancellationError, "Expected CancellationError, got \(String(describing: thrown))")
     }
 
+    @Test("resolveAndCacheThumbnail propagates mid-flight URLError(.cancelled) as CancellationError")
+    func resolveAndCacheThumbnailPropagatesMidFlightCancellation() async {
+        // Regression coverage for issue #250: the existing
+        // `resolveAndCacheThumbnailPropagatesCancellation` test cancels the surrounding
+        // Task before `Task.yield()` returns, so it only exercises the *pre-flight*
+        // `CancellationError` path — before any URL loading starts. The mid-flight path
+        // — where URLSession has already dispatched the request and the cancellation
+        // surfaces from inside the byte loop as `URLError(.cancelled)` — was not covered
+        // at the `resolveAndCacheThumbnail` integration boundary, leaving room for
+        // future refactors to regress the fix for issue #228 without any test failing.
+        //
+        // This test plugs `MockSlowHTMLURLSessionProvider` (which delivers a 200 OK,
+        // an initial chunk, then `URLError(.cancelled)` from a private dispatch queue)
+        // into the service and calls `resolveAndCacheThumbnail` end-to-end. We pass
+        // `thumbnailURL: nil` so the un-mockable `cacheThumbnail` step is skipped and
+        // the call goes straight through `resolveOGImage`, which uses the injected
+        // session. The mid-flight `URLError(.cancelled)` must be normalized to
+        // `CancellationError` by `resolveOGImage` and rethrown unchanged by
+        // `resolveAndCacheThumbnail` — *not* swallowed and reported as
+        // `.transientFailure`. If a future refactor accidentally catches the rethrow
+        // somewhere along the integration path, this test fails.
+        let mockSession = MockSlowHTMLURLSessionProvider()
+        mockSession.midStreamError = URLError(.cancelled)
+        let service = ArticleThumbnailService(session: mockSession)
+        let articleLink = URL(string: "https://example.com/article-mid-flight-cancelled")!
+
+        do {
+            _ = try await service.resolveAndCacheThumbnail(
+                thumbnailURL: nil,
+                articleLink: articleLink,
+                articleID: "mid-flight-cancellation-test"
+            )
+            Issue.record("Expected resolveAndCacheThumbnail to throw CancellationError, but it returned normally")
+        } catch is CancellationError {
+            // Expected: the mid-flight URLError(.cancelled) was normalized to
+            // CancellationError by resolveOGImage and propagated by resolveAndCacheThumbnail.
+        } catch {
+            Issue.record("Expected CancellationError, got \(String(describing: error))")
+        }
+    }
+
     @Test("resolveOGImage normalizes mid-stream URLError(.cancelled) to CancellationError")
     func resolveOGImageNormalizesMidStreamURLErrorCancelled() async {
         // Regression coverage for issue #248: the
