@@ -101,9 +101,14 @@ final class EditFeedViewModel {
                 originalFeed: rssFeed
             ) else {
                 // See the companion guard in `AddFeedViewModel.addFeed()`.
+                // Mirroring the happy-path `if persistEditedFeed(...) { didSave = true }`
+                // here is load-bearing — without it, the release-mode fallback
+                // persists the edit but leaves the sheet frozen.
                 Self.logger.fault("Failed to construct AtomAlternatePrompt despite upstream guards: url=\(url.absoluteString, privacy: .public) atomURL=\(atomURL.absoluteString, privacy: .public)")
                 assertionFailure("AtomAlternatePrompt invariants violated upstream")
-                persistEditedFeed(rssFeed, url: url)
+                if persistEditedFeed(rssFeed, url: url) {
+                    didSave = true
+                }
                 return
             }
             atomAlternatePrompt = prompt

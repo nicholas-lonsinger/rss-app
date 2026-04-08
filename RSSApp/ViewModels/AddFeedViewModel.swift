@@ -95,10 +95,15 @@ final class AddFeedViewModel {
                 // invariants are already established upstream (RSS format,
                 // distinct URLs). If we land here, an upstream refactor has
                 // broken one of those guarantees — crash in debug, degrade
-                // to the RSS-as-is path in release.
+                // to the RSS-as-is path in release. We have to mirror the
+                // happy-path `if persistFetchedFeed(...) { didAddFeed = true }`
+                // here, otherwise the release-mode degradation would persist
+                // the feed but leave the sheet frozen.
                 Self.logger.fault("Failed to construct AtomAlternatePrompt despite upstream guards: url=\(url.absoluteString, privacy: .public) atomURL=\(atomURL.absoluteString, privacy: .public)")
                 assertionFailure("AtomAlternatePrompt invariants violated upstream")
-                persistFetchedFeed(rssFeed, url: url)
+                if persistFetchedFeed(rssFeed, url: url) {
+                    didAddFeed = true
+                }
                 return
             }
             atomAlternatePrompt = prompt
