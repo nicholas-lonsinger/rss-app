@@ -214,11 +214,26 @@ struct AtomDiscoveryServiceTests {
         #expect(result?.absoluteString == "https://example.com/")
     }
 
-    @Test("subfolderURL drops trailing slash before walking up")
-    func subfolderDropsTrailingSlash() {
+    @Test("subfolderURL preserves directory paths as-is")
+    func subfolderPreservesDirectoryPath() {
+        // Directory-style feed URLs (trailing slash) are kept as the
+        // subfolder target — they already point at an HTML listing, not
+        // at a file. Walking up would skip past the page that's most
+        // likely to advertise the feed's Atom alternate.
         let url = URL(string: "https://example.com/a/b/c/")!
         let result = AtomDiscoveryService.subfolderURL(for: url)
-        #expect(result?.absoluteString == "https://example.com/a/b/")
+        #expect(result?.absoluteString == "https://example.com/a/b/c/")
+    }
+
+    @Test("subfolderURL of a bare directory URL is the URL itself")
+    func subfolderOfBareDirectoryFeed() {
+        // Regression guard for the gemini-code-assist PR review: previously
+        // `https://example.com/blog/` was incorrectly walked up to
+        // `https://example.com/`, skipping past the blog listing HTML that
+        // is the most likely place to find an Atom alternate link.
+        let url = URL(string: "https://example.com/blog/")!
+        let result = AtomDiscoveryService.subfolderURL(for: url)
+        #expect(result?.absoluteString == "https://example.com/blog/")
     }
 
     @Test("subfolderURL strips query parameters")

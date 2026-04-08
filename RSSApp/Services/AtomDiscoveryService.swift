@@ -114,33 +114,37 @@ struct AtomDiscoveryService: AtomDiscovering {
 
     // MARK: - URL Utilities
 
-    /// Returns the directory URL containing the feed URL. Preserves scheme/host
-    /// and strips query/fragment.
+    /// Returns the HTML-page URL to probe for `<link rel="alternate">` tags,
+    /// derived from a feed URL. Preserves scheme/host and strips query/fragment.
+    ///
+    /// If the feed URL already represents a directory (path ends with `/`),
+    /// it is kept as-is on the assumption that it points at an HTML listing.
+    /// Otherwise, the last path component is stripped so we land on the
+    /// containing directory — for file-style feed URLs the file itself
+    /// serves XML, not HTML, so we need its parent to find `<link>` tags.
     ///
     /// Examples:
     /// - `https://example.com/blog/feed.xml` → `https://example.com/blog/`
     /// - `https://example.com/feed` → `https://example.com/`
+    /// - `https://example.com/blog/` → `https://example.com/blog/`
     /// - `https://example.com/` → `https://example.com/`
     static func subfolderURL(for url: URL) -> URL? {
         var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
-        guard var path = components?.path, !path.isEmpty else {
+        components?.query = nil
+        components?.fragment = nil
+        guard let path = components?.path, !path.isEmpty else {
             return rootURL(for: url)
         }
 
-        // Drop any trailing slash so "a/b/" is treated the same as "a/b", then
-        // trim back to the last remaining slash to get the parent directory.
-        if path.hasSuffix("/") {
-            path.removeLast()
+        // Directory paths (trailing slash) are already the target — leave
+        // them alone. Only file-style paths need the last component stripped.
+        if !path.hasSuffix("/") {
+            if let lastSlash = path.lastIndex(of: "/") {
+                components?.path = String(path[path.startIndex...lastSlash])
+            } else {
+                components?.path = "/"
+            }
         }
-        if let lastSlash = path.lastIndex(of: "/") {
-            path = String(path[path.startIndex...lastSlash])
-        } else {
-            path = "/"
-        }
-
-        components?.path = path
-        components?.query = nil
-        components?.fragment = nil
         return components?.url
     }
 
