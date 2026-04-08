@@ -119,11 +119,14 @@ final class AddFeedViewModel {
     /// Persists the feed that was already fetched in `addFeed()` so we avoid a
     /// second network round-trip.
     ///
-    /// The `prompt` parameter is passed explicitly by the caller rather than
-    /// re-read from `atomAlternatePrompt`. This keeps the shape symmetric with
-    /// `switchToAtomAlternate(from:)` — which genuinely requires the parameter
-    /// to avoid racing with SwiftUI's alert-dismissal binding clear — and
-    /// ensures both branches of the alert operate on the same captured value.
+    /// The caller passes the captured `prompt` explicitly rather than
+    /// re-reading `atomAlternatePrompt`. SwiftUI's `.alert(isPresented:)`
+    /// setter clears the view-model prompt as part of dismissing the alert,
+    /// and the ordering between that setter and the button action closure is
+    /// not guaranteed — both this method and `switchToAtomAlternate(from:)`
+    /// would see nil if the setter fires first. `switchToAtomAlternate(from:)`
+    /// has the same hazard in stronger form because its async Task extends
+    /// the window; see the `*SurvivesAlertBindingRace` regression tests.
     func keepOriginalFeed(from prompt: AtomAlternatePrompt) {
         Self.logger.notice("User kept RSS feed \(prompt.originalURL.absoluteString, privacy: .public), declining Atom \(prompt.atomURL.absoluteString, privacy: .public)")
         atomAlternatePrompt = nil
@@ -169,20 +172,28 @@ final class AddFeedViewModel {
             Self.logger.debug("Atom switch cancelled for \(atomURL, privacy: .public)")
             return
         } catch {
-            // The Atom alternative was advertised but unreachable. We already
-            // have a successfully-fetched RSS feed from the prompt — persist
-            // it and surface a follow-up notice so the user knows why we
-            // didn't honor their "Switch" choice.
+            // The Atom alternative was advertised but could not be loaded as
+            // a valid feed (network error, HTTP failure, or parse failure).
+            // We already have a successfully-fetched RSS feed from the prompt
+            // — persist it and surface a follow-up notice so the user knows
+            // why we didn't honor their "Switch" choice.
             Self.logger.warning("Atom switch fetch failed for \(atomURL, privacy: .public), falling back to RSS: \(error, privacy: .public)")
             if persistFetchedFeed(prompt.originalFeed, url: prompt.originalURL) {
                 atomFallbackNotice = atomURL
+            } else {
+                // persistFetchedFeed already set errorMessage to the generic
+                // save-failure copy. Replace it with a chained message so the
+                // user understands the Atom attempt was what triggered the
+                // save attempt — retrying the same URL won't help.
+                errorMessage = "The Atom feed couldn't be loaded, and saving the RSS version also failed. Please try again."
             }
             return
         }
 
-        // The switch has now committed. Reflect the Atom URL in the input
-        // field *after* all failure paths above — if we fail earlier, the
-        // user's originally-typed URL remains in the field.
+        // Only update the visible URL once the Atom switch has actually
+        // committed. Every other exit path above — cancellation, duplicate,
+        // fetch-failure fallback — intentionally leaves the user's typed
+        // URL in place so they can see what they entered.
         urlInput = atomURL.absoluteString
         if persistFetchedFeed(atomFeed, url: atomURL) {
             didAddFeed = true
@@ -192,7 +203,18 @@ final class AddFeedViewModel {
     /// Called by the view after the user acknowledges the Atom-fallback
     /// notice alert. Clears the notice state and signals the sheet to
     /// dismiss now that the user has seen the message.
+    ///
+    /// The guard is defensive — SwiftUI's alert-binding setter can fire
+    /// more than once during dismissal transitions on some iOS versions.
+    /// Without the guard, the second call would re-set `didAddFeed = true`
+    /// on an already-dismissing sheet, which is harmless but pollutes the
+    /// observation tracker. Log + early-return makes unexpected re-entries
+    /// visible instead of silently no-op'ing.
     func acknowledgeAtomFallbackNotice() {
+        guard atomFallbackNotice != nil else {
+            Self.logger.debug("acknowledgeAtomFallbackNotice called with no pending notice; ignoring")
+            return
+        }
         atomFallbackNotice = nil
         didAddFeed = true
     }
