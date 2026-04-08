@@ -677,11 +677,18 @@ struct RSSParsingServiceTests {
         let feed = try service.parse(Data(xml.utf8))
 
         let updated = try #require(feed.articles[0].updatedDate)
-        let calendar = Calendar(identifier: .gregorian)
-        let day = calendar.component(.day, from: updated)
-        // atom:updated (Apr 2) appears after dc:modified (Apr 1) in source order, so it
-        // must win. If the semantics were first-wins, day would be 1 instead.
-        #expect(day == 2)
+        let expectedLastWins = try #require(
+            Calendar(identifier: .gregorian).date(
+                from: DateComponents(
+                    timeZone: TimeZone(identifier: "UTC"),
+                    year: 2026, month: 4, day: 2, hour: 9, minute: 0, second: 0
+                )
+            )
+        )
+        // atom:updated (Apr 2 09:00Z) appears after dc:modified (Apr 1 08:00Z) in source
+        // order, so last-wins semantics must pick the Apr 2 instant. A first-wins flip
+        // would produce Apr 1 08:00Z instead.
+        #expect(updated == expectedLastWins)
     }
 
     // MARK: - Date Parsing (Absolute Moment)
