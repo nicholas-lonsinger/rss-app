@@ -62,6 +62,44 @@ struct AddFeedView: View {
             .onChange(of: viewModel.didAddFeed) { _, newValue in
                 if newValue { dismiss() }
             }
+            .alert(
+                "Atom feed available",
+                isPresented: Binding(
+                    get: { viewModel.atomAlternatePrompt != nil },
+                    set: { if !$0 { viewModel.atomAlternatePrompt = nil } }
+                ),
+                presenting: viewModel.atomAlternatePrompt
+            ) { prompt in
+                // RATIONALE: capture `prompt` synchronously here rather than
+                // re-reading `viewModel.atomAlternatePrompt` inside the Task.
+                // SwiftUI's `.alert(isPresented:)` clears the bound state as
+                // the alert dismisses, which races with the spawned Task and
+                // would cause switchToAtomAlternate/keepOriginalFeed to see
+                // nil and no-op silently.
+                Button("Switch to Atom") {
+                    Task { await viewModel.switchToAtomAlternate(from: prompt) }
+                }
+                Button("Keep RSS", role: .cancel) {
+                    viewModel.keepOriginalFeed(from: prompt)
+                }
+            } message: { prompt in
+                Text("This site also publishes an Atom version of this feed at \(prompt.atomURL.absoluteString). Atom feeds often include richer metadata.")
+            }
+            .alert(
+                "Atom feed unavailable",
+                isPresented: Binding(
+                    get: { viewModel.atomFallbackNotice != nil },
+                    // Acknowledging the notice both clears it and signals
+                    // the sheet to dismiss (didAddFeed = true) so the
+                    // successfully-persisted RSS feed becomes visible.
+                    set: { if !$0 { viewModel.acknowledgeAtomFallbackNotice() } }
+                ),
+                presenting: viewModel.atomFallbackNotice
+            ) { atomURL in
+                Button("OK", role: .cancel) { }
+            } message: { atomURL in
+                Text("The Atom feed at \(atomURL.absoluteString) couldn't be loaded. The RSS version has been added instead.")
+            }
         }
     }
 }

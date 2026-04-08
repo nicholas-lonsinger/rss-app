@@ -25,7 +25,8 @@ RSSApp/
 │   ├── PersistentArticle.swift         # @Model — persisted article with read/unread status, saved/bookmarked status, `updatedDate` + `wasUpdated` flag for content-update detection (issue #74), `displayedPublishedDate` computed helper, relationship to feed and content
 │   ├── PersistentArticleContent.swift  # @Model — cached extracted HTML/text content, relationship to article
 │   ├── PersistentFeed.swift            # @Model — persisted feed subscription with caching headers, icon URL, cascade to articles
-│   ├── RSSFeed.swift                   # Feed container with channel info, imageURL, and articles (transient parser output)
+│   ├── AtomAlternatePrompt.swift       # Shared value struct — discovered Atom URL + the already-fetched RSS feed for the "Keep RSS" path; failing init enforces "RSS format + distinct URLs" invariants that `AtomDiscoveryService` and the view-model call sites already establish
+│   ├── RSSFeed.swift                   # Feed container with channel info, imageURL, articles, and `FeedFormat` (rss/atom) — transient parser output
 │   └── SubscribedFeed.swift            # Legacy feed subscription struct (Codable) — retained for UserDefaults migration and OPML export
 ├── Services/                           # Business logic and networking
 │   ├── AppBadgeService.swift            # BadgePermissionStatus enum + AppBadgeUpdating protocol + Bool-gated badge update (enabled shows unread count, disabled clears) via UNUserNotificationCenter with badge-only permission request; checkPermission() for non-side-effect authorization status check; includes one-time migration from legacy 3-mode key
@@ -37,6 +38,7 @@ RSSApp/
 │   ├── ContentAssembler.swift          # Reconstructs clean HTML + plain text from winning DOM subtree
 │   ├── ContentExtractor.swift          # ContentExtracting protocol + extraction pipeline orchestrator
 │   ├── DOMSerializerConstants.swift    # Shared JS bridge constants (message handler name, serializer call)
+│   ├── AtomDiscoveryService.swift      # AtomDiscovering protocol + HTML scrape for `<link rel="alternate" type="application/atom+xml">` via injectable data fetcher (subfolder-first, root fallback, de-dupes self-reference)
 │   ├── FeedFetchingService.swift       # FeedFetching protocol + URLSession implementation
 │   ├── ArticleThumbnailService.swift   # ThumbnailCacheResult enum + ArticleThumbnailCaching protocol + thumbnail download with transient/permanent error classification, URL scheme validation, resize-to-120px, JPEG disk caching; og:image HTML fetch uses an injectable URLSessionBytesProviding session (defaults to URLSession.shared) so HTTP classification can be unit tested
 │   ├── FeedIconService.swift           # FeedIconResolving protocol + icon URL resolution (feed XML → site HTML → /favicon.ico), size-limited HTML fetch, file-system caching, and loadValidatedIcon (decode + visible-content gate + delete-on-corrupt for UI consumers)
@@ -45,18 +47,18 @@ RSSApp/
 │   ├── FeedStorageService.swift        # FeedStoring protocol + UserDefaults persistence — retained for migration only
 │   ├── FeedURLValidator.swift          # Shared URL normalization + validation (trim, scheme prepend, HTTP/HTTPS + host check)
 │   ├── UserDefaultsMigrationService.swift # One-time migration from UserDefaults SubscribedFeed list to SwiftData PersistentFeed
-│   ├── HTMLUtilities.swift             # HTML/XML escaping (text + attributes), tag stripping, entity decoding, image extraction, og:image extraction (with protocol-relative URL resolution via optional baseURL), icon URL extraction
+│   ├── HTMLUtilities.swift             # HTML/XML escaping (text + attributes), tag stripping, entity decoding, image extraction, og:image extraction (with protocol-relative URL resolution via optional baseURL), icon URL extraction, Atom alternate `<link>` extraction (`extractAtomAlternateURL`, tolerant of attribute order and compound `rel` values)
 │   ├── KeychainService.swift           # Keychain wrapper for secure API key storage
 │   ├── MetadataExtractor.swift         # Extracts article title/byline from meta tags and DOM elements
 │   ├── ModelConfigurationValidator.swift # ModelValidation + MaxTokensValidation enums — input validation for model ID and max tokens
 │   ├── NetworkMonitorService.swift      # NetworkMonitoring protocol + NWPathMonitor implementation — detects WiFi vs cellular/constrained for background download gating; accepts injectable `wifiOnlyProvider` and `pathProvider` closures so tests can control the preference and supply synthetic `NetworkPathSnapshot` values without touching `UserDefaults` or starting a real `NWPathMonitor`. Also defines the `NetworkPathSnapshot` protocol (minimal view of `NWPath.status`, `usesInterfaceType(_:)`, `isConstrained`) and the `NWPathSnapshot` production adapter that wraps a live `NWPath`
 │   ├── OPMLService.swift               # OPMLServing protocol + XMLParser-based OPML parser + XML generator
-│   ├── RSSParsingService.swift         # XMLParser-based RSS 2.0 + Atom parser with XHTML content reconstruction; leading `EncodingSniffer` transcodes UTF-16/UTF-32/named-charset payloads (Big5, EUC-KR, GB2312, ISO-8859-*) to UTF-8 before handing bytes to XMLParser
+│   ├── RSSParsingService.swift         # XMLParser-based RSS 2.0 + Atom parser with XHTML content reconstruction; leading `EncodingSniffer` transcodes UTF-16/UTF-32/named-charset payloads (Big5, EUC-KR, GB2312, ISO-8859-*) to UTF-8 before handing bytes to XMLParser; tags the resulting `RSSFeed` with its detected `FeedFormat` based on the root `<channel>` (RSS) or `<feed>` (Atom) element
 │   ├── SiteSpecificExtracting.swift    # Protocol for per-hostname content extractors
 │   └── ThumbnailPrefetchService.swift  # ThumbnailPrefetching protocol + bulk thumbnail download with bounded concurrency, transient retry, and cross-cycle retry cap
 ├── ViewModels/                         # View state management
-│   ├── AddFeedViewModel.swift          # @Observable @MainActor — URL validation + feed subscription via FeedPersisting + icon resolution
-│   ├── EditFeedViewModel.swift         # @Observable @MainActor — URL editing + validation + feed update via FeedPersisting
+│   ├── AddFeedViewModel.swift          # @Observable @MainActor — URL validation + feed subscription via FeedPersisting + icon resolution; consults `AtomDiscovering` after RSS feed fetch and pauses via `atomAlternatePrompt` so the view can offer a Switch to Atom / Keep RSS choice before persisting
+│   ├── EditFeedViewModel.swift         # @Observable @MainActor — URL editing + validation + feed update via FeedPersisting; same `AtomDiscovering` prompt flow as `AddFeedViewModel` when the edited URL resolves to an RSS feed
 │   ├── ArticleSummaryViewModel.swift   # @Observable @MainActor — extraction state machine
 │   ├── DiscussionViewModel.swift       # @Observable @MainActor — chat history + Claude streaming
 │   ├── FeedListViewModel.swift         # @Observable @MainActor — feed list management, refresh, OPML, unread counts, icon resolution via FeedPersisting
@@ -107,6 +109,7 @@ RSSAppTests/
 │   ├── MockArticleThumbnailService.swift   # ArticleThumbnailCaching mock with injectable cache results
 │   ├── MockClaudeAPIService.swift          # ClaudeAPIServicing mock with injectable chunks/errors
 │   ├── MockContentExtractor.swift          # ContentExtracting mock with injectable results
+│   ├── MockAtomDiscoveryService.swift      # AtomDiscovering mock with call count, injectable result, per-URL overrides
 │   ├── MockFeedFetchingService.swift       # FeedFetching mock with injectable results/errors
 │   ├── MockFeedIconService.swift          # FeedIconResolving mock with injectable URL/cache results
 │   ├── MockFeedPersistenceService.swift    # FeedPersisting mock with in-memory store
@@ -131,7 +134,10 @@ RSSAppTests/
 │   ├── ContentExtractorTests.swift     # End-to-end extraction pipeline, site-specific fallback
 │   ├── DOMSerializerTests.swift        # WKWebView integration — JS serialization fidelity
 │   ├── ExtractionPipelineTests.swift   # Full pipeline: HTML → WKWebView serialize → Swift extract
+│   ├── AtomDiscoveryServiceTests.swift # Subfolder-preferred match, root fallback, nil on miss/404/error, self-reference dedup, no duplicate fetch when subfolder == root, subfolder/root URL derivation
 │   ├── FeedIconServiceTests.swift      # Icon resolution, caching, HTMLUtilities icon extraction
+│   ├── HTMLUtilitiesAtomAlternateTests.swift # `extractAtomAlternateURL` attribute-order tolerance, RSS/non-alternate rejection, compound `rel`, case-insensitive, relative href resolution
+│   ├── RSSParsingServiceFormatTests.swift    # FeedFormat detection: `<rss>/<channel>` → .rss, `<feed>` → .atom
 │   ├── FeedPersistenceServiceTests.swift # SwiftData CRUD, upsert, read/unread, saved/unsaved, cross-feed queries, content cache, cascade delete, thumbnail tracking, sort order, mark all as read, unread per-feed queries, saved article queries, article count + bulk delete for retention cleanup with saved-article exemption
 │   ├── FeedStorageServiceTests.swift   # Save/load roundtrip, add/remove, empty state (legacy UserDefaults)
 │   ├── HTMLUtilitiesTests.swift        # Tag stripping, entity decoding, image extraction, og:image extraction
@@ -146,8 +152,8 @@ RSSAppTests/
 │   ├── RSSParsingEncodingTests.swift   # EncodingSniffer unit tests (BOM detection, declaration scanning, IANA lookup) + end-to-end parse() tests for UTF-16/UTF-32/ISO-8859-1/Windows-1252 payloads
 │   └── ThumbnailPrefetchServiceTests.swift # Bulk prefetch, skip cached/maxed, retry count, permanent failure skip, mixed results, error handling
 ├── ViewModels/
-│   ├── AddFeedViewModelTests.swift         # URL validation, duplicate detection, success/failure
-│   ├── EditFeedViewModelTests.swift        # URL editing, validation, duplicate detection, success/failure
+│   ├── AddFeedViewModelTests.swift         # URL validation, duplicate detection, success/failure, Atom discovery prompt path (RSS+alternate sets prompt, Atom format skips discovery, keep/switch branches, switch-branch duplicate and fetch failure)
+│   ├── EditFeedViewModelTests.swift        # URL editing, validation, duplicate detection, success/failure, Atom discovery prompt path (unchanged URL skips discovery, Atom format skips discovery, keep/switch branches)
 │   ├── ArticleReaderViewModelTests.swift   # ArticleSummaryViewModel pre-extraction state tests
 │   ├── DiscussionViewModelTests.swift      # Message flow, streaming, no-key behavior
 │   ├── FeedListViewModelNetworkTests.swift  # Network gating: prefetch/icon resolution allowed/skipped based on NetworkMonitoring, 304 path, refresh continues regardless
@@ -158,7 +164,7 @@ RSSAppTests/
 │   └── HomeViewModelTests.swift            # Unread count, saved count, cross-feed article queries, read/unread status, saved status, sort order, mark all as read
 ```
 
-**Total: 70 source files + 1 resource, 62 test source files + 1 fixture.**
+**Total: 73 source files + 1 resource, 66 test source files + 1 fixture.**
 
 ## Key Components
 
@@ -179,6 +185,8 @@ The directory tree annotations describe each file's purpose. This section covers
 **OPML import pipeline.** `OPMLService` (`OPMLServing` protocol) parses OPML via `XMLParser` with a private `OPMLParserDelegate` that captures all `<outline>` elements with `xmlUrl` attributes regardless of nesting depth (flattening folders), accepting outlines without `type="rss"` for compatibility. Result is `[OPMLFeedEntry]` (intermediate type decoupled from persistence — lacks `id`/`addedDate`). `FeedListViewModel.importOPML(from:)` deduplicates via `FeedPersisting.feedExists(url:)` and calls `addFeed` for new entries. `importOPMLAndRefresh(from:)` extends this by fetching each feed's RSS XML to populate metadata. Export converts `PersistentFeed` → `SubscribedFeed` via `ModelConversion` for OPML generation.
 
 **UserDefaults → SwiftData migration.** `UserDefaultsMigrationService` reads the legacy `SubscribedFeed` list from UserDefaults via `FeedStoring` (`FeedStorageService`), converts to `PersistentFeed` records preserving IDs. One-time and idempotent — sets a migration flag on success, retries on failure. Skipped in test environments (detected via `XCTestConfigurationFilePath`, uses in-memory store).
+
+**Atom feed discovery (issue #151).** When the user adds or edits a feed and the fetched result is RSS (`RSSFeed.format == .rss`), `AddFeedViewModel` / `EditFeedViewModel` consult `AtomDiscoveryService` (`AtomDiscovering` protocol) for an Atom alternative before persisting. Discovery fetches the feed's containing directory first (e.g. `https://example.com/blog/` for a feed at `https://example.com/blog/feed`) and scans the HTML for `<link rel="alternate" type="application/atom+xml" href="...">` via `HTMLUtilities.extractAtomAlternateURL`. If no candidate is found, it falls back to the site root; subfolder==root is detected and only one fetch is issued. A candidate that equals the user's own feed URL is dropped as a self-reference. When a candidate *is* found, the view model stashes a shared `AtomAlternatePrompt` value (in `RSSApp/Models/AtomAlternatePrompt.swift` — failing init enforces the "RSS format + distinct URLs" invariants the caller already established) containing the originally fetched `RSSFeed` plus the discovered Atom URL, and returns without persisting; the view presents an alert with "Switch to Atom" / "Keep RSS" buttons that call back into `switchToAtomAlternate()` (re-fetches the Atom URL and persists *that* feed as the subscription) or `keepOriginalFeed()` (persists the already-fetched RSS feed, no second network call). Discovery is best-effort: any network or parsing failure returns `nil` so the add/edit flow proceeds normally with the RSS feed. The service uses an injected `@Sendable (URL) async throws -> (Data, URLResponse)` fetcher (defaulted to `URLSession.shared.data(from:)`) so tests can supply canned HTML without `URLProtocol` subclasses. Atom feeds skip discovery entirely — there's nothing to upgrade to.
 
 **Feed icon resolution chain.** `FeedIconService` (`FeedIconResolving` protocol) resolves via priority chain: feed XML image URL → site homepage HTML meta tags (apple-touch-icon, `link rel="icon"`) → `/favicon.ico` fallback. Downloads the resolved image, normalizes to PNG (resizing if larger than 128px), and caches to `{cachesDirectory}/feed-icons/{feedID}.png`. `FeedIconView` loads cached PNG from disk with globe placeholder fallback. Resolution triggered by `FeedListViewModel` during refresh and `AddFeedViewModel` during feed add.
 
@@ -274,9 +282,9 @@ RSSAppApp (@main)
 
 ## Test Coverage
 
-**66 test files: 48 test suites, 17 mock implementations, 5 shared helpers, 1 HTML fixture.**
+**66 test files: 51 test suites, 18 mock implementations, 5 shared helpers, 1 HTML fixture.**
 
-**Patterns:** Swift Testing (`@Suite`, `@Test`, `#expect`). Protocol-based dependency injection with 17 mocks (`MockFeedPersistenceService`, `MockFeedFetchingService`, `MockFeedIconService`, `MockArticleThumbnailService`, `MockThumbnailPrefetchService`, `MockOPMLService`, `MockClaudeAPIService`, `MockKeychainService`, `MockArticleExtractionService`, `MockContentExtractor`, `MockFeedStorageService`, `MockURLSessionBytesProvider`, `MockHTMLURLSessionProvider`, `MockSlowHTMLURLSessionProvider`, `MockArticleRetentionService`, `MockAppBadgeService`, `MockNetworkMonitorService`). In-memory `ModelContainer` via `SwiftDataTestHelpers` for SwiftData integration tests. `WKWebView` integration tests via `WebViewTestHelpers` for DOM serialization and extraction pipeline. `MockURLSessionBytesProvider` with `URLProtocol` interception for `ClaudeAPIService.sendMessage` integration tests; `MockHTMLURLSessionProvider` with `URLProtocol` interception for `ArticleThumbnailService.resolveOGImage` HTTP-classification tests; `MockSlowHTMLURLSessionProvider` with `URLProtocol` interception that delivers an initial chunk and then surfaces a configurable mid-stream `URLError` (default `.cancelled`) for `resolveOGImage` cancellation-normalization tests. Shared `TestFixtures` factory methods for `Article`, `RSSFeed`, `PersistentFeed`, `PersistentArticle`, and sample RSS XML.
+**Patterns:** Swift Testing (`@Suite`, `@Test`, `#expect`). Protocol-based dependency injection with 18 mocks (`MockFeedPersistenceService`, `MockFeedFetchingService`, `MockFeedIconService`, `MockAtomDiscoveryService`, `MockArticleThumbnailService`, `MockThumbnailPrefetchService`, `MockOPMLService`, `MockClaudeAPIService`, `MockKeychainService`, `MockArticleExtractionService`, `MockContentExtractor`, `MockFeedStorageService`, `MockURLSessionBytesProvider`, `MockHTMLURLSessionProvider`, `MockSlowHTMLURLSessionProvider`, `MockArticleRetentionService`, `MockAppBadgeService`, `MockNetworkMonitorService`). In-memory `ModelContainer` via `SwiftDataTestHelpers` for SwiftData integration tests. `WKWebView` integration tests via `WebViewTestHelpers` for DOM serialization and extraction pipeline. `MockURLSessionBytesProvider` with `URLProtocol` interception for `ClaudeAPIService.sendMessage` integration tests; `MockHTMLURLSessionProvider` with `URLProtocol` interception for `ArticleThumbnailService.resolveOGImage` HTTP-classification tests; `MockSlowHTMLURLSessionProvider` with `URLProtocol` interception that delivers an initial chunk and then surfaces a configurable mid-stream `URLError` (default `.cancelled`) for `resolveOGImage` cancellation-normalization tests. Shared `TestFixtures` factory methods for `Article`, `RSSFeed`, `PersistentFeed`, `PersistentArticle`, and sample RSS XML.
 
 **Well-covered:** All models, services, and view models have test suites with mock injection — including happy paths, error paths, edge cases, and state transitions.
 

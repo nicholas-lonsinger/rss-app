@@ -173,6 +173,42 @@ enum HTMLUtilities {
         return appleTouchIcons + linkIcons
     }
 
+    /// Extracts the first `<link rel="alternate" type="application/atom+xml" href="...">`
+    /// URL from HTML. Relative hrefs are resolved against the provided base URL.
+    ///
+    /// Attribute order is ignored: the `<link>` tag is matched broadly, then `rel`,
+    /// `type`, and `href` are inspected individually. A tag qualifies only when
+    /// `rel` contains `alternate` (case-insensitive, whitespace-tolerant for
+    /// compound values like `alternate stylesheet`) and `type` is exactly
+    /// `application/atom+xml`. RSS alternates (`application/rss+xml`) and non-Atom
+    /// `rel="alternate"` links are ignored.
+    ///
+    /// Returns the first match in document order. If the HTML contains multiple
+    /// `<link rel="alternate" type="application/atom+xml">` entries (e.g. one
+    /// per category), the first one wins.
+    static func extractAtomAlternateURL(from html: String, baseURL: URL) -> URL? {
+        let linkTagPattern = ##/<link\s[^>]*\/?>/##.ignoresCase()
+        let relPattern = ##/\brel\s*=\s*["']([^"']*)["']/##.ignoresCase()
+        let typePattern = ##/\btype\s*=\s*["']([^"']*)["']/##.ignoresCase()
+        let hrefPattern = ##/\bhref\s*=\s*["']([^"']*)["']/##.ignoresCase()
+
+        for tagMatch in html.matches(of: linkTagPattern) {
+            let tag = String(tagMatch.0)
+
+            guard let relMatch = tag.firstMatch(of: relPattern) else { continue }
+            let relTokens = String(relMatch.1).lowercased().split(whereSeparator: { $0.isWhitespace })
+            guard relTokens.contains("alternate") else { continue }
+
+            guard let typeMatch = tag.firstMatch(of: typePattern) else { continue }
+            guard String(typeMatch.1).lowercased() == "application/atom+xml" else { continue }
+
+            guard let hrefMatch = tag.firstMatch(of: hrefPattern),
+                  let url = resolveURL(String(hrefMatch.1), base: baseURL) else { continue }
+            return url
+        }
+        return nil
+    }
+
     private static func resolveURL(_ href: String, base: URL) -> URL? {
         let decoded = decodeHTMLEntities(href)
 
