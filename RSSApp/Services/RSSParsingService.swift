@@ -1083,9 +1083,11 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
     // formatter per format also eliminates the shared-mutable-state hazard of a
     // single formatter with an in-loop `dateFormat` assignment, so the parser is
     // safe to invoke concurrently from multiple feed refreshes. See GitHub issue
-    // #217. The "never mutated after init" invariant is implicitly enforced by
-    // every existing date-parsing test: any stray `formatter.dateFormat = ...`
-    // would poison subsequent parses in the same suite and cascade failures.
+    // #217. The "never mutated after init" invariant is protected by the existing
+    // date-parsing tests: any stray `formatter.dateFormat = ...` within `parseDate`
+    // would corrupt subsequent format branches within the same `parse()` call
+    // (which walks multiple formatters for multi-item feeds), making a dedicated
+    // invariant pin redundant.
     fileprivate enum HoistedDateFormatters {
         /// Date formats that include an explicit timezone specifier, each paired with a
         /// pre-configured `DateFormatter`. Ordered roughly by expected frequency (RFC
@@ -1162,8 +1164,9 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
 
     // RATIONALE: nonisolated(unsafe) is safe because these formatters are initialized
     // once via static let and never mutated after initialization — only date(from:) is
-    // called. Any stray `formatOptions` mutation would poison subsequent parses in the
-    // same suite and fail existing date-parsing tests cascade-style.
+    // called. The invariant is protected by the existing ISO 8601 date-parsing tests,
+    // which would deterministically fail on any `formatOptions` mutation observed
+    // within a single parse call.
     fileprivate enum ISO8601Formatters {
         nonisolated(unsafe) static let standard: ISO8601DateFormatter = {
             let formatter = ISO8601DateFormatter()
