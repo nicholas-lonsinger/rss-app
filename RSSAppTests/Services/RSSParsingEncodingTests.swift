@@ -455,4 +455,177 @@ struct RSSParsingEncodingTests {
         #expect(prolog.utf8.count > EncodingSniffer.prologScanWindow)
         #expect(EncodingSniffer.scanEncodingDeclaration(data) == nil)
     }
+
+}
+
+/// Diagnostic-emission tests for the `EncodingSniffer` fallback paths.
+///
+/// These tests pin down the dual-emission (`os.Logger` + `DiagnosticRecorder`)
+/// contract introduced by issue #275. Without them, a refactor that silently
+/// removes a `logger.warning(...)` or `DiagnosticRecorder.record(...)` from a
+/// fallback path would make the fallback invisible in production AND pass the
+/// rest of the suite. The recorder-backed assertions below catch that
+/// regression.
+///
+/// The suite is `.serialized` because `DiagnosticRecorder.active` is
+/// process-global state: parallel tests installing their own sinks would race
+/// and cross-pollute one another's recorded events. Serialization keeps each
+/// test's install/exercise/assert sequence hermetic.
+@Suite("EncodingSniffer diagnostic emission", .serialized)
+struct EncodingSnifferDiagnosticTests {
+
+    @Test("Unknown encoding name fallback emits a warning diagnostic with the offending name")
+    func unknownEncodingEmitsWarningDiagnostic() {
+        let sink = RecordingDiagnosticSink()
+        DiagnosticRecorder.install(sink)
+        defer { DiagnosticRecorder.uninstall() }
+
+        // Exercise `EncodingSniffer.transcodeToUTF8IfNeeded` directly so the
+        // test only observes events the sniffer itself emits. Going through
+        // `RSSParsingService.parse()` would introduce additional log
+        // categories (e.g. `RSSParsingService`) in the sink that we'd have to
+        // filter out, and could race with unrelated parsing elsewhere in the
+        // test suite.
+        let xml = """
+        <?xml version="1.0" encoding="x-obviously-fake-encoding"?>
+        <rss version="2.0"><channel><title>fallback</title><item><title>x</title><description>body</description></item></channel></rss>
+        """
+        _ = EncodingSniffer.transcodeToUTF8IfNeeded(Data(xml.utf8))
+
+        let warnings = sink.events(atLevel: .warning)
+            .filter { $0.category == EncodingSniffer.loggerCategory }
+        #expect(warnings.count == 1, "Exactly one warning diagnostic should be emitted for the unknown-encoding fallback path")
+        // The offending name must appear in the message so production log
+        // consumers (Console.app, post-mortem reviewers) can diagnose which
+        // feed declared a charset the system didn't recognize.
+        #expect(warnings.first?.message.contains("x-obviously-fake-encoding") == true)
+        #expect(warnings.first?.message.contains("fallback") == true)
+    }
+
+    @Test("Transcode success path emits a notice diagnostic with byte counts")
+    func transcodeSuccessEmitsNoticeDiagnostic() {
+        let sink = RecordingDiagnosticSink()
+        DiagnosticRecorder.install(sink)
+        defer { DiagnosticRecorder.uninstall() }
+
+        // Exercise `EncodingSniffer.transcode` directly so the success path
+        // is unambiguous: pass a `.isoLatin1` input (which is byte-total, so
+        // decoding always succeeds) and assert the notice event was recorded.
+        // Calling `transcode` directly — rather than `transcodeToUTF8IfNeeded`
+        // — also isolates the emission contract from the sniffer's dispatch
+        // logic above it.
+        let latin1Bytes: [UInt8] = [
+            0x3C, 0x72, 0x73, 0x73, 0x3E,          // "<rss>"
+            0xA3,                                   // £ in latin-1
+            0x3C, 0x2F, 0x72, 0x73, 0x73, 0x3E     // "</rss>"
+        ]
+        let input = Data(latin1Bytes)
+        let output = EncodingSniffer.transcode(input, from: .isoLatin1)
+
+        #expect(output != nil, "transcode should succeed for a byte-total latin-1 input")
+
+        let notices = sink.events(atLevel: .notice)
+            .filter { $0.category == EncodingSniffer.loggerCategory }
+        #expect(notices.count == 1, "Exactly one notice diagnostic should be emitted on the transcode success path")
+        #expect(notices.first?.message.lowercased().contains("transcoded") == true)
+        #expect(notices.first?.message.contains("UTF-8") == true)
+    }
+
+    @Test("Successful UTF-8 fast path emits no diagnostics for the sniffer")
+    func utf8FastPathEmitsNoDiagnostics() {
+        let sink = RecordingDiagnosticSink()
+        DiagnosticRecorder.install(sink)
+        defer { DiagnosticRecorder.uninstall() }
+
+        // Direct sniffer invocation (see rationale above) — the UTF-8 fast
+        // path should short-circuit inside `transcodeToUTF8IfNeeded` and emit
+        // nothing.
+        let xml = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <rss version="2.0"><channel><title>fast</title><item><title>x</title></item></channel></rss>
+        """
+        _ = EncodingSniffer.transcodeToUTF8IfNeeded(Data(xml.utf8))
+
+        let snifferEvents = sink.events(inCategory: EncodingSniffer.loggerCategory)
+        #expect(snifferEvents.isEmpty,
+                "Expected no sniffer diagnostics on the UTF-8 fast path, got: \(snifferEvents.map(\.message))")
+    }
+
+    // Note: the decode-failure warning path inside `transcode(_:from:)` is
+    // *not* directly tested here because `String(data:encoding:)` is
+    // surprisingly permissive for most encodings and rarely returns nil for
+    // arbitrary bytes, making any failure-forcing test flaky across Foundation
+    // revisions. The diagnostic emission at that call site follows the same
+    // pattern as the unknown-encoding case above, and any regression would
+    // also drop the adjacent `logger.warning(...)` — which code review would
+    // catch by inspection.
+
+    // MARK: - DiagnosticRecorder seam contract
+
+    @Test("DiagnosticRecorder is a no-op when no sink is installed")
+    func recorderIsNoOpWithoutSink() {
+        // Clear any leaked installation from prior tests in the same process.
+        DiagnosticRecorder.uninstall()
+
+        // Recording without an installed sink must not crash. There is no
+        // observable state to assert — the point is that the call is cheap
+        // and side-effect-free in production.
+        DiagnosticRecorder.record(category: "NoSink", level: .warning, message: "should be dropped")
+
+        // Install a fresh sink and verify the prior event is *not* remembered
+        // (i.e. there is no buffering when no sink is installed).
+        let sink = RecordingDiagnosticSink()
+        DiagnosticRecorder.install(sink)
+        defer { DiagnosticRecorder.uninstall() }
+        #expect(sink.events.isEmpty)
+    }
+
+    @Test("DiagnosticRecorder.install replaces the previously installed sink")
+    func recorderInstallReplacesPreviousSink() {
+        DiagnosticRecorder.uninstall()
+
+        let first = RecordingDiagnosticSink()
+        let second = RecordingDiagnosticSink()
+
+        // The slot was cleared above, so installing `first` should report
+        // no prior sink. (We do not compare the returned existential by
+        // identity — `DiagnosticSink` is not AnyObject-constrained and
+        // bridging to AnyObject for identity checks is fragile under Swift
+        // 6 strict concurrency. Routing behavior is the real contract we
+        // care about, asserted below.)
+        #expect(DiagnosticRecorder.install(first) == nil)
+
+        // Route an event to `first` to prove it is wired up.
+        DiagnosticRecorder.record(category: "Route", level: .warning, message: "first")
+        #expect(first.events.count == 1)
+        #expect(first.events.first?.message == "first")
+
+        // Install `second` — `install(_:)` returns the prior sink, but we
+        // only assert that routing switches to `second`. The prior-sink
+        // return value is documented so callers can restore nested scopes;
+        // the routing effect is what users observe.
+        _ = DiagnosticRecorder.install(second)
+        DiagnosticRecorder.record(category: "Route", level: .warning, message: "second")
+        #expect(first.events.count == 1, "first sink should not receive events after being replaced")
+        #expect(second.events.count == 1)
+        #expect(second.events.first?.message == "second")
+
+        DiagnosticRecorder.uninstall()
+    }
+
+    @Test("DiagnosticRecorder.uninstall removes the sink and stops routing events")
+    func recorderUninstallStopsRouting() {
+        let sink = RecordingDiagnosticSink()
+        DiagnosticRecorder.install(sink)
+
+        DiagnosticRecorder.record(category: "Cat", level: .warning, message: "first")
+        #expect(sink.events.count == 1)
+
+        DiagnosticRecorder.uninstall()
+
+        DiagnosticRecorder.record(category: "Cat", level: .warning, message: "second")
+        // Sink still holds the first event, but never receives the second.
+        #expect(sink.events.count == 1)
+        #expect(sink.events.first?.message == "first")
+    }
 }
