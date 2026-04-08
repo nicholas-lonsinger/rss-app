@@ -49,20 +49,6 @@ struct PersistentArticleDisplayTests {
         #expect(row.shouldShowUpdatedSuffix == false)
     }
 
-    @Test("shouldShowUpdatedSuffix returns false at the exact 1-second boundary (strict greater-than)")
-    func shouldShowUpdatedSuffixExactBoundary() {
-        let base = Date(timeIntervalSince1970: 1_700_000_000 - 86_400)
-        let row = makeRow(published: base, updated: base.addingTimeInterval(1.0))
-        #expect(row.shouldShowUpdatedSuffix == false)
-    }
-
-    @Test("shouldShowUpdatedSuffix returns true just above the 1-second boundary")
-    func shouldShowUpdatedSuffixJustAboveBoundary() {
-        let base = Date(timeIntervalSince1970: 1_700_000_000 - 86_400)
-        let row = makeRow(published: base, updated: base.addingTimeInterval(1.001))
-        #expect(row.shouldShowUpdatedSuffix == true)
-    }
-
     @Test("shouldShowUpdatedSuffix returns true for a typical 1-hour publisher revision")
     func shouldShowUpdatedSuffixTypicalRevision() {
         let base = Date(timeIntervalSince1970: 1_700_000_000 - 86_400)

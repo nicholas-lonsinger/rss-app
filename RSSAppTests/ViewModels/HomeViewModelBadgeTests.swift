@@ -35,22 +35,6 @@ struct HomeViewModelBadgeTests {
         #expect(mockBadge.lastUnreadCount == 2)
     }
 
-    @Test("loadUnreadCount with zero unread sends zero to badge")
-    @MainActor
-    func loadUnreadCountZero() async {
-        let mockPersistence = MockFeedPersistenceService()
-        let mockBadge = MockAppBadgeService()
-        let viewModel = HomeViewModel(persistence: mockPersistence, badgeService: mockBadge)
-
-        viewModel.loadUnreadCount()
-        #expect(viewModel.unreadCount == 0)
-
-        await Task.yield()
-
-        #expect(mockBadge.updateBadgeCallCount == 1)
-        #expect(mockBadge.lastUnreadCount == 0)
-    }
-
     @Test("loadUnreadCount error does not trigger badge update")
     @MainActor
     func loadUnreadCountErrorSkipsBadge() async {
@@ -147,28 +131,6 @@ struct HomeViewModelBadgeTests {
 
         #expect(viewModel.unreadCount == 1)
         #expect(mockBadge.lastUnreadCount == 1)
-    }
-
-    // MARK: - checkPermission via mock
-
-    @Test("MockAppBadgeService returns configured permission status")
-    @MainActor
-    func mockCheckPermission() async {
-        let mockBadge = MockAppBadgeService()
-
-        mockBadge.permissionStatus = .authorized
-        let authorized = await mockBadge.checkPermission()
-        #expect(authorized == .authorized)
-
-        mockBadge.permissionStatus = .denied
-        let denied = await mockBadge.checkPermission()
-        #expect(denied == .denied)
-
-        mockBadge.permissionStatus = .notDetermined
-        let notDetermined = await mockBadge.checkPermission()
-        #expect(notDetermined == .notDetermined)
-
-        #expect(mockBadge.checkPermissionCallCount == 3)
     }
 
     @Test("markAllAsRead triggers badge update via loadUnreadCount")

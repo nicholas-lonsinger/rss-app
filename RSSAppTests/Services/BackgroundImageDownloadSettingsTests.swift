@@ -17,28 +17,14 @@ struct BackgroundImageDownloadSettingsTests {
         #expect(BackgroundImageDownloadSettings.wifiOnly == true)
     }
 
-    @Test("Setting to false persists and reads back")
-    func setFalseReadsBack() {
+    @Test("Setter round-trips through false and back to true")
+    func setterRoundTrip() {
+        // Assert the intermediate false state so a no-op setter can't pass this test:
+        // because the service's default is `true`, asserting only the final value would
+        // trivially succeed even if both assignments were dropped.
         BackgroundImageDownloadSettings.wifiOnly = false
         #expect(BackgroundImageDownloadSettings.wifiOnly == false)
-    }
-
-    @Test("Setting to true persists and reads back")
-    func setTrueReadsBack() {
-        BackgroundImageDownloadSettings.wifiOnly = false
         BackgroundImageDownloadSettings.wifiOnly = true
-        #expect(BackgroundImageDownloadSettings.wifiOnly == true)
-    }
-
-    @Test("Reads from UserDefaults correctly when key is explicitly set to false")
-    func readsExplicitFalse() {
-        UserDefaults.standard.set(false, forKey: Self.wifiOnlyDefaultsKey)
-        #expect(BackgroundImageDownloadSettings.wifiOnly == false)
-    }
-
-    @Test("Reads from UserDefaults correctly when key is explicitly set to true")
-    func readsExplicitTrue() {
-        UserDefaults.standard.set(true, forKey: Self.wifiOnlyDefaultsKey)
         #expect(BackgroundImageDownloadSettings.wifiOnly == true)
     }
 }

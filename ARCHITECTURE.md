@@ -119,10 +119,7 @@ RSSAppTests/
 │   ├── MockThumbnailPrefetchService.swift  # ThumbnailPrefetching mock with call count tracking
 │   └── MockURLSessionBytesProvider.swift   # URLSessionBytesProviding mock with URLProtocol-backed controlled SSE lines
 ├── Models/
-│   ├── ArticleTests.swift              # Article creation, identity, hashable
 │   ├── DOMNodeTests.swift              # DOMNode accessors, text/element queries, tree traversal
-│   ├── HomeGroupTests.swift            # HomeGroup enum cases, IDs, properties, Hashable conformance
-│   ├── LoadMoreResultTests.swift       # LoadMoreResult enum cases, Equatable conformance
 │   └── SubscribedFeedTests.swift       # updatingMetadata preserves identity, does not mutate
 ├── Services/
 │   ├── ArticleRetentionServiceTests.swift # ArticleLimit enum validation, retention enforcement, thumbnail cleanup, cross-feed global cleanup, error propagation
@@ -144,7 +141,6 @@ RSSAppTests/
 │   ├── BackgroundImageDownloadSettingsTests.swift # WiFi-only default, set/get roundtrip, UserDefaults persistence
 │   ├── MetadataExtractorTests.swift    # Title/byline extraction from meta tags and DOM
 │   ├── ModelConfigurationValidationTests.swift # ModelValidation and MaxTokensValidation input validation
-│   ├── MockNetworkMonitorServiceTests.swift # Mock conformance and default behavior
 │   ├── NetworkMonitorServiceTests.swift # Real NetworkMonitorService: verifies `wifiOnlyProvider` and `pathProvider` closures are invoked on each check, and exercises every branch of `isBackgroundDownloadAllowed()` (nil path, unsatisfied/requiresConnection, wifiOnly with WiFi/non-WiFi and constrained/unconstrained combinations, wifiOnly-off satisfied path) via synthetic `NetworkPathSnapshot` stubs
 │   ├── RSSParsingServiceTests.swift    # Channel parsing, thumbnails, IDs, edge cases
 │   ├── RSSParsingEncodingTests.swift   # EncodingSniffer unit tests (BOM detection, declaration scanning, IANA lookup) + end-to-end parse() tests for UTF-16/UTF-32/ISO-8859-1/Windows-1252 payloads
@@ -157,12 +153,12 @@ RSSAppTests/
 │   ├── FeedListViewModelNetworkTests.swift  # Network gating: prefetch/icon resolution allowed/skipped based on NetworkMonitoring, 304 path, refresh continues regardless
 │   ├── FeedListViewModelTests.swift        # Load, remove by object, remove by IndexSet
 │   ├── FeedViewModelTests.swift            # Load success/failure, state transitions, sort order, read filter, mark all as read
-│   ├── HomeViewModelBadgeTests.swift        # Badge integration: loadUnreadCount triggers badge update, zero/error paths, mark-read/toggle/mark-all-as-read cascade badge updates
+│   ├── HomeViewModelBadgeTests.swift        # Badge integration: loadUnreadCount triggers badge update, error path skips badge, mark-read/toggle/mark-all-as-read cascade badge updates
 │   ├── HomeViewModelBadgeToggleTests.swift  # Badge toggle permission flow: denied reverts, authorized proceeds, notDetermined-then-denied reverts, notDetermined-then-granted proceeds
 │   └── HomeViewModelTests.swift            # Unread count, saved count, cross-feed article queries, read/unread status, saved status, sort order, mark all as read
 ```
 
-**Total: 70 source files + 1 resource, 59 test source files + 1 fixture.**
+**Total: 70 source files + 1 resource, 62 test source files + 1 fixture.**
 
 ## Key Components
 
