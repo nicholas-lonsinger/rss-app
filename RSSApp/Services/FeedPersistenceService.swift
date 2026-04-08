@@ -341,7 +341,9 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
     //
     // The original read timestamp (the moment the user first read the article) is NOT
     // preserved across detection. If a future feature needs "read-before-update"
-    // history, this decision must be revisited.
+    // history, this decision must be revisited. See the companion doc comment on
+    // `markArticleRead` for the first-read-timestamp contract (issue #271) that
+    // governs every non-upsert transition of `readDate`.
     func upsertArticles(_ articles: [Article], for feed: PersistentFeed) throws {
         // Fetch existing rows by ID. We need the full objects (not just the IDs) so we
         // can compare timestamps and mutate in place when an update bump is detected —
@@ -467,17 +469,71 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
         }
     }
 
+    /// Marks an article as read or unread.
+    ///
+    /// **`readDate` semantics (issue #271): `readDate` records the moment the user
+    /// *first* read the article, not the most recent read action.** Calling this
+    /// with `isRead: true` on an article that already has a non-nil `readDate` is
+    /// a no-op for the timestamp — the existing value is preserved. Transitioning
+    /// `isRead: false` clears `readDate` to `nil`; a subsequent `isRead: true`
+    /// therefore stamps a *new* first-read time, because the previous read was
+    /// explicitly undone by the user.
+    ///
+    /// **Destructive transitions for `readDate`** — the timestamp can be cleared
+    /// by exactly two paths:
+    /// 1. *User-initiated*: this method with `isRead: false` (the user explicitly
+    ///    toggled the article back to unread).
+    /// 2. *System-initiated*: `upsertArticles` resets `readDate = nil` when its
+    ///    update-detection path fires (see the RATIONALE block above
+    ///    `upsertArticles`, which calls out `readDate` under "Reset" so the row
+    ///    resurfaces as unread after a publisher revision).
+    ///
+    /// Bulk paths (`markAllArticlesRead(for:)`, `markAllArticlesRead()`) are not
+    /// destructive: their fetch predicates filter on `!$0.isRead`, so they only
+    /// ever touch rows whose `readDate` is already `nil` and cannot clobber an
+    /// existing first-read timestamp.
+    ///
+    /// Also clears the issue #74 `wasUpdated` flag on the read transition. See the
+    /// doc comment on `PersistentArticle.wasUpdated` for the asymmetric-clear
+    /// rationale (manually marking unread does not re-set the flag).
     func markArticleRead(_ article: PersistentArticle, isRead: Bool) throws {
+        let previousReadDate = article.readDate
         article.isRead = isRead
-        article.readDate = isRead ? Date() : nil
-        // Clear the issue #74 update flag on read transitions. See the doc comment on
-        // `PersistentArticle.wasUpdated` for the asymmetric-clear rationale (manually
-        // marking unread does not re-set the flag).
         if isRead {
+            // Stamp only when `readDate` is currently nil — the actual gate used
+            // here. This covers every case where no first-read timestamp exists:
+            // a normal first read, a re-read after the user toggled `isRead: false`,
+            // a re-read after `upsertArticles` cleared the row on update detection,
+            // and any anomalous migrated row that arrived with `readDate == nil`
+            // but `isRead == true`. See the doc comment above for the full contract.
+            if article.readDate == nil {
+                article.readDate = Date()
+            }
+            // Clear the issue #74 update flag on read transitions. See the doc
+            // comment on `PersistentArticle.wasUpdated` for the asymmetric-clear
+            // rationale (manually marking unread does not re-set the flag).
             article.wasUpdated = false
+        } else {
+            article.readDate = nil
         }
         try modelContext.save()
-        Self.logger.debug("Marked article '\(article.title, privacy: .public)' as \(isRead ? "read" : "unread", privacy: .public)")
+        // Branch the audit log by the `readDate` outcome so post-mortem analysis
+        // can tell which of the three paths fired for a given call. Free at
+        // `.debug` level (in-memory only per the CLAUDE.md logging table).
+        if isRead {
+            if let previousReadDate {
+                Self.logger.debug("Marked article '\(article.title, privacy: .public)' as read (preserved existing first-read timestamp \(previousReadDate, privacy: .public))")
+            } else {
+                let stampedDate = article.readDate ?? Date()
+                Self.logger.debug("Marked article '\(article.title, privacy: .public)' as read (first-read stamp \(stampedDate, privacy: .public))")
+            }
+        } else {
+            if let previousReadDate {
+                Self.logger.debug("Marked article '\(article.title, privacy: .public)' as unread (cleared readDate, was \(previousReadDate, privacy: .public))")
+            } else {
+                Self.logger.debug("Marked article '\(article.title, privacy: .public)' as unread (readDate was already nil)")
+            }
+        }
     }
 
     func markAllArticlesRead(for feed: PersistentFeed) throws {

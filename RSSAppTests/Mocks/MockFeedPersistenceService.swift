@@ -166,12 +166,17 @@ final class MockFeedPersistenceService: FeedPersisting {
     func markArticleRead(_ article: PersistentArticle, isRead: Bool) throws {
         if let error = errorToThrow { throw error }
         article.isRead = isRead
-        article.readDate = isRead ? Date() : nil
-        // Mirror SwiftDataFeedPersistenceService.markArticleRead's issue #74 clear so
-        // view-model tests using this mock catch a regression that removes the
-        // production clear. Asymmetric: only on isRead = true.
+        // Mirror SwiftDataFeedPersistenceService.markArticleRead's issue #271
+        // first-read-preservation contract and the issue #74 wasUpdated clear.
+        // Both are asymmetric: only on isRead = true. See the doc comment on the
+        // production `markArticleRead` for the contract rationale.
         if isRead {
+            if article.readDate == nil {
+                article.readDate = Date()
+            }
             article.wasUpdated = false
+        } else {
+            article.readDate = nil
         }
     }
 
