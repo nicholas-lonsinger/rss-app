@@ -12,11 +12,16 @@ struct AddFeedView: View {
         NavigationStack {
             Form {
                 Section {
-                    TextField("https://example.com/feed", text: $viewModel.urlInput)
-                        .autocorrectionDisabled()
-                        .textInputAutocapitalization(.never)
-                        .keyboardType(.URL)
-                        .textContentType(.URL)
+                    TextField(
+                        text: $viewModel.urlInput,
+                        prompt: Text("https://example.com/feed")
+                    ) {
+                        Text("Feed URL")
+                    }
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                    .keyboardType(.URL)
+                    .textContentType(.URL)
                 } header: {
                     Text("Feed URL")
                 } footer: {
