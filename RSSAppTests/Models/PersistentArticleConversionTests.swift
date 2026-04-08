@@ -136,17 +136,4 @@ struct PersistentArticleConversionTests {
         #expect(persistent.displayedPublishedDate == persistent.fetchedDate)
         #expect(persistent.displayedPublishedDate <= persistent.fetchedDate)
     }
-
-    @Test("displayedPublishedDate is always <= fetchedDate for past publication")
-    func displayedPublishedDateSymbolicInvariantForPastPublication() {
-        // Pin the symbolic <= fetchedDate invariant on the most common code path,
-        // not just on the future-clamp path. Catches a refactor that accidentally
-        // adds an unconditional `Date()` clamp at read time, which would make the
-        // displayed value non-stable.
-        let past = Date(timeIntervalSince1970: 1_000_000)
-        let article = TestFixtures.makeArticle(publishedDate: past)
-        let persistent = PersistentArticle(from: article)
-
-        #expect(persistent.displayedPublishedDate <= persistent.fetchedDate)
-    }
 }

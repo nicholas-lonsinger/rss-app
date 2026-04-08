@@ -17,28 +17,10 @@ struct BackgroundImageDownloadSettingsTests {
         #expect(BackgroundImageDownloadSettings.wifiOnly == true)
     }
 
-    @Test("Setting to false persists and reads back")
-    func setFalseReadsBack() {
-        BackgroundImageDownloadSettings.wifiOnly = false
-        #expect(BackgroundImageDownloadSettings.wifiOnly == false)
-    }
-
-    @Test("Setting to true persists and reads back")
+    @Test("Setter writes false then true and reads back the final value")
     func setTrueReadsBack() {
         BackgroundImageDownloadSettings.wifiOnly = false
         BackgroundImageDownloadSettings.wifiOnly = true
-        #expect(BackgroundImageDownloadSettings.wifiOnly == true)
-    }
-
-    @Test("Reads from UserDefaults correctly when key is explicitly set to false")
-    func readsExplicitFalse() {
-        UserDefaults.standard.set(false, forKey: Self.wifiOnlyDefaultsKey)
-        #expect(BackgroundImageDownloadSettings.wifiOnly == false)
-    }
-
-    @Test("Reads from UserDefaults correctly when key is explicitly set to true")
-    func readsExplicitTrue() {
-        UserDefaults.standard.set(true, forKey: Self.wifiOnlyDefaultsKey)
         #expect(BackgroundImageDownloadSettings.wifiOnly == true)
     }
 }

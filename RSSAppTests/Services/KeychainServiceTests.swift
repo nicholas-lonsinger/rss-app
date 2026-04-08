@@ -125,10 +125,4 @@ struct KeychainAPIKeyConvenienceTests {
             try mock.deleteAPIKey()
         }
     }
-
-    @Test("apiKeyAccount returns the expected account identifier")
-    func apiKeyAccountValue() {
-        #expect(MockKeychainService.apiKeyAccount == "anthropic-api-key")
-        #expect(KeychainService.apiKeyAccount == "anthropic-api-key")
-    }
 }

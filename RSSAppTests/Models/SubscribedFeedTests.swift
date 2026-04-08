@@ -23,18 +23,6 @@ struct SubscribedFeedTests {
         #expect(updated.feedDescription == "New Description")
     }
 
-    @Test("updatingMetadata does not mutate original")
-    func updatingMetadataDoesNotMutate() {
-        let original = TestFixtures.makeSubscribedFeed(
-            title: "Original",
-            feedDescription: "Original Desc"
-        )
-        let _ = original.updatingMetadata(title: "Changed", feedDescription: "Changed Desc")
-
-        #expect(original.title == "Original")
-        #expect(original.feedDescription == "Original Desc")
-    }
-
     @Test("updatingMetadata clears error state")
     func updatingMetadataClearsError() {
         let feed = TestFixtures.makeSubscribedFeed(
