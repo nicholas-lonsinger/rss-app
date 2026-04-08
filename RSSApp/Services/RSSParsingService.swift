@@ -57,7 +57,7 @@ struct RSSParsingService: Sendable {
             articles: delegate.articles,
             lastUpdated: delegate.channelUpdated,
             imageURL: imageURL,
-            format: delegate.feedFormat ?? .rss
+            format: delegate.feedFormat
         )
 
         // If the sniffer took a lossy fallback path and the parse produced zero
@@ -452,8 +452,11 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
 
     var foundChannel = false
     /// Set when the root container element is first encountered. `<channel>` → `.rss`,
-    /// `<feed>` → `.atom`. Remains nil if neither element was seen (malformed feed).
-    var feedFormat: FeedFormat?
+    /// `<feed>` → `.atom`. Defaults to `.rss` because `parse()` throws
+    /// `noChannelFound` before consulting this field if neither element was
+    /// seen — the default is unreachable in current control flow and exists
+    /// only to keep the field non-optional for callers.
+    var feedFormat: FeedFormat = .rss
     var channelTitle = ""
     var channelLink = ""
     var channelDescription = ""
@@ -549,12 +552,13 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate, @unchecked S
 
         switch name {
         case "channel", "feed":
-            foundChannel = true
-            // Capture the root container format the first time we see it. `<channel>`
-            // belongs to RSS 2.0 / RSS 0.9x; `<feed>` is the Atom root element. We
-            // guard on `feedFormat == nil` to avoid overwriting if both appear (rare
-            // but possible in deeply nested or malformed payloads).
-            if feedFormat == nil {
+            // Capture the root container format on first occurrence. `<channel>`
+            // belongs to RSS 2.0 / RSS 0.9x; `<feed>` is the Atom root element.
+            // `!foundChannel` guards against a later nested occurrence (rare but
+            // possible in deeply nested or malformed payloads) overwriting the
+            // outer format classification.
+            if !foundChannel {
+                foundChannel = true
                 feedFormat = (name == "feed") ? .atom : .rss
             }
 
