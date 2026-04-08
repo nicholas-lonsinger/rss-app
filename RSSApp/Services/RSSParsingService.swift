@@ -298,7 +298,18 @@ enum EncodingSniffer {
             return nil
         }
         let stripped = stripXMLDeclaration(decoded)
-        guard let utf8 = stripped.data(using: .utf8) else { return nil }
+        guard let utf8 = stripped.data(using: .utf8) else {
+            let message = "UTF-8 re-encoding of transcoded string failed unexpectedly (encoding=\(String(describing: encoding)), chars=\(stripped.count))"
+            logger.fault("\(message, privacy: .public)")
+            // Dual-emit to the DiagnosticRecorder so this fault is observable
+            // in Console.app via the recording sink if it ever fires in production.
+            // No test covers this branch: data(using: .utf8) cannot return nil on a
+            // valid Swift String in practice. See `DiagnosticRecorder` for rationale.
+            // Issue #275.
+            DiagnosticRecorder.record(category: loggerCategory, level: .fault, message: message)
+            assertionFailure(message)
+            return nil
+        }
         let transcodeSuccessMessage = "Transcoded \(data.count) bytes from \(String(describing: encoding)) to \(utf8.count) bytes UTF-8"
         logger.notice("\(transcodeSuccessMessage, privacy: .public)")
         // Dual-emit to the DiagnosticRecorder so tests can assert the success
