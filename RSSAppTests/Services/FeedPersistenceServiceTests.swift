@@ -769,6 +769,61 @@ struct FeedPersistenceServiceTests {
         #expect(updated.wasUpdated == true) // preserved — never read
     }
 
+    @Test("markArticleRead preserves the first-read timestamp on repeated isRead: true calls (issue #271)")
+    @MainActor
+    func markArticleReadPreservesFirstReadDate() async throws {
+        // Pins the issue #271 contract: `readDate` is "the moment the user *first*
+        // read the article" — not "the most recent read action." Calling
+        // `markArticleRead(_, isRead: true)` twice in a row must NOT bump the
+        // timestamp; the second call is a no-op for `readDate`.
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+        try service.upsertArticles([TestFixtures.makeArticle(id: "a1")], for: feed)
+
+        let articles = try service.articles(for: feed)
+        try service.markArticleRead(articles[0], isRead: true)
+        let firstReadDate = try #require(articles[0].readDate)
+
+        // Sleep long enough that a re-stamp would be observable. `Date()` has
+        // sub-millisecond resolution on iOS, so 10ms is generous headroom.
+        try await Task.sleep(nanoseconds: 10_000_000)
+
+        try service.markArticleRead(articles[0], isRead: true)
+        let secondReadDate = try #require(articles[0].readDate)
+        #expect(secondReadDate == firstReadDate)
+    }
+
+    @Test("markArticleRead stamps a fresh readDate after an unread round-trip (issue #271)")
+    @MainActor
+    func markArticleReadStampsFreshDateAfterUnreadRoundTrip() async throws {
+        // Companion to `markArticleReadPreservesFirstReadDate`: verifies the
+        // "round-trip through unread clears the timestamp" half of the contract.
+        // If the user explicitly marks the article unread (nulling `readDate`),
+        // a subsequent `isRead: true` must stamp a *new* first-read time — the
+        // previous read was deliberately undone, so the stored timestamp no
+        // longer represents "the moment the user first read the article."
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+        try service.upsertArticles([TestFixtures.makeArticle(id: "a1")], for: feed)
+
+        let articles = try service.articles(for: feed)
+        try service.markArticleRead(articles[0], isRead: true)
+        let firstReadDate = try #require(articles[0].readDate)
+
+        try service.markArticleRead(articles[0], isRead: false)
+        #expect(articles[0].readDate == nil)
+
+        try await Task.sleep(nanoseconds: 10_000_000)
+
+        try service.markArticleRead(articles[0], isRead: true)
+        let newReadDate = try #require(articles[0].readDate)
+        #expect(newReadDate > firstReadDate)
+    }
+
     @Test("markAllArticlesRead(for:) clears wasUpdated for every article in the feed")
     @MainActor
     func markAllArticlesReadForFeedClearsWasUpdated() throws {

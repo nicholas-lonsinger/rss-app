@@ -60,6 +60,17 @@ final class PersistentArticle {
     // MARK: - Read status
 
     var isRead: Bool
+    /// The moment the user first read this article.
+    ///
+    /// **Contract (issue #271):** `readDate` captures the *first* time the user
+    /// transitioned the article to read — not the most recent read action.
+    /// `FeedPersistenceService.markArticleRead(_:isRead: true)` preserves any
+    /// existing timestamp on repeat calls; only a full round-trip through
+    /// `isRead = false` (which clears `readDate = nil`) lets a subsequent read
+    /// stamp a new timestamp. The bulk `markAllArticlesRead` variants only touch
+    /// rows whose `isRead == false`, so they never clobber an existing first-read
+    /// timestamp. The `upsertArticles` update-detection path clears `readDate`
+    /// alongside `isRead`, which is the only sanctioned destructive transition.
     var readDate: Date?
 
     // MARK: - Saved status

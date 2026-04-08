@@ -467,14 +467,39 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
         }
     }
 
+    /// Marks an article as read or unread.
+    ///
+    /// **`readDate` semantics (issue #271): `readDate` records the moment the user
+    /// *first* read the article, not the most recent read action.** Calling this
+    /// with `isRead: true` on an article that already has `isRead == true` is a
+    /// no-op for `readDate` — the existing timestamp is preserved. Transitioning
+    /// `isRead: false` clears `readDate` to `nil`; a subsequent `isRead: true`
+    /// therefore stamps a *new* first-read time, because the previous read was
+    /// explicitly undone by the user.
+    ///
+    /// This contract matches the `previousReadDate` capture in `upsertArticles`'s
+    /// "Resurfaced read article" notice log and the `PersistentArticle.wasUpdated`
+    /// doc comment, which both describe `readDate` as "the moment the user first
+    /// read the article."
+    ///
+    /// Also clears the issue #74 `wasUpdated` flag on the read transition. See the
+    /// doc comment on `PersistentArticle.wasUpdated` for the asymmetric-clear
+    /// rationale (manually marking unread does not re-set the flag).
     func markArticleRead(_ article: PersistentArticle, isRead: Bool) throws {
         article.isRead = isRead
-        article.readDate = isRead ? Date() : nil
-        // Clear the issue #74 update flag on read transitions. See the doc comment on
-        // `PersistentArticle.wasUpdated` for the asymmetric-clear rationale (manually
-        // marking unread does not re-set the flag).
         if isRead {
+            // Preserve the first-read timestamp: only stamp when transitioning from
+            // unread (or from a previously-cleared state) to read. See the doc
+            // comment above for the contract.
+            if article.readDate == nil {
+                article.readDate = Date()
+            }
+            // Clear the issue #74 update flag on read transitions. See the doc
+            // comment on `PersistentArticle.wasUpdated` for the asymmetric-clear
+            // rationale (manually marking unread does not re-set the flag).
             article.wasUpdated = false
+        } else {
+            article.readDate = nil
         }
         try modelContext.save()
         Self.logger.debug("Marked article '\(article.title, privacy: .public)' as \(isRead ? "read" : "unread", privacy: .public)")
