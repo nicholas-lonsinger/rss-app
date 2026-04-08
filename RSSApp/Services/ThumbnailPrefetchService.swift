@@ -220,8 +220,9 @@ private func downloadWithRetry(
                 articleLink: articleLink,
                 articleID: articleID
             )
-        } catch is CancellationError {
+        } catch {
             // Task was cancelled — stop retrying immediately without incrementing retry counters.
+            // throws(CancellationError) guarantees the only escapable error is CancellationError.
             return ThumbnailDownloadResult(articleID: articleID, outcome: .cancelled)
         }
 

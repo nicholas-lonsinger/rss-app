@@ -76,7 +76,16 @@ final class MockSlowHTMLURLSessionProvider: URLSessionBytesProviding, @unchecked
 /// delivers a small initial chunk followed by a configurable error
 /// (default `URLError(.cancelled)`), so the iterating caller observes
 /// the error from inside its `for try await byte in bytes` loop.
-final class MockSlowHTMLURLProtocol: URLProtocol, @unchecked Sendable {
+final class MockSlowHTMLURLProtocol: URLProtocol {
+
+    // RATIONALE: URLProtocol.Sendable is @available(*, unavailable) in iOS 26 / Swift 6,
+    // so the subclass cannot use @unchecked Sendable directly. WeakBox carries the weak
+    // self reference across the asyncAfter @Sendable boundary without triggering either
+    // the "already unavailable" or "non-Sendable capture" warnings.
+    private final class WeakBox: @unchecked Sendable {
+        weak var value: MockSlowHTMLURLProtocol?
+        init(_ value: MockSlowHTMLURLProtocol) { self.value = value }
+    }
 
     static let requestIDHeader = "X-MockSlowHTML-RequestID"
 
@@ -169,9 +178,10 @@ final class MockSlowHTMLURLProtocol: URLProtocol, @unchecked Sendable {
         // the AsyncBytes iterator, which throws it from `next()`.
         let delayNanoseconds = config.failureDelayNanoseconds
         let error = config.midStreamError
-        deliveryQueue.asyncAfter(deadline: .now() + .nanoseconds(Int(min(UInt64(Int.max), delayNanoseconds)))) { [weak self] in
-            guard let self else { return }
-            self.client?.urlProtocol(self, didFailWithError: error)
+        let box = WeakBox(self)
+        deliveryQueue.asyncAfter(deadline: .now() + .nanoseconds(Int(min(UInt64(Int.max), delayNanoseconds)))) {
+            guard let proto = box.value else { return }
+            proto.client?.urlProtocol(proto, didFailWithError: error)
         }
     }
 
