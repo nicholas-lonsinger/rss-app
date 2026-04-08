@@ -176,8 +176,9 @@ final class MockSlowHTMLURLProtocol: URLProtocol {
         let error = config.midStreamError
         // RATIONALE: `self` is non-Sendable (URLProtocol's Sendable conformance is
         // marked unavailable under iOS 26), but DispatchQueue.asyncAfter requires a
-        // @Sendable closure. `nonisolated(unsafe)` bypasses the check; the mock is
-        // only used in single-threaded test contexts per the class-level RATIONALE.
+        // @Sendable closure. `nonisolated(unsafe)` bypasses the check. Safety: the
+        // delivery queue serializes all access to `self`, and URLSession tears down
+        // the data task after `didFailWithError`, so no concurrent access occurs.
         nonisolated(unsafe) let capturedSelf = self
         deliveryQueue.asyncAfter(deadline: .now() + .nanoseconds(Int(min(UInt64(Int.max), delayNanoseconds)))) {
             capturedSelf.client?.urlProtocol(capturedSelf, didFailWithError: error)

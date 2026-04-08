@@ -212,7 +212,8 @@ private func downloadWithRetry(
         // RATIONALE: `resolveAndCacheThumbnail` is `throws(CancellationError)`, so the
         // unqualified `catch` below only ever receives a CancellationError and no
         // `catch { assertionFailure(...) }` safety net is needed. A `catch is
-        // CancellationError` pattern would be flagged as always-true by Swift 6.
+        // CancellationError` pattern would be flagged as always-true given the
+        // typed-throws signature already guarantees the error type.
         let result: ThumbnailCacheResult
         do {
             result = try await thumbnailService.resolveAndCacheThumbnail(
