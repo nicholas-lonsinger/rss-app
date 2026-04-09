@@ -107,12 +107,13 @@ final class FeedRefreshService {
         // Observe the WiFi-only setting change notification so that toggling
         // the setting while a prefetch batch is in flight promptly cancels any
         // tasks that are no longer allowed. The notification is posted by
-        // `BackgroundImageDownloadSettings.wifiOnly.set` on whatever thread
-        // writes the setting; dispatching to the main actor is required because
-        // FeedRefreshService is @MainActor.
+        // the wifiOnly property setter in BackgroundImageDownloadSettings on
+        // whatever thread writes the setting; dispatching to the main actor is
+        // required because FeedRefreshService is @MainActor.
         //
-        // Stored on `self` so the token outlives the init scope. Deregistration
-        // is automatic when `settingsObserverToken` is released.
+        // Stored on `self` so the token is available for explicit deregistration
+        // in deinit. NotificationCenter does NOT auto-remove block-based observers
+        // when the token is released — removeObserver(_:) must be called explicitly.
         settingsObserverToken = NotificationCenter.default.addObserver(
             forName: BackgroundImageDownloadSettings.wifiOnlyDidChangeNotification,
             object: nil,
@@ -125,9 +126,10 @@ final class FeedRefreshService {
     }
 
     deinit {
-        if let token = settingsObserverToken {
-            NotificationCenter.default.removeObserver(token)
-        }
+        // settingsObserverToken is written unconditionally in init; nil here
+        // would mean the observer was never registered and cannot be removed.
+        guard let token = settingsObserverToken else { return }
+        NotificationCenter.default.removeObserver(token)
     }
 
     // MARK: - Outcome
@@ -270,6 +272,12 @@ final class FeedRefreshService {
     /// case `await task.value` returns early on the cancelled task; the
     /// drain still releases and the OS-allotted runtime is still used,
     /// just for whatever work completed before the cancel.
+    ///
+    /// Similarly, a call to `cancelBackgroundDownloadTasksIfDisallowed()` while
+    /// this method is suspended will call `task.cancel()` on the same handle
+    /// this caller holds locally; `await task.value` returns early on the
+    /// cancelled task. This is correct — the BGTask should not block on
+    /// downloads that are no longer allowed.
     func awaitPendingWork() async {
         // Snapshot both task references synchronously, before any `await`,
         // so a concurrent `refreshAllFeeds()` cycle cannot replace the
@@ -298,6 +306,10 @@ final class FeedRefreshService {
     /// - From the UserDefaults observer installed in `init` — handles a toggle
     ///   change while a prefetch batch is already running.
     ///
+    /// This is a no-op when no tasks are in flight or when the network still
+    /// allows background downloads, so calling it unconditionally on every
+    /// `.active` transition is safe.
+    ///
     /// The mid-batch check inside `ThumbnailPrefetchService.downloadThumbnails`
     /// catches the window *within* a single item's download slot; this cancel
     /// handles the outer task-level granularity.
@@ -319,6 +331,8 @@ final class FeedRefreshService {
         }
         if cancelledCount > 0 {
             Self.logger.notice("Cancelled \(cancelledCount, privacy: .public) background download task(s) — network no longer allows background downloads")
+        } else {
+            Self.logger.debug("cancelBackgroundDownloadTasksIfDisallowed() — network disallowed but no tasks in flight")
         }
     }
 

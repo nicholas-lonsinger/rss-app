@@ -362,8 +362,10 @@ struct ThumbnailPrefetchServiceTests {
             networkMonitor: mockNetwork
         )
 
-        // Flip to disallowed after first batch starts — the mid-batch guard
-        // should prevent enqueueing remaining articles
+        // Set disallowed before the call. The mock thumbnail service returns
+        // synchronously, so the first seed of maxConcurrency items completes
+        // before the mid-batch guard check runs — at that point downloads are
+        // already disallowed, so no further items are enqueued.
         mockNetwork.backgroundDownloadAllowed = false
 
         await service.prefetchThumbnails()
