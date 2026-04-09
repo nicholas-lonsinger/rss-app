@@ -68,9 +68,10 @@ protocol ArticleListSource: AnyObject, Observable {
     /// Content shown when `articles` is empty and not loading.
     var emptyState: EmptyStateContent { get }
 
-    /// Whether the toolbar should expose a sort-order toggle. Saved and
-    /// Unread lists may keep this off if their ordering is semantically
-    /// fixed; per-feed and All-Articles sources typically return `true`.
+    /// Whether the toolbar should expose a sort-order toggle. Today every
+    /// source returns `true` — the Saved list honors the same global
+    /// `sortAscending` preference as the other lists. Future sources with
+    /// semantically fixed ordering could return `false`.
     var supportsSort: Bool { get }
 
     /// Whether the toolbar should expose a "Show Unread Only" toggle. Only
