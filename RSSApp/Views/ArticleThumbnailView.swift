@@ -46,6 +46,7 @@ struct ArticleThumbnailView: View {
             }.value
             if let image {
                 thumbnailImage = image
+                ImageLoadBackoffTracker.thumbnails.clearFailure(for: articleID)
                 return
             }
             // Corrupt cache entry — purge it and fall through to resolution
@@ -55,6 +56,11 @@ struct ArticleThumbnailView: View {
 
         guard thumbnailURL != nil || articleLink != nil else {
             thumbnailImage = nil
+            return
+        }
+
+        // Check backoff before attempting network resolution
+        guard !ImageLoadBackoffTracker.thumbnails.shouldSuppress(articleID) else {
             return
         }
 
@@ -74,7 +80,19 @@ struct ArticleThumbnailView: View {
             // View task was cancelled (e.g., row scrolled off-screen) — bail out quietly.
             return
         }
-        guard result == .cached, let fileURL = thumbnailService.cachedThumbnailFileURL(for: articleID) else {
+
+        switch result {
+        case .cached:
+            ImageLoadBackoffTracker.thumbnails.clearFailure(for: articleID)
+        case .transientFailure, .permanentFailure:
+            ImageLoadBackoffTracker.thumbnails.recordFailure(for: articleID)
+            thumbnailImage = nil
+            return
+        }
+
+        guard let fileURL = thumbnailService.cachedThumbnailFileURL(for: articleID) else {
+            Self.logger.fault("Thumbnail resolved as .cached but cachedThumbnailFileURL returned nil for article \(articleID, privacy: .public)")
+            assertionFailure("Thumbnail resolved as .cached but cachedThumbnailFileURL returned nil for article: \(articleID)")
             thumbnailImage = nil
             return
         }

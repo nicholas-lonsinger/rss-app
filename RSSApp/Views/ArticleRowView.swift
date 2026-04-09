@@ -98,6 +98,7 @@ struct ArticleRowView: View {
             HStack(spacing: 3) {
                 FeedIconView(
                     feedID: feed.id,
+                    feedURL: feed.feedURL,
                     iconURL: feed.iconURL,
                     iconService: iconService,
                     style: .inline

@@ -1,3 +1,4 @@
+import os
 import SwiftUI
 
 struct FeedIconView: View {
@@ -13,6 +14,11 @@ struct FeedIconView: View {
     }
 
     let feedID: UUID
+    /// The feed's XML URL, used to derive the site root for icon candidate
+    /// resolution when on-view fallback is triggered. Callers that only
+    /// display already-cached icons (none today — kept for safety) may pass
+    /// `nil`, but on-view resolution will be skipped.
+    let feedURL: URL?
     /// Drives `.task(id:)` so the icon load re-runs after the feed's icon URL is
     /// resolved and cached. The value itself isn't used for rendering.
     let iconURL: URL?
@@ -20,6 +26,8 @@ struct FeedIconView: View {
     var style: Style = .standard
 
     @State private var iconImage: UIImage?
+
+    private static let logger = Logger(category: "FeedIconView")
 
     // RATIONALE: @ScaledMetric must live on the view (not the Style enum) because property
     // wrappers require stored properties on a DynamicProperty-conforming type. Both sizes are
@@ -71,10 +79,75 @@ struct FeedIconView: View {
         }
         .frame(width: iconSize, height: iconSize)
         .task(id: iconURL) {
-            // RATIONALE: Delegates decode + visibility validation + delete-on-corrupt
-            // to FeedIconResolving so the cache-validity invariant is enforced once at
-            // the service boundary. Keeps this view to a single async call.
-            iconImage = await iconService.loadValidatedIcon(for: feedID)
+            await loadIcon()
         }
+    }
+
+    // MARK: - Loading
+
+    // RATIONALE: On-view resolution mirrors the ArticleThumbnailView pattern where
+    // the view always attempts to load the image when shown, regardless of WiFi-only
+    // background download settings. The Settings screen explicitly states "Images
+    // loaded while browsing are always fetched." On-view loads are user-initiated
+    // browsing, so they must not be gated by isBackgroundDownloadAllowed().
+    private func loadIcon() async {
+        // Step 1: Try loading from cache (delegates decode + visibility validation
+        // + delete-on-corrupt to FeedIconResolving).
+        if let cached = await iconService.loadValidatedIcon(for: feedID) {
+            iconImage = cached
+            return
+        }
+
+        // Step 2: No cached icon — attempt on-view resolution if we have a feed URL.
+        guard let feedURL else {
+            Self.logger.debug("No feedURL for feed \(feedID.uuidString, privacy: .public) — cannot resolve icon on-view")
+            return
+        }
+
+        let backoffKey = feedID.uuidString
+        guard !ImageLoadBackoffTracker.feedIcons.shouldSuppress(backoffKey) else {
+            return
+        }
+
+        // Derive site URL from feed URL the same way FeedRefreshService does.
+        let feedSiteURL = Self.siteURL(from: feedURL)
+        if feedSiteURL == nil {
+            Self.logger.debug("Could not derive site URL from feedURL for feed \(feedID.uuidString, privacy: .public)")
+        }
+
+        // Both resolution inputs are nil — skip the service call to avoid
+        // triggering backoff escalation for a permanently unresolvable condition.
+        guard feedSiteURL != nil || iconURL != nil else {
+            Self.logger.debug("No site URL or icon URL available for feed \(feedID.uuidString, privacy: .public) — skipping on-view resolution")
+            return
+        }
+
+        let resolvedURL = await iconService.resolveAndCacheIcon(
+            feedSiteURL: feedSiteURL,
+            feedImageURL: iconURL,
+            feedID: feedID
+        )
+
+        guard resolvedURL != nil else {
+            ImageLoadBackoffTracker.feedIcons.recordFailure(for: backoffKey)
+            iconImage = nil
+            return
+        }
+
+        // Successfully resolved — clear any prior backoff and reload from cache.
+        ImageLoadBackoffTracker.feedIcons.clearFailure(for: backoffKey)
+        Self.logger.notice("Resolved icon on-view for feed \(feedID.uuidString, privacy: .public)")
+        let validated = await iconService.loadValidatedIcon(for: feedID)
+        if validated == nil {
+            Self.logger.warning("Icon resolved for feed \(feedID.uuidString, privacy: .public) but failed post-cache validation")
+        }
+        iconImage = validated
+    }
+
+    /// Derives a site root URL from a feed URL (e.g., https://example.com/feed → https://example.com).
+    /// Returns nil if the feed URL has no host.
+    private static func siteURL(from feedURL: URL) -> URL? {
+        guard let host = feedURL.host(percentEncoded: false), !host.isEmpty else { return nil }
+        return URL(string: "\(feedURL.scheme ?? "https")://\(host)")
     }
 }
