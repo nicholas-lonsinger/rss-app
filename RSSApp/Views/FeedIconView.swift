@@ -109,8 +109,8 @@ struct FeedIconView: View {
             return
         }
 
-        // Derive site URL from feed URL the same way FeedRefreshService does.
-        let feedSiteURL = Self.siteURL(from: feedURL)
+        // Derive site URL from feed URL.
+        let feedSiteURL = feedURL.siteRoot
         if feedSiteURL == nil {
             Self.logger.debug("Could not derive site URL from feedURL for feed \(feedID.uuidString, privacy: .public)")
         }
@@ -142,12 +142,5 @@ struct FeedIconView: View {
             Self.logger.warning("Icon resolved for feed \(feedID.uuidString, privacy: .public) but failed post-cache validation")
         }
         iconImage = validated
-    }
-
-    /// Derives a site root URL from a feed URL (e.g., https://example.com/feed → https://example.com).
-    /// Returns nil if the feed URL has no host.
-    private static func siteURL(from feedURL: URL) -> URL? {
-        guard let host = feedURL.host(percentEncoded: false), !host.isEmpty else { return nil }
-        return URL(string: "\(feedURL.scheme ?? "https")://\(host)")
     }
 }
