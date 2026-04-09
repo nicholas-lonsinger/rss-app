@@ -24,6 +24,24 @@ enum BackgroundRefreshScheduler {
 
     private static let logger = Logger(category: "BackgroundRefreshScheduler")
 
+    /// Guards against double-registration. `BGTaskScheduler.register` is
+    /// single-shot per identifier per process launch; a second call with the
+    /// same identifier crashes the framework. Today only `RSSAppApp.init()`
+    /// calls this, but the flag makes a future refactor that accidentally
+    /// calls it twice fail loudly instead of crashing inside BackgroundTasks.
+    ///
+    /// RATIONALE: `nonisolated(unsafe)` is correct here because
+    /// `registerLaunchHandlers` is only ever called from `RSSAppApp.init()`,
+    /// which runs on `@MainActor` (the `App` protocol is `@MainActor`). The
+    /// guard logic below runs before any `Task` has been spawned from the
+    /// coordinator, so there is no concurrent reader. If a future caller
+    /// invokes `registerLaunchHandlers` from a non-main context, the
+    /// `assertionFailure` below will still fire on the second call — the
+    /// read is benign because the worst case is crashing inside BGTaskScheduler
+    /// on a true double-registration, which is exactly the behavior this
+    /// guard is meant to avoid.
+    nonisolated(unsafe) private static var registered = false
+
     /// Task identifier for `BGAppRefreshTaskRequest`. Must also appear in
     /// `BGTaskSchedulerPermittedIdentifiers` in Info.plist.
     static let appRefreshTaskIdentifier = "com.nicholas-lonsinger.rss-app.refresh"
@@ -38,39 +56,38 @@ enum BackgroundRefreshScheduler {
     /// from `RSSAppApp.init()` before `didFinishLaunchingWithOptions` returns.
     ///
     /// - Parameter coordinator: The coordinator that handles launched tasks.
-    ///   Captured weakly so registration does not extend its lifetime.
+    ///   Captured strongly because the coordinator is owned by `RSSAppApp` for
+    ///   the entire process lifetime — there is no release path that would
+    ///   leave a launch handler referring to a deallocated coordinator.
     static func registerLaunchHandlers(coordinator: BackgroundRefreshCoordinator) {
+        guard !registered else {
+            logger.fault("registerLaunchHandlers called twice — BGTaskScheduler.register is single-shot per identifier and will crash on re-registration")
+            assertionFailure("BackgroundRefreshScheduler.registerLaunchHandlers called twice")
+            return
+        }
+        registered = true
+
         let appRefreshRegistered = BGTaskScheduler.shared.register(
             forTaskWithIdentifier: appRefreshTaskIdentifier,
             using: nil
-        ) { [weak coordinator] task in
-            guard let coordinator else {
-                logger.fault("BGAppRefreshTask launched but coordinator was deallocated — task will be marked failed")
-                task.setTaskCompleted(success: false)
-                return
-            }
+        ) { task in
             coordinator.handle(task)
         }
 
         let processingRegistered = BGTaskScheduler.shared.register(
             forTaskWithIdentifier: processingTaskIdentifier,
             using: nil
-        ) { [weak coordinator] task in
-            guard let coordinator else {
-                logger.fault("BGProcessingTask launched but coordinator was deallocated — task will be marked failed")
-                task.setTaskCompleted(success: false)
-                return
-            }
+        ) { task in
             coordinator.handle(task)
         }
 
         if !appRefreshRegistered {
             logger.fault("Failed to register BGAppRefreshTask identifier '\(appRefreshTaskIdentifier, privacy: .public)' — check Info.plist BGTaskSchedulerPermittedIdentifiers")
-            assertionFailure("Failed to register BGAppRefreshTask identifier: check Info.plist BGTaskSchedulerPermittedIdentifiers")
+            assertionFailure("Failed to register BGAppRefreshTask identifier '\(appRefreshTaskIdentifier)': check Info.plist BGTaskSchedulerPermittedIdentifiers")
         }
         if !processingRegistered {
             logger.fault("Failed to register BGProcessingTask identifier '\(processingTaskIdentifier, privacy: .public)' — check Info.plist BGTaskSchedulerPermittedIdentifiers")
-            assertionFailure("Failed to register BGProcessingTask identifier: check Info.plist BGTaskSchedulerPermittedIdentifiers")
+            assertionFailure("Failed to register BGProcessingTask identifier '\(processingTaskIdentifier)': check Info.plist BGTaskSchedulerPermittedIdentifiers")
         }
         logger.notice("Background task launch handlers registered")
     }
@@ -83,7 +100,12 @@ enum BackgroundRefreshScheduler {
     /// Call from `RSSAppApp` after launch, after a completed refresh (to seed
     /// the next cycle), and after the user changes any background refresh
     /// setting.
-    static func scheduleNextRefresh(now: Date = Date()) {
+    ///
+    /// - Throws: Rethrows any error from `BGTaskScheduler.submit(_:)`. Callers
+    ///   that react to user input (the settings view) should catch and
+    ///   surface the error; launch-seed and post-run re-seed callers can
+    ///   silently log.
+    static func scheduleNextRefresh(now: Date = Date()) throws {
         guard BackgroundRefreshSettings.isEnabled else {
             logger.debug("scheduleNextRefresh() called while disabled; cancelling all")
             cancelAll()
@@ -102,14 +124,14 @@ enum BackgroundRefreshScheduler {
             BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: processingTaskIdentifier)
             let request = BGAppRefreshTaskRequest(identifier: appRefreshTaskIdentifier)
             request.earliestBeginDate = earliestBegin
-            submit(request)
+            try submit(request)
         case .processing:
             BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: appRefreshTaskIdentifier)
             let request = BGProcessingTaskRequest(identifier: processingTaskIdentifier)
             request.earliestBeginDate = earliestBegin
             request.requiresNetworkConnectivity = true
             request.requiresExternalPower = (power == .chargingOnly)
-            submit(request)
+            try submit(request)
         }
     }
 
@@ -154,12 +176,13 @@ enum BackgroundRefreshScheduler {
 
     // MARK: - Private
 
-    private static func submit(_ request: BGTaskRequest) {
+    private static func submit(_ request: BGTaskRequest) throws {
         do {
             try BGTaskScheduler.shared.submit(request)
             logger.notice("Submitted background refresh request '\(request.identifier, privacy: .public)' earliestBeginDate=\(request.earliestBeginDate?.description ?? "nil", privacy: .public)")
         } catch {
             logger.error("Failed to submit background refresh request '\(request.identifier, privacy: .public)': \(error, privacy: .public)")
+            throw error
         }
     }
 }

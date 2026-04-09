@@ -4,9 +4,14 @@ import SwiftData
 struct ContentView: View {
     let persistence: FeedPersisting
     let refreshService: FeedRefreshService
+    let feedIconService: FeedIconResolving
 
     var body: some View {
-        HomeView(persistence: persistence, refreshService: refreshService)
+        HomeView(
+            persistence: persistence,
+            refreshService: refreshService,
+            feedIconService: feedIconService
+        )
     }
 }
 
@@ -16,9 +21,14 @@ struct ContentView: View {
         configurations: ModelConfiguration(isStoredInMemoryOnly: true)
     )
     let persistence = SwiftDataFeedPersistenceService(modelContext: previewContainer.mainContext)
+    let feedIconService = FeedIconService()
     ContentView(
         persistence: persistence,
-        refreshService: FeedRefreshService(persistence: persistence)
+        refreshService: FeedRefreshService(
+            persistence: persistence,
+            feedIconService: feedIconService
+        ),
+        feedIconService: feedIconService
     )
     .modelContainer(previewContainer)
 }

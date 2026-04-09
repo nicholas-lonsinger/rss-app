@@ -87,6 +87,11 @@ enum BackgroundRefreshSettings {
     /// Whether background refresh should run at all. Defaults to `true`.
     static var isEnabled: Bool {
         get {
+            // RATIONALE: Two-step key-existence check is load-bearing.
+            // `UserDefaults.standard.bool(forKey:)` alone returns `false` for
+            // both "key absent" and "key present with value false", which
+            // would silently flip the default from `true` to `false` on first
+            // launch. `object(forKey:) == nil` distinguishes the two cases.
             if UserDefaults.standard.object(forKey: enabledKey) == nil {
                 return true
             }

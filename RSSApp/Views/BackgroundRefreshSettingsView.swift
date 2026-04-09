@@ -12,6 +12,15 @@ struct BackgroundRefreshSettingsView: View {
     @State private var networkRequirement: BackgroundRefreshNetworkRequirement
     @State private var powerRequirement: BackgroundRefreshPowerRequirement
 
+    /// Surfaces `BGTaskScheduler.submit(_:)` failures triggered by the user's
+    /// own setting changes. The most common cause is Background App Refresh
+    /// being disabled in iOS Settings → General, which causes submit to throw
+    /// with `BGTaskSchedulerErrorDomain` code 1 ("unavailable"). The user's
+    /// in-app preference is intentionally NOT reverted on failure — iOS
+    /// convention is to keep the user's declared intent and tell them where
+    /// to fix the underlying OS-level condition.
+    @State private var scheduleError: Error?
+
     init() {
         _isEnabled = State(initialValue: BackgroundRefreshSettings.isEnabled)
         _interval = State(initialValue: BackgroundRefreshSettings.interval)
@@ -28,7 +37,7 @@ struct BackgroundRefreshSettingsView: View {
                 .onChange(of: isEnabled) { _, newValue in
                     BackgroundRefreshSettings.isEnabled = newValue
                     if newValue {
-                        BackgroundRefreshScheduler.scheduleNextRefresh()
+                        scheduleOrReportError()
                     } else {
                         BackgroundRefreshScheduler.cancelAll()
                     }
@@ -42,7 +51,7 @@ struct BackgroundRefreshSettingsView: View {
                     Button {
                         interval = option
                         BackgroundRefreshSettings.interval = option
-                        BackgroundRefreshScheduler.scheduleNextRefresh()
+                        scheduleOrReportError()
                     } label: {
                         HStack {
                             Text(option.displayLabel)
@@ -72,7 +81,7 @@ struct BackgroundRefreshSettingsView: View {
                 .pickerStyle(.segmented)
                 .onChange(of: networkRequirement) { _, newValue in
                     BackgroundRefreshSettings.networkRequirement = newValue
-                    BackgroundRefreshScheduler.scheduleNextRefresh()
+                    scheduleOrReportError()
                 }
             } header: {
                 Text("Network")
@@ -90,7 +99,7 @@ struct BackgroundRefreshSettingsView: View {
                 .pickerStyle(.segmented)
                 .onChange(of: powerRequirement) { _, newValue in
                     BackgroundRefreshSettings.powerRequirement = newValue
-                    BackgroundRefreshScheduler.scheduleNextRefresh()
+                    scheduleOrReportError()
                 }
             } header: {
                 Text("Power")
@@ -100,5 +109,30 @@ struct BackgroundRefreshSettingsView: View {
             .disabled(!isEnabled)
         }
         .navigationTitle("Background Refresh")
+        .alert(
+            "Background Refresh Unavailable",
+            isPresented: Binding(
+                get: { scheduleError != nil },
+                set: { if !$0 { scheduleError = nil } }
+            ),
+            presenting: scheduleError
+        ) { _ in
+            Button("OK") { scheduleError = nil }
+        } message: { _ in
+            Text("Background refresh couldn't be scheduled. Make sure Background App Refresh is enabled for this app in Settings → General → Background App Refresh.")
+        }
+    }
+
+    // MARK: - Helpers
+
+    /// Attempts to schedule the next refresh and surfaces any submission
+    /// failure via the `scheduleError` alert binding.
+    private func scheduleOrReportError() {
+        do {
+            try BackgroundRefreshScheduler.scheduleNextRefresh()
+        } catch {
+            Self.logger.error("User-initiated schedule change failed: \(error, privacy: .public)")
+            scheduleError = error
+        }
     }
 }

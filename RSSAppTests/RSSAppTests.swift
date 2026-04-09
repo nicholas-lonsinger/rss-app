@@ -12,8 +12,16 @@ struct RSSAppTests {
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
         let persistence = SwiftDataFeedPersistenceService(modelContext: container.mainContext)
-        let refreshService = FeedRefreshService(persistence: persistence)
-        let view = ContentView(persistence: persistence, refreshService: refreshService)
+        let feedIconService = FeedIconService()
+        let refreshService = FeedRefreshService(
+            persistence: persistence,
+            feedIconService: feedIconService
+        )
+        let view = ContentView(
+            persistence: persistence,
+            refreshService: refreshService,
+            feedIconService: feedIconService
+        )
         #expect(view.body is Never == false)
     }
 }

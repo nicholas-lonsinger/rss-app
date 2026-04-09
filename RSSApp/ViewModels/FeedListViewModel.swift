@@ -14,24 +14,20 @@ final class FeedListViewModel {
     var opmlImportResult: OPMLImportResult?
     var opmlExportURL: URL?
 
-    /// Forwards from the shared `FeedRefreshService` so the pull-to-refresh UI spinner
-    /// reflects a refresh in flight regardless of which caller kicked it off.
-    var isRefreshing: Bool { refreshService.isRefreshing }
-
     private let persistence: FeedPersisting
     private let opmlService: OPMLServing
     private let refreshService: FeedRefreshService
-    var feedIconService: FeedIconResolving { refreshService.feedIconService }
+    let feedIconService: FeedIconResolving
 
     init(
         persistence: FeedPersisting,
-        // RATIONALE: Default cannot reference the `persistence` parameter in a default-value
-        // expression, so nil-coalescing is used to construct the default inside the body.
-        refreshService: FeedRefreshService? = nil,
+        refreshService: FeedRefreshService,
+        feedIconService: FeedIconResolving = FeedIconService(),
         opmlService: OPMLServing = OPMLService()
     ) {
         self.persistence = persistence
-        self.refreshService = refreshService ?? FeedRefreshService(persistence: persistence)
+        self.refreshService = refreshService
+        self.feedIconService = feedIconService
         self.opmlService = opmlService
     }
 
@@ -231,21 +227,30 @@ final class FeedListViewModel {
         // Always reload so any persistence changes (new articles, updated
         // metadata, retention-cleaned rows) are reflected in the UI, even when
         // the service coalesced with another caller's in-flight refresh.
+        // loadFeeds() clears errorMessage on success, so the outcome-based
+        // error assignments below must run AFTER loadFeeds() to survive.
         loadFeeds()
 
         switch outcome {
         case .skipped:
-            // Either another caller is still refreshing (their completion will
-            // update the UI via the shared `isRefreshing` forward), or there
-            // were no feeds to refresh in the first place. Either way, leave
-            // errorMessage nil — the loadFeeds() above already cleared it.
+            // Either another caller is still refreshing, or there were no
+            // feeds to refresh in the first place. Leave errorMessage nil —
+            // loadFeeds() already cleared it.
             break
-        case let .completed(totalFeeds, failureCount, saveDidFail, retentionCleanupFailed):
-            if saveDidFail {
+        case .setupFailed:
+            errorMessage = "Unable to load your feeds."
+        case .cancelled:
+            // Cancellation is typically caused by a BG task expiration or a
+            // view-teardown cancel — neither warrants a user-visible error.
+            // The in-flight work has been abandoned; the next refresh picks
+            // up from where this one left off.
+            break
+        case .completed(let summary):
+            if summary.saveDidFail {
                 errorMessage = "Unable to save updated feeds."
-            } else if failureCount > 0 {
-                errorMessage = "\(failureCount) of \(totalFeeds) feed(s) could not be updated."
-            } else if retentionCleanupFailed {
+            } else if summary.failureCount > 0 {
+                errorMessage = "\(summary.failureCount) of \(summary.totalFeeds) feed(s) could not be updated."
+            } else if summary.retentionCleanupFailed {
                 errorMessage = "Article cleanup could not complete."
             }
         }

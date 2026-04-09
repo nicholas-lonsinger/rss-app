@@ -56,7 +56,7 @@ struct FeedRefreshServiceTests {
         #expect(refreshed?[0].feedDescription == "Desc One")
         #expect(refreshed?[1].title == "New Two")
         #expect(refreshed?[1].feedDescription == "Desc Two")
-        #expect(outcome == .completed(totalFeeds: 2, failureCount: 0, saveDidFail: false, retentionCleanupFailed: false))
+        #expect(outcome == .completed(.init(totalFeeds: 2, failureCount: 0, saveDidFail: false, retentionCleanupFailed: false)))
     }
 
     @Test("refreshAllFeeds returns .skipped when feeds is empty")
@@ -104,7 +104,7 @@ struct FeedRefreshServiceTests {
         let service = Self.makeService(persistence: mockPersistence, feedFetching: mockFetching)
         let outcome = await service.refreshAllFeeds()
 
-        #expect(outcome == .completed(totalFeeds: 1, failureCount: 1, saveDidFail: false, retentionCleanupFailed: false))
+        #expect(outcome == .completed(.init(totalFeeds: 1, failureCount: 1, saveDidFail: false, retentionCleanupFailed: false)))
     }
 
     @Test("refreshAllFeeds handles partial failures")
@@ -129,7 +129,7 @@ struct FeedRefreshServiceTests {
         let refreshed = try? mockPersistence.allFeeds()
         #expect(refreshed?[0].title == "Updated")
         #expect(refreshed?[0].feedDescription == "New Desc")
-        #expect(outcome == .completed(totalFeeds: 2, failureCount: 1, saveDidFail: false, retentionCleanupFailed: false))
+        #expect(outcome == .completed(.init(totalFeeds: 2, failureCount: 1, saveDidFail: false, retentionCleanupFailed: false)))
     }
 
     @Test("refreshAllFeeds sets error state on failed feeds")
@@ -192,7 +192,7 @@ struct FeedRefreshServiceTests {
         let service = Self.makeService(persistence: mockPersistence, feedFetching: mockFetching)
         let outcome = await service.refreshAllFeeds()
 
-        #expect(outcome == .completed(totalFeeds: 1, failureCount: 0, saveDidFail: false, retentionCleanupFailed: false))
+        #expect(outcome == .completed(.init(totalFeeds: 1, failureCount: 0, saveDidFail: false, retentionCleanupFailed: false)))
     }
 
     // MARK: - Metadata / upsert / cache-header ordering
@@ -225,7 +225,7 @@ struct FeedRefreshServiceTests {
         // should still have run: the side effect is that articlesByFeedID has
         // the fetched article persisted to the mock store.
         #expect(mockPersistence.articlesByFeedID[feed.id]?.count == 1)
-        #expect(outcome == .completed(totalFeeds: 1, failureCount: 0, saveDidFail: false, retentionCleanupFailed: false))
+        #expect(outcome == .completed(.init(totalFeeds: 1, failureCount: 0, saveDidFail: false, retentionCleanupFailed: false)))
     }
 
     @Test("refreshAllFeeds skips cache header update when upsert fails")
@@ -255,7 +255,7 @@ struct FeedRefreshServiceTests {
         let refreshed = try? mockPersistence.allFeeds()
         #expect(refreshed?[0].etag == nil)
         #expect(refreshed?[0].lastModifiedHeader == nil)
-        #expect(outcome == .completed(totalFeeds: 1, failureCount: 1, saveDidFail: false, retentionCleanupFailed: false))
+        #expect(outcome == .completed(.init(totalFeeds: 1, failureCount: 1, saveDidFail: false, retentionCleanupFailed: false)))
     }
 
     // MARK: - Save / retention
@@ -275,7 +275,7 @@ struct FeedRefreshServiceTests {
         let service = Self.makeService(persistence: mockPersistence, feedFetching: mockFetching)
         let outcome = await service.refreshAllFeeds()
 
-        #expect(outcome == .completed(totalFeeds: 1, failureCount: 0, saveDidFail: true, retentionCleanupFailed: false))
+        #expect(outcome == .completed(.init(totalFeeds: 1, failureCount: 0, saveDidFail: true, retentionCleanupFailed: false)))
     }
 
     @Test("refreshAllFeeds invokes article retention enforcement after refresh")
@@ -320,7 +320,80 @@ struct FeedRefreshServiceTests {
         )
         let outcome = await service.refreshAllFeeds()
 
-        #expect(outcome == .completed(totalFeeds: 1, failureCount: 0, saveDidFail: false, retentionCleanupFailed: true))
+        #expect(outcome == .completed(.init(totalFeeds: 1, failureCount: 0, saveDidFail: false, retentionCleanupFailed: true)))
+    }
+
+    // MARK: - Setup failure
+
+    @Test("refreshAllFeeds returns .setupFailed when feeds cannot be loaded")
+    @MainActor
+    func refreshReturnsSetupFailedWhenLoadFails() async {
+        // The persistence layer throws when listing feeds — a distinct failure
+        // class from "save after refresh failed" and one that should NOT
+        // surface as "Unable to save updated feeds." in the viewmodel.
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.errorToThrow = NSError(domain: "test", code: 1)
+
+        let service = Self.makeService(persistence: mockPersistence)
+        let outcome = await service.refreshAllFeeds()
+
+        #expect(outcome == .setupFailed)
+        #expect(service.isRefreshing == false)
+    }
+
+    // MARK: - Cancellation
+
+    @Test("refreshAllFeeds returns .cancelled when the task group throws CancellationError")
+    @MainActor
+    func refreshReturnsCancelledOnTaskGroupCancellation() async {
+        let url = URL(string: "https://example.com/feed")!
+        let feed = TestFixtures.makePersistentFeed(feedURL: url)
+
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+        let mockFetching = MockFeedFetchingService()
+        // Inject a CancellationError on the fetch — the enqueue closure
+        // rethrows it, which cancels the task group and causes performRefresh
+        // to return .cancelled rather than .completed with a false "no
+        // failures" report.
+        mockFetching.errorsByURL = [url: CancellationError()]
+
+        let service = Self.makeService(persistence: mockPersistence, feedFetching: mockFetching)
+        let outcome = await service.refreshAllFeeds()
+
+        #expect(outcome == .cancelled(totalFeeds: 1))
+    }
+
+    // MARK: - Cosmetic persistence failures (not counted in failureCount)
+
+    @Test("refreshAllFeeds does not count updateFeedCacheHeaders failure in failureCount")
+    @MainActor
+    func cacheHeaderFailureIsCosmetic() async {
+        // Cache-header write failure is self-healing (the next refresh
+        // re-fetches the content) and must NOT count as a user-visible
+        // failure. This is a load-bearing invariant once the BG coordinator
+        // gates success on `failureCount == 0` — counting cosmetic failures
+        // here would train iOS to back off the BG schedule over transient
+        // SwiftData hiccups that have no data-integrity impact.
+        let url = URL(string: "https://example.com/feed")!
+        let feed = TestFixtures.makePersistentFeed(feedURL: url)
+
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+        mockPersistence.updateFeedCacheHeadersError = NSError(domain: "test", code: 1)
+        let mockFetching = MockFeedFetchingService()
+        mockFetching.feedsByURL = [
+            url: TestFixtures.makeFeed(title: "Updated Title")
+        ]
+
+        let service = Self.makeService(persistence: mockPersistence, feedFetching: mockFetching)
+        let outcome = await service.refreshAllFeeds()
+
+        // Metadata update still persisted (cosmetic failure downstream of
+        // the successful upsert), upsert succeeded, failureCount unchanged.
+        let refreshed = try? mockPersistence.allFeeds()
+        #expect(refreshed?[0].title == "Updated Title")
+        #expect(outcome == .completed(.init(totalFeeds: 1, failureCount: 0, saveDidFail: false, retentionCleanupFailed: false)))
     }
 
     // MARK: - Icon resolution
@@ -531,6 +604,6 @@ struct FeedRefreshServiceTests {
 
         let refreshed = try? mockPersistence.allFeeds()
         #expect(refreshed?[0].title == "Updated")
-        #expect(outcome == .completed(totalFeeds: 1, failureCount: 0, saveDidFail: false, retentionCleanupFailed: false))
+        #expect(outcome == .completed(.init(totalFeeds: 1, failureCount: 0, saveDidFail: false, retentionCleanupFailed: false)))
     }
 }

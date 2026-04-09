@@ -20,6 +20,7 @@ struct FeedListView: View {
 
     private let persistence: FeedPersisting
     private let refreshService: FeedRefreshService
+    private let feedIconService: FeedIconResolving
     private let thumbnailService: ArticleThumbnailCaching = ArticleThumbnailService()
     private let isEmbedded: Bool
 
@@ -29,6 +30,8 @@ struct FeedListView: View {
     ///   - refreshService: The shared feed refresh service. Callers should pass
     ///     the app-wide instance so foreground and background refreshes share
     ///     in-flight state.
+    ///   - feedIconService: The shared feed icon service. Callers should pass
+    ///     the app-wide instance so refresh writes and UI reads share the cache.
     ///   - isEmbedded: When `true`, omits the wrapping `NavigationStack` so this view
     ///     can be pushed inside a parent stack (e.g., from `HomeView`). Defaults to `false`.
     ///   - homeViewModel: The home view model for badge updates in settings. When nil
@@ -36,13 +39,19 @@ struct FeedListView: View {
     init(
         persistence: FeedPersisting,
         refreshService: FeedRefreshService,
+        feedIconService: FeedIconResolving,
         isEmbedded: Bool = false,
         homeViewModel: HomeViewModel? = nil
     ) {
         self.persistence = persistence
         self.refreshService = refreshService
+        self.feedIconService = feedIconService
         self.isEmbedded = isEmbedded
-        _viewModel = State(initialValue: FeedListViewModel(persistence: persistence, refreshService: refreshService))
+        _viewModel = State(initialValue: FeedListViewModel(
+            persistence: persistence,
+            refreshService: refreshService,
+            feedIconService: feedIconService
+        ))
         _homeViewModel = State(initialValue: homeViewModel ?? HomeViewModel(persistence: persistence))
     }
 

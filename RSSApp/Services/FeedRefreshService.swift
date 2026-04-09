@@ -20,7 +20,7 @@ final class FeedRefreshService {
 
     private let persistence: FeedPersisting
     private let feedFetching: FeedFetching
-    let feedIconService: FeedIconResolving
+    private let feedIconService: FeedIconResolving
     private let thumbnailPrefetcher: ThumbnailPrefetching
     private let articleRetention: ArticleRetaining
     private let thumbnailService: ArticleThumbnailCaching
@@ -30,6 +30,12 @@ final class FeedRefreshService {
     /// Retained so `awaitPendingWork()` can drain it on behalf of a background
     /// task handler before it calls `setTaskCompleted(success:)`.
     private var thumbnailPrefetchTask: Task<Void, Never>?
+
+    /// Fire-and-forget icon resolution tasks spawned during a refresh cycle.
+    /// Retained so `awaitPendingWork()` can drain them for the same reason
+    /// as `thumbnailPrefetchTask` — the allotted BG runtime should be used
+    /// rather than cancelled mid-flight when the OS reclaims the process.
+    private var pendingIconTasks: [Task<Void, Never>] = []
 
     init(
         persistence: FeedPersisting,
@@ -59,13 +65,51 @@ final class FeedRefreshService {
         /// refresh in flight, or there are no feeds to refresh.
         case skipped
 
-        /// Refresh completed; possibly with per-feed failures.
-        case completed(
-            totalFeeds: Int,
-            failureCount: Int,
-            saveDidFail: Bool,
-            retentionCleanupFailed: Bool
-        )
+        /// Refresh could not begin because the feed list could not be loaded
+        /// from persistence. Distinct from `.completed(... saveDidFail: true)`,
+        /// which reports a save failure *after* a refresh cycle ran.
+        case setupFailed
+
+        /// Refresh was cancelled mid-cycle (typically because a `BGTask`
+        /// expiration handler fired, propagating cancellation into the task
+        /// group). `totalFeeds` is the number of feeds the cycle was
+        /// attempting when cancellation was observed.
+        case cancelled(totalFeeds: Int)
+
+        /// Refresh completed; possibly with per-feed failures. All invariants
+        /// on the associated values are enforced by `Summary`'s init.
+        case completed(Summary)
+
+        /// The post-completion summary of a successful refresh cycle.
+        /// `Summary`'s init enforces `totalFeeds > 0` and
+        /// `0 ≤ failureCount ≤ totalFeeds`, so pattern-matching callers do
+        /// not need to defend against degenerate combinations.
+        struct Summary: Sendable, Equatable {
+            let totalFeeds: Int
+            let failureCount: Int
+            let saveDidFail: Bool
+            let retentionCleanupFailed: Bool
+
+            init(
+                totalFeeds: Int,
+                failureCount: Int,
+                saveDidFail: Bool,
+                retentionCleanupFailed: Bool
+            ) {
+                precondition(
+                    totalFeeds > 0,
+                    "FeedRefreshService.Outcome.Summary requires totalFeeds > 0; use .skipped or .setupFailed for zero-feed paths"
+                )
+                precondition(
+                    (0...totalFeeds).contains(failureCount),
+                    "FeedRefreshService.Outcome.Summary requires 0 ≤ failureCount (\(failureCount)) ≤ totalFeeds (\(totalFeeds))"
+                )
+                self.totalFeeds = totalFeeds
+                self.failureCount = failureCount
+                self.saveDidFail = saveDidFail
+                self.retentionCleanupFailed = retentionCleanupFailed
+            }
+        }
     }
 
     // MARK: - Public API
@@ -91,7 +135,7 @@ final class FeedRefreshService {
             feeds = try persistence.allFeeds()
         } catch {
             Self.logger.error("Failed to load feeds for refresh: \(error, privacy: .public)")
-            return .completed(totalFeeds: 0, failureCount: 0, saveDidFail: true, retentionCleanupFailed: false)
+            return .setupFailed
         }
 
         guard !feeds.isEmpty else {
@@ -110,13 +154,33 @@ final class FeedRefreshService {
     /// `setTaskCompleted(success:)` so the allotted background runtime is
     /// used for thumbnail downloads that would otherwise be cancelled when
     /// the OS reclaims the process.
+    ///
+    /// Precondition: this should be called *after* `refreshAllFeeds()` has
+    /// returned for the caller's own refresh cycle — a concurrent
+    /// `refreshAllFeeds()` call would replace the stored task handles with
+    /// new ones mid-drain. In practice the process-wide `isRefreshing` guard
+    /// (coalescing new callers as `.skipped`) makes this safe for the
+    /// background task coordinator's sequential `refreshAllFeeds() →
+    /// awaitPendingWork()` pattern.
     func awaitPendingWork() async {
         await thumbnailPrefetchTask?.value
+        // Snapshot the icon tasks first so a reassignment during draining
+        // cannot cause us to miss or re-await an entry.
+        let iconTasks = pendingIconTasks
+        for task in iconTasks {
+            _ = await task.value
+        }
     }
 
     // MARK: - Refresh Loop
 
     private func performRefresh(feeds: [PersistentFeed]) async -> Outcome {
+        // Cancel any icon tasks still in flight from a previous cycle so they
+        // cannot contend with this cycle's writes or outlive it unnecessarily.
+        // Mirrors the `thumbnailPrefetchTask?.cancel()` pattern below.
+        for task in pendingIconTasks { task.cancel() }
+        pendingIconTasks.removeAll()
+
         let feedFetching = self.feedFetching
         let logger = Self.logger
         let maxConcurrency = 6
@@ -163,19 +227,37 @@ final class FeedRefreshService {
 
                 return collected
             }
+        } catch is CancellationError {
+            Self.logger.warning("performRefresh() cancelled — reporting .cancelled outcome")
+            return .cancelled(totalFeeds: feeds.count)
         } catch {
-            Self.logger.debug("performRefresh() cancelled")
-            return .completed(
-                totalFeeds: feeds.count,
-                failureCount: 0,
-                saveDidFail: false,
-                retentionCleanupFailed: false
-            )
+            // RATIONALE: The enqueue closures explicitly convert non-CancellationError
+            // fetch errors to `.failure` results, so the task group should only ever
+            // rethrow CancellationError. A non-cancellation throw here indicates a
+            // programming bug in the enqueue closure — fault-log and fall through to
+            // `.cancelled` to avoid a misleading .completed outcome.
+            Self.logger.fault("performRefresh() task group threw unexpected non-cancellation error: \(error, privacy: .public)")
+            assertionFailure("performRefresh() task group threw unexpected error: \(error)")
+            return .cancelled(totalFeeds: feeds.count)
+        }
+
+        // The expirationHandler-triggered cancel path may flip Task.isCancelled
+        // while this loop is running. Bail before starting persistence writes so
+        // the ModelContext does not get left mid-save when the OS reclaims the
+        // process. Checked at each loop boundary so partial progress is not
+        // silently reported as completion.
+        if Task.isCancelled {
+            Self.logger.warning("performRefresh() cancelled before result processing")
+            return .cancelled(totalFeeds: feeds.count)
         }
 
         let idToFeed = Dictionary(uniqueKeysWithValues: feeds.map { ($0.id, $0) })
         var failureCount = 0
         for (id, result) in results {
+            if Task.isCancelled {
+                Self.logger.warning("performRefresh() cancelled mid-results at feed \(id, privacy: .public)")
+                return .cancelled(totalFeeds: feeds.count)
+            }
             guard let feed = idToFeed[id] else {
                 Self.logger.warning("Skipping refresh result for feed ID \(id, privacy: .public) — feed no longer in list")
                 continue
@@ -183,21 +265,27 @@ final class FeedRefreshService {
             switch result {
             case .success(let fetchResult):
                 guard let fetchResult else {
-                    // 304 Not Modified — clear error state and resolve icon if needed
+                    // 304 Not Modified — clear error state (cosmetic on failure,
+                    // matching the 200 path below) and resolve icon if needed.
                     do {
                         try persistence.updateFeedError(feed, error: nil)
                     } catch {
-                        failureCount += 1
-                        Self.logger.error("Failed to clear error state for '\(feed.title, privacy: .public)': \(error, privacy: .public) — feed will appear to have an error on next launch despite successful 304 response")
+                        // Cosmetic — does not increment failureCount. Matches
+                        // the 200-path treatment at "Always clear error state
+                        // on successful fetch" below. Both paths describe the
+                        // same failure mode (cannot clear a stale error flag)
+                        // with the same self-healing consequence.
+                        Self.logger.warning("Failed to clear error state for '\(feed.title, privacy: .public)' on 304: \(error, privacy: .public) — feed may show stale error indicator until next successful clear")
                     }
                     if isDownloadAllowed {
-                        Task {
+                        let iconTask = Task {
                             await self.resolveAndCacheIconIfNeeded(
                                 for: feed,
                                 siteURL: Self.siteURL(from: feed.feedURL),
                                 feedImageURL: feed.iconURL
                             )
                         }
+                        pendingIconTasks.append(iconTask)
                     } else {
                         Self.logger.debug("Skipping icon resolution for '\(feed.title, privacy: .public)' on 304 — background downloads not allowed")
                     }
@@ -227,9 +315,12 @@ final class FeedRefreshService {
                     Self.logger.warning("Failed to clear error state for '\(feed.title, privacy: .public)': \(error, privacy: .public) — feed may show stale error indicator")
                 }
 
-                // Only upsert failure increments failureCount — it is the one
-                // operation that loses user-visible data (new articles). Metadata
-                // and cache header failures are cosmetic or self-healing.
+                // failureCount is incremented in exactly three places in this
+                // function: (1) upsertArticles failure below — the one
+                // data-losing operation; (2) the explicit .failure arm for
+                // fetch failures; (3) never for cosmetic persistence failures
+                // (metadata, error-clear, cache headers), which are logged as
+                // warnings and allowed to self-heal on the next refresh.
                 var upsertSucceeded = false
                 do {
                     try persistence.upsertArticles(fetchResult.feed.articles, for: feed)
@@ -251,13 +342,14 @@ final class FeedRefreshService {
                 }
 
                 if isDownloadAllowed {
-                    Task {
+                    let iconTask = Task {
                         await self.resolveAndCacheIconIfNeeded(
                             for: feed,
                             siteURL: fetchResult.feed.link,
                             feedImageURL: fetchResult.feed.imageURL
                         )
                     }
+                    pendingIconTasks.append(iconTask)
                 } else {
                     Self.logger.debug("Skipping icon resolution for '\(feed.title, privacy: .public)' — background downloads not allowed")
                 }
@@ -271,12 +363,22 @@ final class FeedRefreshService {
             }
         }
 
+        if Task.isCancelled {
+            Self.logger.warning("performRefresh() cancelled before save")
+            return .cancelled(totalFeeds: feeds.count)
+        }
+
         var saveDidFail = false
         do {
             try persistence.save()
         } catch {
             saveDidFail = true
             Self.logger.error("Failed to save after refresh: \(error, privacy: .public)")
+        }
+
+        if Task.isCancelled {
+            Self.logger.warning("performRefresh() cancelled before retention cleanup")
+            return .cancelled(totalFeeds: feeds.count)
         }
 
         // Enforce article retention limit after save so the count reflects the
@@ -294,7 +396,10 @@ final class FeedRefreshService {
 
         Self.logger.notice("Refresh complete: \(feeds.count - failureCount, privacy: .public) updated, \(failureCount, privacy: .public) failed")
 
-        // Cancel any in-flight prefetch from a previous refresh cycle before starting a new one
+        // Cancel any in-flight prefetch from a previous refresh cycle before
+        // starting a new one. Safe because the `isRefreshing` guard coalesces
+        // concurrent `refreshAllFeeds()` calls, so this cancel only runs once
+        // the previous cycle has fully completed its result processing.
         thumbnailPrefetchTask?.cancel()
         if isDownloadAllowed {
             thumbnailPrefetchTask = Task(priority: .utility) {
@@ -305,10 +410,12 @@ final class FeedRefreshService {
         }
 
         return .completed(
-            totalFeeds: feeds.count,
-            failureCount: failureCount,
-            saveDidFail: saveDidFail,
-            retentionCleanupFailed: retentionCleanupFailed
+            Outcome.Summary(
+                totalFeeds: feeds.count,
+                failureCount: failureCount,
+                saveDidFail: saveDidFail,
+                retentionCleanupFailed: retentionCleanupFailed
+            )
         )
     }
 
