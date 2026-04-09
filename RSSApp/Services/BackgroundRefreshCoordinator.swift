@@ -29,13 +29,23 @@ final class BackgroundRefreshCoordinator: Sendable {
     /// `setTaskCompleted(success:)` is called exactly once with a value that
     /// reflects the actual refresh outcome (not just cancellation).
     ///
+    /// WiFi enforcement is two-layered:
+    /// - `BGProcessingTaskRequest.requiresNetworkConnectivity` guarantees *some*
+    ///   network is available, so iOS may suppress cellular BGTask launches
+    ///   entirely when no network is reachable. However, it does **not** constrain
+    ///   the task to WiFi — iOS will fire the task on cellular if that satisfies
+    ///   `requiresNetworkConnectivity`.
+    /// - The coordinator's WiFi gate (below) handles the residual case where iOS
+    ///   fires the task on cellular (which satisfies `requiresNetworkConnectivity`)
+    ///   but the user's `BackgroundRefreshSettings.networkRequirement` demands WiFi.
+    ///
     /// If `BackgroundRefreshSettings.networkRequirement` is `.wifiOnly` and the
-    /// current network path is not using WiFi (or is constrained / unavailable),
-    /// the task is completed immediately with `success: true` and the refresh
-    /// loop is skipped. Reporting success (not failure) here is intentional —
-    /// skipping on cellular honors the user's preference without signalling iOS
-    /// that this feature is broken; iOS should keep scheduling at the configured
-    /// cadence rather than backing off.
+    /// current network path is not using WiFi (or is constrained, unavailable, or
+    /// not yet resolved), the task is completed immediately with `success: true`
+    /// and the refresh loop is skipped. Reporting success (not failure) here is
+    /// intentional — skipping on cellular honors the user's preference without
+    /// signalling iOS that this feature is broken; iOS should keep scheduling at
+    /// the configured cadence rather than backing off.
     func handle(_ task: BGTask) {
         Self.logger.notice("BGTask launched: \(task.description, privacy: .public)")
 
@@ -58,7 +68,15 @@ final class BackgroundRefreshCoordinator: Sendable {
         // only guarantees that *some* network is available — it does not
         // constrain the task to WiFi. The coordinator therefore checks the
         // current NWPath via `NetworkMonitorService.currentPathIsWiFi()` and
-        // short-circuits here when the path is cellular or constrained.
+        // short-circuits here when the path is cellular, constrained, or not
+        // yet resolved.
+        // RATIONALE: The two reads below — `BackgroundRefreshSettings.networkRequirement`
+        // (UserDefaults) and `networkMonitor.currentPathIsWiFi()` (NSLock-guarded
+        // NWPath state) — are not atomic. A window exists where the preference flips
+        // or the path changes between the two reads. The consequence is at most one
+        // spurious skip or one spurious fetch, which self-corrects on the next BGTask
+        // window. Locking across UserDefaults and NWPathMonitor's internal state is
+        // disproportionate to this risk and would complicate the Sendable boundary.
         if BackgroundRefreshSettings.networkRequirement == .wifiOnly && !networkMonitor.currentPathIsWiFi() {
             Self.logger.notice("BGTask skipped — WiFi-only preference set but current path is not WiFi; completing with success=true to preserve schedule cadence")
             task.setTaskCompleted(success: true)
@@ -116,6 +134,10 @@ final class BackgroundRefreshCoordinator: Sendable {
     ///   and no feed fetches failed. Partial success (some feeds refreshed,
     ///   some failed) is reported as failure so iOS backs off — the next
     ///   refresh will retry and, if the issue is transient, rapidly recover.
+    ///   `summary.retentionCleanupFailed` is intentionally excluded from this
+    ///   calculation: retention cleanup is cosmetic (old articles remain visible
+    ///   but are still correct) and self-heals on the next successful refresh,
+    ///   so backing off the schedule for it would be disproportionate.
     static func isSuccess(outcome: FeedRefreshService.Outcome) -> Bool {
         switch outcome {
         case .skipped:

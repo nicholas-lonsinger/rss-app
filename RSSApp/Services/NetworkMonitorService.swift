@@ -25,9 +25,9 @@ protocol NetworkMonitoring: Sendable {
     /// `BackgroundRefreshSettings.networkRequirement == .wifiOnly` gate at
     /// runtime, independent of the image-download WiFi preference.
     ///
-    /// Returns `false` when no path is available yet (conservative default
-    /// matches the WiFi-only intent: skip rather than fetch over an unknown
-    /// interface).
+    /// Returns `false` when no path is available yet or when the path is unsatisfied
+    /// (conservative default matches the WiFi-only intent: skip rather than fetch
+    /// over an unknown interface).
     func currentPathIsWiFi() -> Bool
 }
 
@@ -188,8 +188,10 @@ final class NetworkMonitorService: NetworkMonitoring, @unchecked Sendable {
     func currentPathIsWiFi() -> Bool {
         guard let path = currentSnapshot() else {
             // No path yet — conservatively deny. A WiFi-only BG refresh skips
-            // rather than risks fetching over an unknown interface.
-            Self.logger.debug("currentPathIsWiFi() — no path yet, returning false")
+            // rather than risks fetching over an unknown interface. This can
+            // happen when a BGTask fires before NWPathMonitor delivers its
+            // first update.
+            Self.logger.warning("currentPathIsWiFi() — no path yet (BGTask may have fired before NWPathMonitor delivered its first update), returning false (conservative deny)")
             return false
         }
         guard path.status == .satisfied else {
