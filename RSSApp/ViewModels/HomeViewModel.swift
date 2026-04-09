@@ -57,8 +57,8 @@ final class HomeViewModel {
     private(set) var hasMoreSavedArticles = true
 
     // RATIONALE: Unlike FeedViewModel.sortAscending which auto-reloads on set,
-    // HomeViewModel does not auto-reload because it serves three independent views
-    // (AllArticlesView, UnreadArticlesView, and SavedArticlesView) that each need
+    // HomeViewModel does not auto-reload because it serves three independent adapters
+    // (AllArticlesSource, UnreadArticlesSource, and SavedArticlesSource) that each need
     // to reload their own specific list. Callers toggle the property then call the
     // appropriate reload method (loadAllArticles, loadUnreadArticles, or
     // loadSavedArticles) for their view.

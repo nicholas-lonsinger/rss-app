@@ -19,7 +19,7 @@ struct ArticleListSourceTests {
 
     // MARK: - FeedArticleSource
 
-    /// Guards the B2 gating contract: `FeedArticleSource.markAsRead` must
+    /// Guards the reader-push gating contract: `FeedArticleSource.markAsRead` must
     /// forward the underlying `FeedViewModel.markAsRead` Bool return so the
     /// shared view can decide whether to push the reader. Prior to this
     /// refactor the per-feed view swallowed the result and always pushed.
@@ -89,9 +89,9 @@ struct ArticleListSourceTests {
         #expect(article.isRead == true)
     }
 
-    // MARK: - Cross-feed initialLoad triggers refresh (A3)
+    // MARK: - Cross-feed initialLoad triggers refresh
 
-    /// Core A3 invariant: entering a cross-feed list should trigger a network
+    /// Core invariant: entering a cross-feed list should trigger a network
     /// refresh of all feeds — cache-first + refresh + reload. Prior to this
     /// refactor the cross-feed views only did a local SwiftData query on
     /// entry, leaving stale data until the user manually pulled to refresh.
@@ -197,7 +197,7 @@ struct ArticleListSourceTests {
         #expect(saved.isSaved == false)
     }
 
-    /// Snapshot stability for mark-all-as-read (B1). The Unread list must not
+    /// Snapshot stability for mark-all-as-read. The Unread list must not
     /// empty out when the user taps Mark All as Read; it must stay populated
     /// with the (now read-styled) rows until an explicit refresh. The
     /// `HomeViewModel`-level test already pins this at the view model layer;
@@ -240,7 +240,7 @@ struct ArticleListSourceTests {
 
     // MARK: - Refresh throttling on list entry
 
-    /// Follow-up to A3: rapid navigation across sibling cross-feed lists (or
+    /// Follow-up to cross-feed refresh: rapid navigation across sibling cross-feed lists (or
     /// re-entry within the throttle window) must NOT stack redundant network
     /// refreshes. Seeds the shared `FeedRefreshService.lastRefreshCompletedKey`
     /// UserDefaults entry to "just now" and then asserts `initialLoad()` does

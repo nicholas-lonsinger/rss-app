@@ -19,7 +19,8 @@ final class FeedViewModel {
     var errorMessage: String?
     private(set) var hasMoreArticles = true
 
-    /// When `true`, only unread articles are shown. Only used in `ArticleListView` (per-feed).
+    /// When `true`, only unread articles are shown. Toggled via
+    /// `FeedArticleSource.showUnreadOnly` in `ArticleListScreen`.
     var showUnreadOnly = false {
         didSet {
             guard oldValue != showUnreadOnly else { return }

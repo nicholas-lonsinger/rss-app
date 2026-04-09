@@ -23,10 +23,7 @@ final class FeedArticleSource: ArticleListSource {
     var articles: [PersistentArticle] { viewModel.articles }
     var hasMore: Bool { viewModel.hasMoreArticles }
     var isLoading: Bool { viewModel.isLoading }
-    var errorMessage: String? {
-        get { viewModel.errorMessage }
-        set { viewModel.errorMessage = newValue }
-    }
+    var errorMessage: String? { viewModel.errorMessage }
 
     // MARK: Display
 
@@ -124,19 +121,7 @@ final class AllArticlesSource: ArticleListSource {
     // instant work is the network refresh during `initialLoad`, so we
     // surface the shared refresh guard as the source's loading state.
     var isLoading: Bool { homeViewModel.isRefreshing }
-    var errorMessage: String? {
-        get { homeViewModel.errorMessage }
-        set {
-            if newValue == nil {
-                homeViewModel.clearError()
-            }
-            // RATIONALE: HomeViewModel.errorMessage is `private(set)`, so the
-            // adapter cannot assign a non-nil value from the outside. The
-            // shared view only ever clears the error, never sets a new one,
-            // so this is sufficient — and matches the existing contract of
-            // `ArticleListSource.errorMessage`.
-        }
-    }
+    var errorMessage: String? { homeViewModel.errorMessage }
 
     var title: String { "All Articles" }
     var emptyState: EmptyStateContent {
@@ -214,6 +199,10 @@ final class AllArticlesSource: ArticleListSource {
         homeViewModel.markAllAsRead()
     }
 
+    func onDisappear() {
+        homeViewModel.loadUnreadCount()
+    }
+
     func clearError() {
         homeViewModel.clearError()
     }
@@ -238,10 +227,7 @@ final class UnreadArticlesSource: ArticleListSource {
     var articles: [PersistentArticle] { homeViewModel.unreadArticlesList }
     var hasMore: Bool { homeViewModel.hasMoreUnreadArticles }
     var isLoading: Bool { homeViewModel.isRefreshing }
-    var errorMessage: String? {
-        get { homeViewModel.errorMessage }
-        set { if newValue == nil { homeViewModel.clearError() } }
-    }
+    var errorMessage: String? { homeViewModel.errorMessage }
 
     var title: String { "Unread Articles" }
     var emptyState: EmptyStateContent {
@@ -306,6 +292,10 @@ final class UnreadArticlesSource: ArticleListSource {
         homeViewModel.markAllAsRead()
     }
 
+    func onDisappear() {
+        homeViewModel.loadUnreadCount()
+    }
+
     func clearError() {
         homeViewModel.clearError()
     }
@@ -315,7 +305,7 @@ final class UnreadArticlesSource: ArticleListSource {
 
 /// Cross-feed source filtered to saved / bookmarked articles. Honors the
 /// same global `sortAscending` preference as the other cross-feed lists —
-/// sort key is `publishedDate`, not `savedDate` (A2).
+/// sort key is `sortDate`, not `savedDate`, for cross-feed consistency.
 @MainActor
 @Observable
 final class SavedArticlesSource: ArticleListSource {
@@ -329,10 +319,7 @@ final class SavedArticlesSource: ArticleListSource {
     var articles: [PersistentArticle] { homeViewModel.savedArticlesList }
     var hasMore: Bool { homeViewModel.hasMoreSavedArticles }
     var isLoading: Bool { homeViewModel.isRefreshing }
-    var errorMessage: String? {
-        get { homeViewModel.errorMessage }
-        set { if newValue == nil { homeViewModel.clearError() } }
-    }
+    var errorMessage: String? { homeViewModel.errorMessage }
 
     var title: String { "Saved Articles" }
     var emptyState: EmptyStateContent {
@@ -402,6 +389,10 @@ final class SavedArticlesSource: ArticleListSource {
     /// Saved list, which was not what the affordance implies.
     func markAllAsRead() {
         homeViewModel.markAllSavedArticlesRead()
+    }
+
+    func onDisappear() {
+        homeViewModel.loadSavedCount()
     }
 
     func clearError() {

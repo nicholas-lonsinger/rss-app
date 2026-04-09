@@ -206,7 +206,7 @@ final class PersistentArticle {
     // MARK: - Display Helpers
 
     /// Stable display value for the article's original publication time, consumed by
-    /// `ArticleRowView`'s metadata grid (see `RSSApp/Views/ArticleRowView.swift`).
+    /// `ArticleRowView`'s metadata footer (see `RSSApp/Views/ArticleRowView.swift`).
     ///
     /// Distinct from `sortDate` because `FeedPersistenceService.upsertArticles`
     /// mutates `sortDate` to the current time when content-update detection fires on

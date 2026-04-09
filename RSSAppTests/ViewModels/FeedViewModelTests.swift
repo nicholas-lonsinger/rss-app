@@ -370,7 +370,7 @@ struct FeedViewModelTests {
     }
 
     /// Regression test for #209 (per-feed surface). When the user opens an article
-    /// from `ArticleListView` with "Show Unread Only" active, reads it (and additional
+    /// from `ArticleListScreen` (via `FeedArticleSource`) with "Show Unread Only" active, reads it (and additional
     /// articles via the reader's previous/next navigation), then returns to the list,
     /// the now-read articles must remain visible until the user explicitly leaves
     /// and returns or pulls to refresh. This covers the `FeedViewModel` half of

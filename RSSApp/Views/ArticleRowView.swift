@@ -1,4 +1,5 @@
 import SwiftUI
+import os
 
 /// Article row used by every list view in the app. Always shows the article's
 /// source feed (icon + title) on the bottom line, regardless of whether the
@@ -7,6 +8,9 @@ import SwiftUI
 /// self-describing — removing per-list row variants and keeping behavior
 /// identical across entry points.
 struct ArticleRowView: View {
+
+    private static let logger = Logger(category: "ArticleRowView")
+
     let article: PersistentArticle
     let thumbnailService: ArticleThumbnailCaching
     let iconService: FeedIconResolving
@@ -101,9 +105,10 @@ struct ArticleRowView: View {
                 Text(feed.title)
             }
         } else {
-            // Placeholder for articles without a feed relationship (should
-            // not happen in practice). `Color.clear` collapses to zero width
-            // so the rest of the row shifts left cleanly.
+            let _ = {
+                Self.logger.fault("Article '\(self.article.articleID, privacy: .public)' has nil feed relationship")
+                assertionFailure("Article '\(self.article.articleID)' has nil feed relationship")
+            }()
             Color.clear
         }
     }

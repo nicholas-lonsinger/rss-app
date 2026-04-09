@@ -27,8 +27,9 @@ struct EmptyStateContent: Sendable, Equatable {
 /// `toggleSaved`, `markAllAsRead`) update row visuals through observation
 /// propagation but never change list composition or order. Only
 /// `initialLoad`, `refresh`, and `reload` re-query the underlying store;
-/// toggling `sortAscending` or `showUnreadOnly` is handled by the adapter's
-/// backing view model (which re-queries its own state).
+/// toggling `sortAscending` or `showUnreadOnly` triggers a re-query — either
+/// via the backing view model's `didSet` (`FeedViewModel`) or via the
+/// adapter's setter calling the appropriate reload method (cross-feed sources).
 ///
 /// Conforming types should be `@MainActor @Observable` classes so that
 /// SwiftUI's body re-invocation picks up changes to any property the view
@@ -57,7 +58,7 @@ protocol ArticleListSource: AnyObject, Observable {
 
     /// Current error message, if any. Cleared by `clearError()` or by a
     /// successful subsequent `initialLoad` / `refresh` / `reload`.
-    var errorMessage: String? { get set }
+    var errorMessage: String? { get }
 
     // MARK: - Display configuration
 
@@ -79,6 +80,11 @@ protocol ArticleListSource: AnyObject, Observable {
 
     // MARK: - Filter/sort (explicit list-level actions — DO re-query)
 
+    /// Sort order for the article list. Conformers MUST trigger a reload of
+    /// `articles` within the setter (either via the backing view model's
+    /// `didSet` or by calling the appropriate load method explicitly) so the
+    /// list reflects the new order immediately — `ArticleListScreen` does
+    /// not call `reload()` after toggling this property.
     var sortAscending: Bool { get set }
     var showUnreadOnly: Bool { get set }
 
@@ -101,8 +107,9 @@ protocol ArticleListSource: AnyObject, Observable {
     /// `initialLoad` but without the first cache-render step.
     func refresh() async
 
-    /// Called on non-reader re-entry (e.g. after toggling sort or filter).
-    /// Synchronous local re-query only — network work belongs to `refresh`.
+    /// Called on non-reader re-entry (e.g. navigating back to this view
+    /// from a parent screen). Synchronous local re-query only — network
+    /// work belongs to `refresh()`.
     func reload()
 
     // MARK: - Pagination (extends snapshot, doesn't re-query)
@@ -127,7 +134,18 @@ protocol ArticleListSource: AnyObject, Observable {
     func toggleSaved(_ article: PersistentArticle)
     func markAllAsRead()
 
+    // MARK: - Disappear
+
+    /// Called when the list view disappears. Cross-feed sources use this to
+    /// refresh Home badge counts (unread / saved) so the Home screen
+    /// reflects any mutations made during the session. Default is a no-op.
+    func onDisappear()
+
     // MARK: - Error dismissal
 
     func clearError()
+}
+
+extension ArticleListSource {
+    func onDisappear() {}
 }

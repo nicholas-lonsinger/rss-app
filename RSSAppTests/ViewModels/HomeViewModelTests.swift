@@ -1045,6 +1045,43 @@ struct HomeViewModelTests {
         UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
     }
 
+    @Test("loadSavedArticles respects ascending sort order")
+    @MainActor
+    func loadSavedArticlesAscending() {
+        UserDefaults.standard.set(true, forKey: FeedViewModel.sortAscendingKey)
+        let feed = TestFixtures.makePersistentFeed()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+
+        let article1 = TestFixtures.makePersistentArticle(
+            articleID: "s1",
+            publishedDate: Date(timeIntervalSince1970: 1_000_000),
+            isSaved: true,
+            savedDate: Date(timeIntervalSince1970: 2_000_000)
+        )
+        article1.feed = feed
+        let article2 = TestFixtures.makePersistentArticle(
+            articleID: "s2",
+            publishedDate: Date(timeIntervalSince1970: 2_000_000),
+            isSaved: true,
+            savedDate: Date(timeIntervalSince1970: 1_000_000)
+        )
+        article2.feed = feed
+        mockPersistence.articlesByFeedID[feed.id] = [article1, article2]
+
+        let viewModel = HomeViewModel(persistence: mockPersistence)
+        viewModel.loadSavedArticles()
+
+        // Ascending: oldest sortDate first. savedDate is deliberately inverted
+        // relative to publishedDate so the test validates sorting by sortDate
+        // (derived from publishedDate), not savedDate.
+        #expect(viewModel.savedArticlesList.first?.articleID == "s1")
+        #expect(viewModel.savedArticlesList.last?.articleID == "s2")
+
+        // Clean up
+        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
+    }
+
     // MARK: - shouldRefreshOnEntry throttle
 
     @Test("shouldRefreshOnEntry returns true when no refresh has ever completed")
@@ -1909,8 +1946,8 @@ struct HomeViewModelTests {
     }
 
     /// Regression guard for #256. Mirrors the all-articles variant for the unread pathway.
-    /// `ArticleReaderView` is presented from `UnreadArticlesView` and observes
-    /// `articleID` for the same load-bearing reasons.
+    /// `ArticleReaderView` is presented from `ArticleListScreen` (via `UnreadArticlesSource`)
+    /// and observes `articleID` for the same load-bearing reasons.
     @Test("loadUnreadArticles preserves articleID prefix on reload")
     @MainActor
     func loadUnreadArticlesPreservesArticleIDPrefixOnReload() {
@@ -1985,12 +2022,13 @@ struct HomeViewModelTests {
     }
 
     /// Regression guard for #256. Mirrors the all-articles variant for the saved-articles pathway.
-    /// `ArticleReaderView` is presented from `SavedArticlesView` and observes
-    /// `articleID` for the same load-bearing reasons. Saved articles are always sorted
-    /// by `savedDate` descending (no ascending sort option), so no UserDefaults cleanup needed.
+    /// `ArticleReaderView` is presented from `ArticleListScreen` (via `SavedArticlesSource`)
+    /// and observes `articleID` for the same load-bearing reasons.
     @Test("loadSavedArticles preserves articleID prefix on reload")
     @MainActor
     func loadSavedArticlesPreservesArticleIDPrefixOnReload() {
+        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
+        defer { UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey) }
         let feed = TestFixtures.makePersistentFeed()
         let mockPersistence = MockFeedPersistenceService()
         mockPersistence.feeds = [feed]

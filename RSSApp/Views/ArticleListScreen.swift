@@ -1,5 +1,4 @@
 import SwiftUI
-import os
 
 /// Single shared implementation of every article list in the app. Generic
 /// over `ArticleListSource` so the per-feed, All Articles, Unread Articles,
@@ -29,8 +28,6 @@ struct ArticleListScreen<Source: ArticleListSource>: View {
         self.persistence = persistence
         self.thumbnailService = thumbnailService
     }
-
-    private static var logger: Logger { Logger(category: "ArticleListScreen") }
 
     @State private var selectedArticleIndex: Int?
     @State private var showMarkAllReadConfirmation = false
@@ -116,6 +113,9 @@ struct ArticleListScreen<Source: ArticleListSource>: View {
                 return
             }
             source.reload()
+        }
+        .onDisappear {
+            source.onDisappear()
         }
     }
 
