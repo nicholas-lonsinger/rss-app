@@ -116,6 +116,27 @@ protocol FeedPersisting: Sendable {
     /// - Parameter articleIDs: The set of article IDs to delete.
     func deleteArticles(withIDs articleIDs: Set<String>) throws
 
+    // MARK: Group operations
+
+    /// Returns all feed groups, sorted by `sortOrder`.
+    func allGroups() throws -> [PersistentFeedGroup]
+    func addGroup(_ group: PersistentFeedGroup) throws
+    func deleteGroup(_ group: PersistentFeedGroup) throws
+    func renameGroup(_ group: PersistentFeedGroup, to name: String) throws
+
+    /// Adds a feed to a group. No-op if the membership already exists.
+    func addFeed(_ feed: PersistentFeed, to group: PersistentFeedGroup) throws
+    func removeFeed(_ feed: PersistentFeed, from group: PersistentFeedGroup) throws
+    func feeds(in group: PersistentFeedGroup) throws -> [PersistentFeed]
+    func groups(for feed: PersistentFeed) throws -> [PersistentFeedGroup]
+
+    /// Returns a page of articles from all feeds in the group, sorted by `sortDate`.
+    func articles(in group: PersistentFeedGroup, offset: Int, limit: Int, ascending: Bool) throws -> [PersistentArticle]
+    /// Returns the total number of unread articles across all feeds in the group.
+    func unreadCount(in group: PersistentFeedGroup) throws -> Int
+    /// Marks all articles in all feeds belonging to the group as read.
+    func markAllArticlesRead(in group: PersistentFeedGroup) throws
+
     // MARK: Persistence
 
     func save() throws
@@ -806,5 +827,145 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
         } else {
             Self.logger.notice("Deleted \(totalDeleted, privacy: .public) articles during cleanup")
         }
+    }
+
+    // MARK: - Group Operations
+
+    func allGroups() throws -> [PersistentFeedGroup] {
+        let descriptor = FetchDescriptor<PersistentFeedGroup>(
+            sortBy: [SortDescriptor(\.sortOrder), SortDescriptor(\.createdDate)]
+        )
+        let groups = try modelContext.fetch(descriptor)
+        Self.logger.debug("Fetched \(groups.count, privacy: .public) groups")
+        return groups
+    }
+
+    func addGroup(_ group: PersistentFeedGroup) throws {
+        modelContext.insert(group)
+        try modelContext.save()
+        Self.logger.notice("Added group '\(group.name, privacy: .public)'")
+    }
+
+    func deleteGroup(_ group: PersistentFeedGroup) throws {
+        let name = group.name
+        modelContext.delete(group)
+        try modelContext.save()
+        Self.logger.notice("Deleted group '\(name, privacy: .public)'")
+    }
+
+    func renameGroup(_ group: PersistentFeedGroup, to name: String) throws {
+        let previousName = group.name
+        group.name = name
+        try modelContext.save()
+        Self.logger.notice("Renamed group '\(previousName, privacy: .public)' to '\(name, privacy: .public)'")
+    }
+
+    func addFeed(_ feed: PersistentFeed, to group: PersistentFeedGroup) throws {
+        // Application-layer unique constraint: skip if membership already exists.
+        let feedID = feed.persistentModelID
+        let groupID = group.persistentModelID
+        let descriptor = FetchDescriptor<PersistentFeedGroupMembership>(
+            predicate: #Predicate {
+                $0.feed?.persistentModelID == feedID
+                    && $0.group?.persistentModelID == groupID
+            }
+        )
+        let existingCount = try modelContext.fetchCount(descriptor)
+        guard existingCount == 0 else {
+            Self.logger.debug("Feed '\(feed.title, privacy: .public)' already in group '\(group.name, privacy: .public)' — skipping")
+            return
+        }
+        let membership = PersistentFeedGroupMembership(feed: feed, group: group)
+        modelContext.insert(membership)
+        try modelContext.save()
+        Self.logger.notice("Added feed '\(feed.title, privacy: .public)' to group '\(group.name, privacy: .public)'")
+    }
+
+    func removeFeed(_ feed: PersistentFeed, from group: PersistentFeedGroup) throws {
+        let feedID = feed.persistentModelID
+        let groupID = group.persistentModelID
+        let descriptor = FetchDescriptor<PersistentFeedGroupMembership>(
+            predicate: #Predicate {
+                $0.feed?.persistentModelID == feedID
+                    && $0.group?.persistentModelID == groupID
+            }
+        )
+        let memberships = try modelContext.fetch(descriptor)
+        for membership in memberships {
+            modelContext.delete(membership)
+        }
+        try modelContext.save()
+        Self.logger.notice("Removed feed '\(feed.title, privacy: .public)' from group '\(group.name, privacy: .public)'")
+    }
+
+    func feeds(in group: PersistentFeedGroup) throws -> [PersistentFeed] {
+        let feeds = group.memberships.compactMap(\.feed).sorted { $0.addedDate < $1.addedDate }
+        Self.logger.debug("Group '\(group.name, privacy: .public)' contains \(feeds.count, privacy: .public) feeds")
+        return feeds
+    }
+
+    func groups(for feed: PersistentFeed) throws -> [PersistentFeedGroup] {
+        let groups = feed.groupMemberships.compactMap(\.group).sorted { $0.sortOrder < $1.sortOrder }
+        Self.logger.debug("Feed '\(feed.title, privacy: .public)' belongs to \(groups.count, privacy: .public) groups")
+        return groups
+    }
+
+    // RATIONALE: SwiftData's #Predicate does not support `array.contains(keypath)` on
+    // captured PersistentIdentifier arrays. Instead we fetch a bounded window per feed
+    // and merge in-memory. For typical group sizes (2–20 feeds) this is efficient and
+    // correct. The per-feed cap of `offset + limit` ensures we fetch at most enough
+    // rows to fill the requested page after merge-sorting.
+    func articles(in group: PersistentFeedGroup, offset: Int, limit: Int, ascending: Bool = false) throws -> [PersistentArticle] {
+        let feeds = group.memberships.compactMap(\.feed)
+        guard !feeds.isEmpty else { return [] }
+
+        let sortOrder: SortOrder = ascending ? .forward : .reverse
+        let perFeedCap = offset + limit
+        var merged: [PersistentArticle] = []
+        merged.reserveCapacity(perFeedCap * feeds.count)
+
+        for feed in feeds {
+            let feedID = feed.persistentModelID
+            var descriptor = FetchDescriptor<PersistentArticle>(
+                predicate: #Predicate { $0.feed?.persistentModelID == feedID },
+                sortBy: [
+                    SortDescriptor(\.sortDate, order: sortOrder),
+                    SortDescriptor(\.articleID, order: .forward)
+                ]
+            )
+            descriptor.fetchLimit = perFeedCap
+            let feedArticles = try modelContext.fetch(descriptor)
+            merged.append(contentsOf: feedArticles)
+        }
+
+        // Re-sort the merged set to interleave articles from different feeds correctly.
+        if ascending {
+            merged.sort { ($0.sortDate, $0.articleID) < ($1.sortDate, $1.articleID) }
+        } else {
+            merged.sort { ($0.sortDate, $0.articleID) > ($1.sortDate, $1.articleID) }
+        }
+
+        let start = min(offset, merged.count)
+        let end = min(start + limit, merged.count)
+        let page = Array(merged[start..<end])
+        Self.logger.debug("Fetched \(page.count, privacy: .public) articles in group '\(group.name, privacy: .public)' (offset: \(offset, privacy: .public), limit: \(limit, privacy: .public), ascending: \(ascending, privacy: .public))")
+        return page
+    }
+
+    func unreadCount(in group: PersistentFeedGroup) throws -> Int {
+        let feeds = group.memberships.compactMap(\.feed)
+        var total = 0
+        for feed in feeds {
+            total += try unreadCount(for: feed)
+        }
+        return total
+    }
+
+    func markAllArticlesRead(in group: PersistentFeedGroup) throws {
+        let feeds = group.memberships.compactMap(\.feed)
+        for feed in feeds {
+            try markAllArticlesRead(for: feed)
+        }
+        Self.logger.notice("Marked all articles as read in group '\(group.name, privacy: .public)' (\(feeds.count, privacy: .public) feeds)")
     }
 }

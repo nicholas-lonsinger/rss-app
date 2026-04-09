@@ -19,6 +19,8 @@ struct RSSAppApp: App {
             PersistentFeed.self,
             PersistentArticle.self,
             PersistentArticleContent.self,
+            PersistentFeedGroup.self,
+            PersistentFeedGroupMembership.self,
         ])
         let configuration: ModelConfiguration
         if isTestEnvironment {

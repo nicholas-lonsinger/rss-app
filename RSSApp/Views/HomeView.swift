@@ -1,5 +1,13 @@
 import SwiftUI
 
+/// Lightweight navigation value for user-created feed groups. Uses the
+/// group's UUID rather than the `PersistentFeedGroup` model directly to
+/// avoid SwiftData identity issues in `NavigationLink(value:)`.
+struct GroupDestination: Hashable, Identifiable {
+    let groupID: UUID
+    var id: UUID { groupID }
+}
+
 struct HomeView: View {
 
     @Environment(\.scenePhase) private var scenePhase
@@ -8,6 +16,14 @@ struct HomeView: View {
     private let persistence: FeedPersisting
     private let refreshService: FeedRefreshService
     private let feedIconService: FeedIconResolving
+
+    // MARK: - Group CRUD state
+
+    @State private var showAddFeed = false
+    @State private var showCreateGroup = false
+    @State private var newGroupName = ""
+    @State private var groupToEdit: PersistentFeedGroup?
+    @State private var groupToDelete: PersistentFeedGroup?
 
     init(
         persistence: FeedPersisting,
@@ -34,9 +50,48 @@ struct HomeView: View {
 
     var body: some View {
         NavigationStack {
-            List(HomeGroup.allCases) { group in
-                NavigationLink(value: group) {
-                    HomeRowView(group: group, badgeCount: badgeCount(for: group))
+            List {
+                Section {
+                    ForEach(HomeGroup.allCases) { group in
+                        NavigationLink(value: group) {
+                            HomeRowView(
+                                title: group.title,
+                                systemImage: group.systemImage,
+                                badgeCount: badgeCount(for: group)
+                            )
+                        }
+                    }
+                }
+
+                if !viewModel.groups.isEmpty {
+                    Section {
+                        ForEach(viewModel.groups, id: \.id) { group in
+                            NavigationLink(value: GroupDestination(groupID: group.id)) {
+                                HomeRowView(
+                                    title: group.name,
+                                    systemImage: "folder",
+                                    badgeCount: groupBadgeCount(for: group)
+                                )
+                            }
+                            .swipeActions(edge: .leading) {
+                                Button {
+                                    groupToEdit = group
+                                } label: {
+                                    Label("Edit", systemImage: "pencil")
+                                }
+                                .tint(.blue)
+                            }
+                            .swipeActions(edge: .trailing) {
+                                Button(role: .destructive) {
+                                    groupToDelete = group
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
+                            }
+                        }
+                    } header: {
+                        Text("Groups")
+                    }
                 }
             }
             .listStyle(.plain)
@@ -44,6 +99,7 @@ struct HomeView: View {
                 await viewModel.refreshAllFeeds()
                 viewModel.loadUnreadCount()
                 viewModel.loadSavedCount()
+                viewModel.loadGroupUnreadCounts()
             }
             .navigationTitle("Home")
             .navigationDestination(for: HomeGroup.self) { group in
@@ -73,6 +129,24 @@ struct HomeView: View {
                     )
                 }
             }
+            .navigationDestination(for: GroupDestination.self) { destination in
+                if let group = viewModel.groups.first(where: { $0.id == destination.groupID }) {
+                    ArticleListScreen(
+                        source: GroupArticleSource(
+                            group: group,
+                            persistence: persistence,
+                            homeViewModel: viewModel
+                        ),
+                        persistence: persistence
+                    )
+                } else {
+                    ContentUnavailableView {
+                        Label("Group Not Found", systemImage: "exclamationmark.triangle")
+                    } description: {
+                        Text("This group is no longer available.")
+                    }
+                }
+            }
             .navigationDestination(for: SettingsDestination.self) { destination in
                 switch destination {
                 case .settings:
@@ -85,6 +159,23 @@ struct HomeView: View {
             }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        Button {
+                            showAddFeed = true
+                        } label: {
+                            Label("Add Feed", systemImage: "plus")
+                        }
+                        Button {
+                            showCreateGroup = true
+                        } label: {
+                            Label("New Group", systemImage: "folder.badge.plus")
+                        }
+                    } label: {
+                        Image(systemName: "plus")
+                    }
+                    .accessibilityLabel("Add")
+                }
+                ToolbarItem(placement: .topBarTrailing) {
                     NavigationLink(value: SettingsDestination.settings) {
                         Image(systemName: "gear")
                     }
@@ -94,6 +185,7 @@ struct HomeView: View {
             .task {
                 viewModel.loadUnreadCount()
                 viewModel.loadSavedCount()
+                viewModel.loadGroups()
                 feedListViewModel.loadFeeds()
             }
             .alert("Error", isPresented: errorAlertBinding) {
@@ -101,10 +193,49 @@ struct HomeView: View {
             } message: {
                 Text(viewModel.errorMessage ?? "")
             }
+            .alert("New Group", isPresented: $showCreateGroup) {
+                TextField("Group name", text: $newGroupName)
+                Button("Create") {
+                    let name = newGroupName.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !name.isEmpty {
+                        viewModel.addGroup(name: name)
+                    }
+                    newGroupName = ""
+                }
+                Button("Cancel", role: .cancel) {
+                    newGroupName = ""
+                }
+            }
+            .alert(
+                "Delete Group?",
+                isPresented: Binding(
+                    get: { groupToDelete != nil },
+                    set: { if !$0 { groupToDelete = nil } }
+                ),
+                presenting: groupToDelete
+            ) { group in
+                Button("Delete", role: .destructive) {
+                    viewModel.deleteGroup(group)
+                }
+                Button("Cancel", role: .cancel) { }
+            } message: { group in
+                Text("\"\(group.name)\" will be deleted. Its feeds will not be removed.")
+            }
+            .sheet(isPresented: $showAddFeed, onDismiss: {
+                feedListViewModel.loadFeeds()
+            }) {
+                AddFeedView(persistence: persistence)
+            }
+            .sheet(item: $groupToEdit, onDismiss: {
+                viewModel.loadGroups()
+            }) { group in
+                EditGroupView(group: group, persistence: persistence)
+            }
             .onChange(of: scenePhase) { _, newPhase in
                 if newPhase == .active {
                     viewModel.loadUnreadCount()
                     viewModel.loadSavedCount()
+                    viewModel.loadGroupUnreadCounts()
                 }
             }
         }
@@ -129,18 +260,24 @@ struct HomeView: View {
             return nil
         }
     }
+
+    private func groupBadgeCount(for group: PersistentFeedGroup) -> Int? {
+        let count = viewModel.groupUnreadCounts[group.id] ?? 0
+        return count > 0 ? count : nil
+    }
 }
 
 // MARK: - Home Row
 
 private struct HomeRowView: View {
 
-    let group: HomeGroup
+    let title: String
+    let systemImage: String
     let badgeCount: Int?
 
     var body: some View {
         HStack {
-            Label(group.title, systemImage: group.systemImage)
+            Label(title, systemImage: systemImage)
                 .font(.headline)
 
             Spacer()

@@ -335,6 +335,97 @@ final class MockFeedPersistenceService: FeedPersisting {
         }
     }
 
+    // MARK: - Group Operations
+
+    var groups: [PersistentFeedGroup] = []
+    var memberships: [PersistentFeedGroupMembership] = []
+    var groupError: (any Error)?
+
+    func allGroups() throws -> [PersistentFeedGroup] {
+        if let error = groupError ?? errorToThrow { throw error }
+        return groups.sorted { $0.sortOrder < $1.sortOrder }
+    }
+
+    func addGroup(_ group: PersistentFeedGroup) throws {
+        if let error = groupError ?? errorToThrow { throw error }
+        groups.append(group)
+    }
+
+    func deleteGroup(_ group: PersistentFeedGroup) throws {
+        if let error = groupError ?? errorToThrow { throw error }
+        memberships.removeAll { $0.group?.id == group.id }
+        groups.removeAll { $0.id == group.id }
+    }
+
+    func renameGroup(_ group: PersistentFeedGroup, to name: String) throws {
+        if let error = groupError ?? errorToThrow { throw error }
+        group.name = name
+    }
+
+    func addFeed(_ feed: PersistentFeed, to group: PersistentFeedGroup) throws {
+        if let error = groupError ?? errorToThrow { throw error }
+        let alreadyExists = memberships.contains {
+            $0.feed?.id == feed.id && $0.group?.id == group.id
+        }
+        guard !alreadyExists else { return }
+        let membership = PersistentFeedGroupMembership(feed: feed, group: group)
+        memberships.append(membership)
+    }
+
+    func removeFeed(_ feed: PersistentFeed, from group: PersistentFeedGroup) throws {
+        if let error = groupError ?? errorToThrow { throw error }
+        memberships.removeAll { $0.feed?.id == feed.id && $0.group?.id == group.id }
+    }
+
+    func feeds(in group: PersistentFeedGroup) throws -> [PersistentFeed] {
+        if let error = groupError ?? errorToThrow { throw error }
+        return memberships
+            .filter { $0.group?.id == group.id }
+            .compactMap(\.feed)
+            .sorted { $0.addedDate < $1.addedDate }
+    }
+
+    func groups(for feed: PersistentFeed) throws -> [PersistentFeedGroup] {
+        if let error = groupError ?? errorToThrow { throw error }
+        return memberships
+            .filter { $0.feed?.id == feed.id }
+            .compactMap(\.group)
+            .sorted { $0.sortOrder < $1.sortOrder }
+    }
+
+    func articles(in group: PersistentFeedGroup, offset: Int, limit: Int, ascending: Bool = false) throws -> [PersistentArticle] {
+        if let error = groupError ?? errorToThrow { throw error }
+        let feedIDs = Set(memberships.filter { $0.group?.id == group.id }.compactMap { $0.feed?.id })
+        let all = articlesByFeedID
+            .filter { feedIDs.contains($0.key) }
+            .values.flatMap { $0 }
+            .sorted(by: ascending ? Self.sortAscending : Self.sortDescending)
+        return Array(all.dropFirst(offset).prefix(limit))
+    }
+
+    func unreadCount(in group: PersistentFeedGroup) throws -> Int {
+        if let error = groupError ?? errorToThrow { throw error }
+        let feedIDs = Set(memberships.filter { $0.group?.id == group.id }.compactMap { $0.feed?.id })
+        return articlesByFeedID
+            .filter { feedIDs.contains($0.key) }
+            .values.flatMap { $0 }
+            .filter { !$0.isRead }
+            .count
+    }
+
+    func markAllArticlesRead(in group: PersistentFeedGroup) throws {
+        if let error = groupError ?? errorToThrow { throw error }
+        let feedIDs = Set(memberships.filter { $0.group?.id == group.id }.compactMap { $0.feed?.id })
+        let now = Date()
+        for (feedID, articles) in articlesByFeedID where feedIDs.contains(feedID) {
+            for article in articles where !article.isRead {
+                article.isRead = true
+                if article.readDate == nil { article.readDate = now }
+                article.wasUpdated = false
+            }
+        }
+    }
+
     // MARK: - Persistence
 
     func save() throws {
