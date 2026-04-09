@@ -67,8 +67,14 @@ protocol FeedPersisting: Sendable {
 
     /// Toggles the saved state of an article. Sets `isSaved` and updates `savedDate`.
     func toggleArticleSaved(_ article: PersistentArticle) throws
-    /// Returns a page of saved articles across all feeds, sorted by saved date descending (most recently saved first).
-    func allSavedArticles(offset: Int, limit: Int) throws -> [PersistentArticle]
+    /// Returns a page of saved articles across all feeds, sorted by
+    /// `sortDate` with direction controlled by `ascending`. Uses the same
+    /// global sort order as `allArticles(offset:limit:ascending:)` and
+    /// `allUnreadArticles(offset:limit:ascending:)` so the three cross-feed
+    /// lists feel consistent — the Saved list honors the user's current
+    /// newest-first / oldest-first preference rather than hardcoding a
+    /// savedDate-descending order.
+    func allSavedArticles(offset: Int, limit: Int, ascending: Bool) throws -> [PersistentArticle]
     /// Returns the total number of saved articles across all feeds.
     func savedCount() throws -> Int
 
@@ -614,18 +620,19 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
         Self.logger.notice("Toggled saved state for '\(article.title, privacy: .public)' to \(newSaved ? "saved" : "unsaved", privacy: .public)")
     }
 
-    func allSavedArticles(offset: Int, limit: Int) throws -> [PersistentArticle] {
+    func allSavedArticles(offset: Int, limit: Int, ascending: Bool = false) throws -> [PersistentArticle] {
+        let sortOrder: SortOrder = ascending ? .forward : .reverse
         var descriptor = FetchDescriptor<PersistentArticle>(
             predicate: #Predicate { $0.isSaved },
             sortBy: [
-                SortDescriptor(\.savedDate, order: .reverse),
+                SortDescriptor(\.sortDate, order: sortOrder),
                 SortDescriptor(\.articleID, order: .forward)
             ]
         )
         descriptor.fetchOffset = offset
         descriptor.fetchLimit = limit
         let articles = try modelContext.fetch(descriptor)
-        Self.logger.debug("Fetched \(articles.count, privacy: .public) saved articles (offset: \(offset, privacy: .public), limit: \(limit, privacy: .public))")
+        Self.logger.debug("Fetched \(articles.count, privacy: .public) saved articles (offset: \(offset, privacy: .public), limit: \(limit, privacy: .public), ascending: \(ascending, privacy: .public))")
         return articles
     }
 

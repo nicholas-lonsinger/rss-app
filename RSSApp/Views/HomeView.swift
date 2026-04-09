@@ -49,11 +49,20 @@ struct HomeView: View {
             .navigationDestination(for: HomeGroup.self) { group in
                 switch group {
                 case .allArticles:
-                    AllArticlesView(persistence: persistence, homeViewModel: viewModel)
+                    ArticleListScreen(
+                        source: AllArticlesSource(homeViewModel: viewModel),
+                        persistence: persistence
+                    )
                 case .unreadArticles:
-                    UnreadArticlesView(persistence: persistence, homeViewModel: viewModel)
+                    ArticleListScreen(
+                        source: UnreadArticlesSource(homeViewModel: viewModel),
+                        persistence: persistence
+                    )
                 case .savedArticles:
-                    SavedArticlesView(persistence: persistence, homeViewModel: viewModel)
+                    ArticleListScreen(
+                        source: SavedArticlesSource(homeViewModel: viewModel),
+                        persistence: persistence
+                    )
                 case .allFeeds:
                     FeedListView(
                         persistence: persistence,

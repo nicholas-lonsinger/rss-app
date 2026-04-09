@@ -243,13 +243,16 @@ final class HomeViewModel {
     }
 
     /// Loads the next page of saved articles and appends to the existing list.
-    /// Saved articles are always sorted by `savedDate` descending (most recently saved first).
+    /// Sorted by `sortDate` with direction controlled by the global
+    /// `sortAscending` preference — same as `allArticles` / `allUnreadArticles`
+    /// so the saved list honors the user's newest-first / oldest-first choice.
     @discardableResult
     func loadMoreSavedArticles() -> LoadMoreResult {
+        let ascending = sortAscending
         return loadMorePage(
             into: &savedArticlesList,
             hasMore: &hasMoreSavedArticles,
-            fetch: { offset, limit in try self.persistence.allSavedArticles(offset: offset, limit: limit) },
+            fetch: { offset, limit in try self.persistence.allSavedArticles(offset: offset, limit: limit, ascending: ascending) },
             label: "saved articles"
         )
     }
@@ -331,21 +334,17 @@ final class HomeViewModel {
         }
     }
 
-    /// Removes an article from the local saved articles list without reloading from persistence.
-    /// Used after unsaving an article in SavedArticlesView to avoid resetting pagination and scroll position.
-    func removeFromSavedList(_ article: PersistentArticle) {
-        savedArticlesList.removeAll { $0.articleID == article.articleID }
-        Self.logger.debug("Removed article '\(article.articleID, privacy: .public)' from saved list (remaining: \(self.savedArticlesList.count, privacy: .public))")
-    }
-
-    /// Marks all articles across all feeds as read.
+    /// Marks all articles across all feeds as read. Does NOT re-query any of
+    /// the three lists — per the snapshot-stable rule, bulk mutations update
+    /// row visuals through `@Observable` propagation but leave list composition
+    /// and order intact. In the Unread Articles list specifically, the
+    /// just-read rows remain visible (now read-styled) until the user triggers
+    /// an explicit refresh. `loadUnreadCount()` is still called so the Home
+    /// badge and the sidebar count reflect the mutation immediately.
     func markAllAsRead() {
         do {
             try persistence.markAllArticlesRead()
             loadUnreadCount()
-            loadAllArticles()
-            unreadArticlesList = []
-            hasMoreUnreadArticles = false
             Self.logger.notice("Marked all articles as read across all feeds")
         } catch {
             errorMessage = "Unable to mark all articles as read."

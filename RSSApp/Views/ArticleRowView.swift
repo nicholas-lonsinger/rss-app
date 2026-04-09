@@ -1,8 +1,25 @@
 import SwiftUI
 
+/// Article row used by every list view in the app. Always shows the article's
+/// source feed (icon + title) on the second line, regardless of whether the
+/// containing list is cross-feed (All / Unread / Saved / Group / Label) or
+/// single-feed (a feed's own article list). Unified so every row is
+/// self-describing — removing per-list row variants and keeping behavior
+/// identical across entry points.
 struct ArticleRowView: View {
     let article: PersistentArticle
     let thumbnailService: ArticleThumbnailCaching
+    let iconService: FeedIconResolving
+
+    init(
+        article: PersistentArticle,
+        thumbnailService: ArticleThumbnailCaching,
+        iconService: FeedIconResolving = FeedIconService()
+    ) {
+        self.article = article
+        self.thumbnailService = thumbnailService
+        self.iconService = iconService
+    }
 
     var body: some View {
         HStack(spacing: 8) {
@@ -25,12 +42,30 @@ struct ArticleRowView: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
 
-                ArticleRowDateLine(article: article)
+                HStack(spacing: 3) {
+                    if let feed = article.feed {
+                        FeedIconView(
+                            feedID: feed.id,
+                            iconURL: feed.iconURL,
+                            iconService: iconService,
+                            style: .inline
+                        )
+
+                        Text(feed.title)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        Text("\u{00B7}")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    ArticleRowDateLine(article: article)
+                }
+                .padding(.top, 2)
             }
         }
-        .padding(.vertical, 4)
     }
-
 }
 
 /// Two-line date block for article rows (issue #300).
@@ -56,9 +91,6 @@ struct ArticleRowView: View {
 ///   (e.g., because a feed reports `updated <= published` per issue #299) but
 ///   `wasUpdated` is still true, the badge stands alone on line 2 so the call
 ///   to action is never lost.
-///
-/// Extracted as its own view so `ArticleRowView` and `CrossFeedArticleRowView`
-/// render the same two-line date treatment.
 struct ArticleRowDateLine: View {
     let article: PersistentArticle
 
