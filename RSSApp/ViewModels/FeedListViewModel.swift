@@ -22,7 +22,7 @@ final class FeedListViewModel {
     init(
         persistence: FeedPersisting,
         refreshService: FeedRefreshService,
-        feedIconService: FeedIconResolving = FeedIconService(),
+        feedIconService: FeedIconResolving,
         opmlService: OPMLServing = OPMLService()
     ) {
         self.persistence = persistence

@@ -48,15 +48,12 @@ final class BackgroundRefreshCoordinator: Sendable {
         // the background-queue expiration handler can signal completion safely.
         let gate = CompletionGate(task: task)
 
-        // RATIONALE: The work task must be created *before* `expirationHandler`
-        // is assigned because the handler captures `workTask` by reference. In
-        // the brief window between `workTask` creation and `expirationHandler`
-        // assignment, an expiration firing would not cancel the work task and
-        // the task would run to natural completion (still reporting a correct
-        // outcome via the gate). Making the window smaller is structurally
-        // impossible — there is no BackgroundTasks API for installing the
-        // expiration handler before the work begins — so this ordering is the
-        // canonical pattern.
+        // RATIONALE: `workTask` is created before `expirationHandler` is
+        // assigned because the handler's closure body references
+        // `workTask.cancel()` — Swift requires the name to exist at the
+        // point of capture, so the task must be declared first. There is
+        // no BackgroundTasks API for installing the expiration handler
+        // before the work begins, making this the canonical pattern.
         let workTask = Task { @MainActor in
             let outcome = await self.refreshService.refreshAllFeeds()
             // Drain any in-flight thumbnail prefetch and icon resolution tasks

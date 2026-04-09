@@ -20,7 +20,6 @@ struct FeedListView: View {
 
     private let persistence: FeedPersisting
     private let refreshService: FeedRefreshService
-    private let feedIconService: FeedIconResolving
     private let thumbnailService: ArticleThumbnailCaching = ArticleThumbnailService()
     private let isEmbedded: Bool
 
@@ -45,7 +44,6 @@ struct FeedListView: View {
     ) {
         self.persistence = persistence
         self.refreshService = refreshService
-        self.feedIconService = feedIconService
         self.isEmbedded = isEmbedded
         _viewModel = State(initialValue: FeedListViewModel(
             persistence: persistence,

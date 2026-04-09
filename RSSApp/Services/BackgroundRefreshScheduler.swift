@@ -28,18 +28,16 @@ enum BackgroundRefreshScheduler {
     /// single-shot per identifier per process launch; a second call with the
     /// same identifier crashes the framework. Today only `RSSAppApp.init()`
     /// calls this, but the flag makes a future refactor that accidentally
-    /// calls it twice fail loudly instead of crashing inside BackgroundTasks.
+    /// calls it twice fail loudly with an `assertionFailure` instead of
+    /// crashing inside BackgroundTasks.
     ///
     /// RATIONALE: `nonisolated(unsafe)` is correct here because
     /// `registerLaunchHandlers` is only ever called from `RSSAppApp.init()`,
     /// which runs on `@MainActor` (the `App` protocol is `@MainActor`). The
-    /// guard logic below runs before any `Task` has been spawned from the
-    /// coordinator, so there is no concurrent reader. If a future caller
-    /// invokes `registerLaunchHandlers` from a non-main context, the
-    /// `assertionFailure` below will still fire on the second call — the
-    /// read is benign because the worst case is crashing inside BGTaskScheduler
-    /// on a true double-registration, which is exactly the behavior this
-    /// guard is meant to avoid.
+    /// guard logic runs before any `Task` has been spawned from the
+    /// coordinator, so there is no concurrent reader. The runtime
+    /// `assertionFailure` catches future refactors that accidentally add a
+    /// second call.
     nonisolated(unsafe) private static var registered = false
 
     /// Task identifier for `BGAppRefreshTaskRequest`. Must also appear in

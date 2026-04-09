@@ -6,21 +6,50 @@ import SwiftData
 @Suite("FeedListViewModel Tests")
 struct FeedListViewModelTests {
 
-    /// Builds a view model wired to a real `FeedRefreshService` over the
-    /// supplied mock persistence. Tests that exercise refresh-specific
-    /// behavior (icon cleanup, delegation-to-error-message translation)
-    /// construct the service explicitly so they can inject mocks into it;
-    /// tests that only touch load/remove/OPML/unread paths rely on this
-    /// helper and ignore the service's defaults.
+    /// Builds a view model wired to a fully-mocked `FeedRefreshService`.
+    /// Tests that only touch load/remove/OPML/unread paths use this helper;
+    /// tests that exercise refresh-specific behavior (icon cleanup,
+    /// delegation-to-error-message translation) construct the service
+    /// explicitly via `makeRefreshService` so they can override specific
+    /// mocks.
     @MainActor
     private static func makeViewModel(
         persistence: FeedPersisting,
-        opmlService: OPMLServing = OPMLService()
+        opmlService: OPMLServing = MockOPMLService()
     ) -> FeedListViewModel {
-        FeedListViewModel(
+        let mockIconService = MockFeedIconService()
+        return FeedListViewModel(
             persistence: persistence,
-            refreshService: FeedRefreshService(persistence: persistence),
+            refreshService: Self.makeRefreshService(persistence: persistence, feedIconService: mockIconService),
+            feedIconService: mockIconService,
             opmlService: opmlService
+        )
+    }
+
+    /// Builds a fully-mocked `FeedRefreshService` for tests that need to
+    /// exercise refresh behavior. Every dependency defaults to a mock so
+    /// tests never accidentally spawn real network or disk I/O — e.g.,
+    /// the default `FeedIconService()` would fetch from the feed URL's
+    /// host, and the default `NetworkMonitorService()` would start a
+    /// real `NWPathMonitor`.
+    @MainActor
+    private static func makeRefreshService(
+        persistence: FeedPersisting,
+        feedFetching: FeedFetching = MockFeedFetchingService(),
+        feedIconService: FeedIconResolving = MockFeedIconService(),
+        thumbnailPrefetcher: ThumbnailPrefetching = MockThumbnailPrefetchService(),
+        articleRetention: ArticleRetaining = MockArticleRetentionService(),
+        thumbnailService: ArticleThumbnailCaching = MockArticleThumbnailService(),
+        networkMonitor: NetworkMonitoring = MockNetworkMonitorService()
+    ) -> FeedRefreshService {
+        FeedRefreshService(
+            persistence: persistence,
+            feedFetching: feedFetching,
+            feedIconService: feedIconService,
+            thumbnailPrefetcher: thumbnailPrefetcher,
+            articleRetention: articleRetention,
+            thumbnailService: thumbnailService,
+            networkMonitor: networkMonitor
         )
     }
 
@@ -869,13 +898,16 @@ struct FeedListViewModelTests {
         let mockFetching = MockFeedFetchingService()
         mockFetching.feedsByURL = [url: TestFixtures.makeFeed()]
 
-        let refreshService = FeedRefreshService(
+        let mockIconService = MockFeedIconService()
+        let refreshService = Self.makeRefreshService(
             persistence: mockPersistence,
-            feedFetching: mockFetching
+            feedFetching: mockFetching,
+            feedIconService: mockIconService
         )
         let viewModel = FeedListViewModel(
             persistence: mockPersistence,
-            refreshService: refreshService
+            refreshService: refreshService,
+            feedIconService: mockIconService
         )
         viewModel.errorMessage = "stale error"
         await viewModel.refreshAllFeeds()
@@ -893,13 +925,16 @@ struct FeedListViewModelTests {
         let mockFetching = MockFeedFetchingService()
         mockFetching.errorsByURL = [url: FeedFetchingError.invalidResponse(statusCode: 500)]
 
-        let refreshService = FeedRefreshService(
+        let mockIconService = MockFeedIconService()
+        let refreshService = Self.makeRefreshService(
             persistence: mockPersistence,
-            feedFetching: mockFetching
+            feedFetching: mockFetching,
+            feedIconService: mockIconService
         )
         let viewModel = FeedListViewModel(
             persistence: mockPersistence,
-            refreshService: refreshService
+            refreshService: refreshService,
+            feedIconService: mockIconService
         )
         await viewModel.refreshAllFeeds()
 
@@ -921,13 +956,16 @@ struct FeedListViewModelTests {
         let mockFetching = MockFeedFetchingService()
         mockFetching.errorsByURL = [url: FeedFetchingError.invalidResponse(statusCode: 500)]
 
-        let refreshService = FeedRefreshService(
+        let mockIconService = MockFeedIconService()
+        let refreshService = Self.makeRefreshService(
             persistence: mockPersistence,
-            feedFetching: mockFetching
+            feedFetching: mockFetching,
+            feedIconService: mockIconService
         )
         let viewModel = FeedListViewModel(
             persistence: mockPersistence,
-            refreshService: refreshService
+            refreshService: refreshService,
+            feedIconService: mockIconService
         )
         await viewModel.refreshAllFeeds()
 
@@ -946,14 +984,17 @@ struct FeedListViewModelTests {
         let mockRetention = MockArticleRetentionService()
         mockRetention.enforceError = NSError(domain: "test", code: 1)
 
-        let refreshService = FeedRefreshService(
+        let mockIconService = MockFeedIconService()
+        let refreshService = Self.makeRefreshService(
             persistence: mockPersistence,
             feedFetching: mockFetching,
+            feedIconService: mockIconService,
             articleRetention: mockRetention
         )
         let viewModel = FeedListViewModel(
             persistence: mockPersistence,
-            refreshService: refreshService
+            refreshService: refreshService,
+            feedIconService: mockIconService
         )
         await viewModel.refreshAllFeeds()
 
@@ -963,16 +1004,25 @@ struct FeedListViewModelTests {
     @Test("refreshAllFeeds surfaces setupFailed with distinct 'load your feeds' message")
     @MainActor
     func refreshSetupFailedExactMessage() async {
-        // persistence.allFeeds() throws → FeedRefreshService returns .setupFailed.
-        // The viewmodel must translate this to "Unable to load your feeds."
-        // (NOT "Unable to save updated feeds.", which is the save-failure path).
+        // persistence.allFeeds() throws on the FIRST call (triggering
+        // .setupFailed) but succeeds on the second (so loadFeeds() in the
+        // viewmodel's post-refresh reload does NOT set its own
+        // "Unable to load your feeds." error). This isolates the assertion
+        // to the `.setupFailed` switch arm — a refactor that silently
+        // dropped the arm would leave errorMessage nil and fail this test,
+        // which is exactly the regression we want to catch.
         let mockPersistence = MockFeedPersistenceService()
-        mockPersistence.errorToThrow = NSError(domain: "test", code: 1)
+        mockPersistence.allFeedsFailureCount = 1  // fail once, then succeed
 
-        let refreshService = FeedRefreshService(persistence: mockPersistence)
+        let mockIconService = MockFeedIconService()
+        let refreshService = Self.makeRefreshService(
+            persistence: mockPersistence,
+            feedIconService: mockIconService
+        )
         let viewModel = FeedListViewModel(
             persistence: mockPersistence,
-            refreshService: refreshService
+            refreshService: refreshService,
+            feedIconService: mockIconService
         )
         await viewModel.refreshAllFeeds()
 
@@ -993,13 +1043,16 @@ struct FeedListViewModelTests {
         let mockFetching = MockFeedFetchingService()
         mockFetching.errorsByURL = [url: CancellationError()]
 
-        let refreshService = FeedRefreshService(
+        let mockIconService = MockFeedIconService()
+        let refreshService = Self.makeRefreshService(
             persistence: mockPersistence,
-            feedFetching: mockFetching
+            feedFetching: mockFetching,
+            feedIconService: mockIconService
         )
         let viewModel = FeedListViewModel(
             persistence: mockPersistence,
-            refreshService: refreshService
+            refreshService: refreshService,
+            feedIconService: mockIconService
         )
         await viewModel.refreshAllFeeds()
 

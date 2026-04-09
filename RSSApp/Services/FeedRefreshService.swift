@@ -40,7 +40,12 @@ final class FeedRefreshService {
     init(
         persistence: FeedPersisting,
         feedFetching: FeedFetching = FeedFetchingService(),
-        feedIconService: FeedIconResolving = FeedIconService(),
+        // No default for `feedIconService`: callers must pass the shared
+        // instance explicitly so the refresh service and the UI layer
+        // observe the same on-disk cache. A default-constructed
+        // `FeedIconService()` would silently create an unshared instance
+        // and break the shared-cache invariant.
+        feedIconService: FeedIconResolving,
         // RATIONALE: Default cannot reference the `persistence` parameter in a default-value
         // expression, so nil-coalescing is used to construct the default inside the body.
         thumbnailPrefetcher: ThumbnailPrefetching? = nil,
@@ -90,6 +95,18 @@ final class FeedRefreshService {
             let saveDidFail: Bool
             let retentionCleanupFailed: Bool
 
+            // RATIONALE: `precondition` (not `assertionFailure`) is the right
+            // defensive tool here. CLAUDE.md's `assertionFailure` + fallback
+            // pattern targets I/O-boundary defensive unwrapping (system APIs
+            // returning an unexpected nil), where degraded operation is
+            // preferable to a crash. Structural invariants on a value-type
+            // constructor are a different case: there is no meaningful
+            // fallback (what would a clamped `failureCount` even mean to the
+            // caller?), and the invariants are guaranteed by the single
+            // construction site in `performRefresh`. A precondition failure
+            // here would indicate a genuine counting bug that surfaces
+            // immediately rather than silently propagating a malformed
+            // outcome through the system.
             init(
                 totalFeeds: Int,
                 failureCount: Int,
@@ -149,24 +166,35 @@ final class FeedRefreshService {
         return await performRefresh(feeds: feeds)
     }
 
-    /// Blocks until any in-flight thumbnail prefetch task has drained.
+    /// Blocks until the in-flight thumbnail prefetch task and all pending
+    /// icon resolution tasks from the current refresh cycle have drained.
     /// Background task handlers call this before invoking
     /// `setTaskCompleted(success:)` so the allotted background runtime is
-    /// used for thumbnail downloads that would otherwise be cancelled when
+    /// used for thumbnail + icon work that would otherwise be cancelled when
     /// the OS reclaims the process.
     ///
-    /// Precondition: this should be called *after* `refreshAllFeeds()` has
-    /// returned for the caller's own refresh cycle — a concurrent
-    /// `refreshAllFeeds()` call would replace the stored task handles with
-    /// new ones mid-drain. In practice the process-wide `isRefreshing` guard
-    /// (coalescing new callers as `.skipped`) makes this safe for the
-    /// background task coordinator's sequential `refreshAllFeeds() →
-    /// awaitPendingWork()` pattern.
+    /// Precondition: call this immediately after `refreshAllFeeds()` returns,
+    /// as two consecutive `await` statements on the same main-actor task:
+    ///
+    ///     let outcome = await service.refreshAllFeeds()
+    ///     await service.awaitPendingWork()
+    ///
+    /// The snapshot of task handles below runs synchronously at entry (before
+    /// any suspension point), so a concurrent `refreshAllFeeds()` cycle that
+    /// starts during one of the drain's `await` yields cannot mutate the
+    /// captured handles — this caller will always drain its own cycle's work
+    /// and nothing else. `pendingIconTasks` is cleared after snapshotting so
+    /// the next cycle starts with a clean slate even if its `performRefresh`
+    /// start-of-cycle cleanup runs before this caller resumes.
     func awaitPendingWork() async {
-        await thumbnailPrefetchTask?.value
-        // Snapshot the icon tasks first so a reassignment during draining
-        // cannot cause us to miss or re-await an entry.
+        // Snapshot both task references synchronously, before any `await`,
+        // so a concurrent `refreshAllFeeds()` cycle cannot replace the
+        // stored handles mid-drain.
+        let prefetchTask = thumbnailPrefetchTask
         let iconTasks = pendingIconTasks
+        pendingIconTasks.removeAll()
+
+        await prefetchTask?.value
         for task in iconTasks {
             _ = await task.value
         }
@@ -315,12 +343,13 @@ final class FeedRefreshService {
                     Self.logger.warning("Failed to clear error state for '\(feed.title, privacy: .public)': \(error, privacy: .public) — feed may show stale error indicator")
                 }
 
-                // failureCount is incremented in exactly three places in this
+                // failureCount is incremented in exactly two places in this
                 // function: (1) upsertArticles failure below — the one
                 // data-losing operation; (2) the explicit .failure arm for
-                // fetch failures; (3) never for cosmetic persistence failures
-                // (metadata, error-clear, cache headers), which are logged as
-                // warnings and allowed to self-heal on the next refresh.
+                // fetch failures. Cosmetic persistence failures (metadata,
+                // error-clear, cache headers) are logged at .warning and
+                // NOT counted — they self-heal on the next refresh and do
+                // not warrant iOS backing off the BG schedule.
                 var upsertSucceeded = false
                 do {
                     try persistence.upsertArticles(fetchResult.feed.articles, for: feed)

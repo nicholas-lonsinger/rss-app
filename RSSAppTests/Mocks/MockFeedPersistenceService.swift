@@ -18,6 +18,13 @@ final class MockFeedPersistenceService: FeedPersisting {
     var updateFeedCacheHeadersError: (any Error)?
     var addFeedFailureAfterCount: Int?
 
+    /// When non-zero, `allFeeds()` throws on the first N calls and then
+    /// begins returning `feeds` normally. Counter decrements per call.
+    /// Used to test the distinction between `.setupFailed` (first call
+    /// fails) and the subsequent post-refresh `loadFeeds()` (second call
+    /// succeeds) in the viewmodel delegation tests.
+    var allFeedsFailureCount = 0
+
     var articlesByFeedID: [UUID: [PersistentArticle]] = [:]
     private var contentByArticleID: [String: PersistentArticleContent] = [:]
     private var addFeedCallCount = 0
@@ -25,6 +32,10 @@ final class MockFeedPersistenceService: FeedPersisting {
     // MARK: - Feed Operations
 
     func allFeeds() throws -> [PersistentFeed] {
+        if allFeedsFailureCount > 0 {
+            allFeedsFailureCount -= 1
+            throw NSError(domain: "MockPersistence", code: 1, userInfo: [NSLocalizedDescriptionKey: "Simulated allFeeds failure"])
+        }
         if let error = errorToThrow { throw error }
         return feeds
     }
