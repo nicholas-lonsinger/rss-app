@@ -12,6 +12,14 @@ enum BackgroundImageDownloadSettings {
 
     private static let wifiOnlyDefaultsKey = "backgroundImageDownloadWiFiOnly"
 
+    /// Posted on `NotificationCenter.default` whenever `wifiOnly` is written.
+    /// Observers receive the notification on the same thread as the write.
+    /// `FeedRefreshService` subscribes to this notification to cancel in-flight
+    /// background download tasks when the WiFi-only setting is turned on.
+    static let wifiOnlyDidChangeNotification = Notification.Name(
+        "BackgroundImageDownloadSettings.wifiOnlyDidChange"
+    )
+
     /// Whether background image downloads should be restricted to WiFi.
     ///
     /// When `true`, thumbnail prefetching and feed icon resolution during refresh
@@ -28,6 +36,7 @@ enum BackgroundImageDownloadSettings {
         set {
             UserDefaults.standard.set(newValue, forKey: wifiOnlyDefaultsKey)
             logger.notice("Background image download WiFi-only changed to \(newValue, privacy: .public)")
+            NotificationCenter.default.post(name: wifiOnlyDidChangeNotification, object: nil)
         }
     }
 }

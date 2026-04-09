@@ -606,4 +606,152 @@ struct FeedRefreshServiceTests {
         #expect(refreshed?[0].title == "Updated")
         #expect(outcome == .completed(.init(totalFeeds: 1, failureCount: 0, saveDidFail: false, retentionCleanupFailed: false)))
     }
+
+    // MARK: - cancelBackgroundDownloadTasksIfDisallowed
+
+    @Test("cancelBackgroundDownloadTasksIfDisallowed cancels prefetch task when downloads are disallowed")
+    @MainActor
+    func cancelBackgroundDownloadTasksCancelsPrefetchWhenDisallowed() async {
+        let url = URL(string: "https://example.com/feed")!
+        let feed = TestFixtures.makePersistentFeed(feedURL: url)
+
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+        let mockFetching = MockFeedFetchingService()
+        mockFetching.feedsByURL = [url: TestFixtures.makeFeed()]
+
+        // A slow prefetcher that we can check for cancellation
+        let slowPrefetcher = SlowCancellationPrefetchService()
+        let mockNetwork = MockNetworkMonitorService()
+        mockNetwork.backgroundDownloadAllowed = true
+
+        let service = Self.makeService(
+            persistence: mockPersistence,
+            feedFetching: mockFetching,
+            thumbnailPrefetcher: slowPrefetcher,
+            networkMonitor: mockNetwork
+        )
+
+        // Kick off a refresh so the thumbnailPrefetchTask gets set
+        await service.refreshAllFeeds()
+
+        // Now flip the network to disallowed and call the cancel method
+        mockNetwork.backgroundDownloadAllowed = false
+        service.cancelBackgroundDownloadTasksIfDisallowed()
+
+        // Yield to let the cancellation handler's Task { @MainActor } hop execute
+        for _ in 0..<20 { await Task.yield() }
+
+        // The prefetch task should have been cancelled
+        #expect(slowPrefetcher.wasCancelled)
+    }
+
+    @Test("cancelBackgroundDownloadTasksIfDisallowed does nothing when downloads are still allowed")
+    @MainActor
+    func cancelBackgroundDownloadTasksNoopWhenAllowed() async {
+        let url = URL(string: "https://example.com/feed")!
+        let feed = TestFixtures.makePersistentFeed(feedURL: url)
+
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+        let mockFetching = MockFeedFetchingService()
+        mockFetching.feedsByURL = [url: TestFixtures.makeFeed()]
+
+        let slowPrefetcher = SlowCancellationPrefetchService()
+        let mockNetwork = MockNetworkMonitorService()
+        mockNetwork.backgroundDownloadAllowed = true
+
+        let service = Self.makeService(
+            persistence: mockPersistence,
+            feedFetching: mockFetching,
+            thumbnailPrefetcher: slowPrefetcher,
+            networkMonitor: mockNetwork
+        )
+
+        await service.refreshAllFeeds()
+
+        // Downloads still allowed — cancel should be a no-op
+        service.cancelBackgroundDownloadTasksIfDisallowed()
+
+        for _ in 0..<20 { await Task.yield() }
+
+        #expect(!slowPrefetcher.wasCancelled)
+    }
+
+    @Test("wifiOnly setting notification triggers cancel of in-flight prefetch task")
+    @MainActor
+    func wifiOnlySettingNotificationTriggersCancel() async {
+        let url = URL(string: "https://example.com/feed")!
+        let feed = TestFixtures.makePersistentFeed(feedURL: url)
+
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+        let mockFetching = MockFeedFetchingService()
+        mockFetching.feedsByURL = [url: TestFixtures.makeFeed()]
+
+        let slowPrefetcher = SlowCancellationPrefetchService()
+        let mockNetwork = MockNetworkMonitorService()
+        mockNetwork.backgroundDownloadAllowed = true
+
+        let service = Self.makeService(
+            persistence: mockPersistence,
+            feedFetching: mockFetching,
+            thumbnailPrefetcher: slowPrefetcher,
+            networkMonitor: mockNetwork
+        )
+
+        // Start refresh so the prefetch task is in-flight
+        await service.refreshAllFeeds()
+
+        // Flip to disallowed so the notification-triggered cancel will fire
+        mockNetwork.backgroundDownloadAllowed = false
+
+        // Post the notification that SettingsView toggle would fire via
+        // BackgroundImageDownloadSettings.wifiOnly setter
+        NotificationCenter.default.post(
+            name: BackgroundImageDownloadSettings.wifiOnlyDidChangeNotification,
+            object: nil
+        )
+
+        // Yield to allow the Task { @MainActor } inside the notification observer
+        // and the cancellation handler to execute
+        for _ in 0..<20 { await Task.yield() }
+
+        #expect(slowPrefetcher.wasCancelled)
+    }
+}
+
+// MARK: - SlowCancellationPrefetchService
+
+/// A mock prefetcher that suspends indefinitely until cancelled. Used to verify
+/// that `cancelBackgroundDownloadTasksIfDisallowed` actually cancels the task
+/// rather than just clearing the reference.
+///
+/// `wasCancelled` is written from the `onCancel` handler (nonisolated context)
+/// and read from the main actor after a sequence of `Task.yield()` calls that
+/// ensure the cancellation has propagated. `nonisolated(unsafe)` is safe here
+/// because:
+///   1. The value is written exactly once in `onCancel`.
+///   2. Test assertions always follow multiple `Task.yield()` calls that give
+///      the runtime enough scheduling cycles to execute the cancel handler.
+///   3. No concurrent reads happen; this is a strictly sequential test pattern.
+@MainActor
+private final class SlowCancellationPrefetchService: ThumbnailPrefetching {
+
+    // RATIONALE: nonisolated(unsafe) so the onCancel handler can write from a
+    // nonisolated context without a @MainActor hop. The single-write, read-after-
+    // yield discipline in the tests makes this safe in practice.
+    nonisolated(unsafe) private(set) var wasCancelled = false
+
+    func prefetchThumbnails() async {
+        // Suspend until cancelled
+        await withTaskCancellationHandler {
+            // Keep yielding until Task.isCancelled is true
+            while !Task.isCancelled {
+                await Task.yield()
+            }
+        } onCancel: { [weak self] in
+            self?.wasCancelled = true
+        }
+    }
 }

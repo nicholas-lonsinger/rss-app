@@ -9,6 +9,10 @@ protocol ThumbnailPrefetching: Sendable {
 
     /// Downloads thumbnails for articles that are missing cached thumbnails,
     /// respecting the retry cap.
+    ///
+    /// The implementation re-checks `networkMonitor.isBackgroundDownloadAllowed()`
+    /// between items so that a WiFi-only toggle flipped mid-batch stops further
+    /// downloads within the current concurrency window.
     func prefetchThumbnails() async
 }
 
@@ -61,10 +65,16 @@ struct ThumbnailPrefetchService: ThumbnailPrefetching {
 
     private let persistence: FeedPersisting
     private let thumbnailService: ArticleThumbnailCaching
+    private let networkMonitor: NetworkMonitoring
 
-    init(persistence: FeedPersisting, thumbnailService: ArticleThumbnailCaching = ArticleThumbnailService()) {
+    init(
+        persistence: FeedPersisting,
+        thumbnailService: ArticleThumbnailCaching = ArticleThumbnailService(),
+        networkMonitor: NetworkMonitoring = NetworkMonitorService()
+    ) {
         self.persistence = persistence
         self.thumbnailService = thumbnailService
+        self.networkMonitor = networkMonitor
     }
 
     func prefetchThumbnails() async {
@@ -92,8 +102,8 @@ struct ThumbnailPrefetchService: ThumbnailPrefetching {
             ($0.articleID, $0.thumbnailURL, $0.link)
         }
 
-        // Download thumbnails concurrently
-        let results = await downloadThumbnails(articleData: articleData)
+        // Download thumbnails concurrently, re-checking network allowance between items
+        let results = await downloadThumbnails(articleData: articleData, networkMonitor: networkMonitor)
 
         // Apply results back to persistence on MainActor
         var successCount = 0
@@ -137,7 +147,8 @@ struct ThumbnailPrefetchService: ThumbnailPrefetching {
     // MARK: - Private
 
     private func downloadThumbnails(
-        articleData: [(articleID: String, thumbnailURL: URL?, articleLink: URL?)]
+        articleData: [(articleID: String, thumbnailURL: URL?, articleLink: URL?)],
+        networkMonitor: NetworkMonitoring
     ) async -> [ThumbnailDownloadResult] {
         let thumbnailService = self.thumbnailService
 
@@ -163,10 +174,22 @@ struct ThumbnailPrefetchService: ThumbnailPrefetching {
                 guard enqueueNext(&group, &iterator) else { break }
             }
 
-            // Drain results, enqueuing more work as each finishes
+            // Drain results, enqueuing more work as each finishes.
+            // Re-check network allowance between items so that toggling WiFi Only
+            // on mid-batch stops dispatching new downloads promptly.
             for await result in group {
                 collected.append(result)
+                guard networkMonitor.isBackgroundDownloadAllowed() else {
+                    Self.logger.info("Background downloads no longer allowed mid-prefetch — cancelling remaining items")
+                    group.cancelAll()
+                    break
+                }
                 _ = enqueueNext(&group, &iterator)
+            }
+
+            // Drain any cancelled tasks so the group closes cleanly
+            for await result in group {
+                collected.append(result)
             }
 
             return collected

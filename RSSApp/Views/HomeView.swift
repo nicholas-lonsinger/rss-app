@@ -236,6 +236,11 @@ struct HomeView: View {
                     viewModel.loadUnreadCount()
                     viewModel.loadSavedCount()
                     viewModel.loadGroupUnreadCounts()
+                    // Re-check network allowance on foreground so that a network
+                    // change (WiFi → cellular) or setting change that occurred
+                    // while the app was backgrounded cancels any still-suspended
+                    // download tasks before they resume.
+                    refreshService.cancelBackgroundDownloadTasksIfDisallowed()
                 }
             }
         }
