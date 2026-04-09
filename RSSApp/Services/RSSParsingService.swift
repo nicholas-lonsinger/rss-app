@@ -182,22 +182,22 @@ enum EncodingSniffer {
         guard !data.isEmpty else { return (data, .utf8Passthrough) }
 
         // 1. BOM check — authoritative.
-        if let (encoding, bomLength) = detectBOM(data) {
-            if encoding == .utf8 {
+        if let bom = detectBOM(data) {
+            if bom.encoding == .utf8 {
                 // UTF-8 BOM: strip it. XMLParser tolerates the BOM in practice but
                 // stripping makes the downstream byte stream canonical.
-                return (data.subdata(in: bomLength..<data.count), .bomStripped(.utf8))
+                return (data.subdata(in: bom.bomLength..<data.count), .bomStripped(.utf8))
             }
-            let stripped = data.subdata(in: bomLength..<data.count)
-            if let transcoded = transcode(stripped, from: encoding) {
-                return (transcoded, .bomStripped(encoding))
+            let stripped = data.subdata(in: bom.bomLength..<data.count)
+            if let transcoded = transcode(SniffedPayload(data: stripped, encoding: bom.encoding)) {
+                return (transcoded, .bomStripped(bom.encoding))
             }
-            return (data, .transcodeFailureFallback(encoding))
+            return (data, .transcodeFailureFallback(bom.encoding))
         }
 
         // 2. UTF-16 / UTF-32 without BOM — detect from first four bytes.
         if let encoding = detectWideEncodingWithoutBOM(data) {
-            if let transcoded = transcode(data, from: encoding) {
+            if let transcoded = transcode(SniffedPayload(data: data, encoding: encoding)) {
                 return (transcoded, .transcoded(from: encoding))
             }
             return (data, .transcodeFailureFallback(encoding))
@@ -211,7 +211,7 @@ enum EncodingSniffer {
                 return (data, .utf8Passthrough)
             }
             if let encoding = encodingFromIANAName(declaredName) {
-                if let transcoded = transcode(data, from: encoding) {
+                if let transcoded = transcode(SniffedPayload(data: data, encoding: encoding)) {
                     return (transcoded, .transcoded(from: encoding))
                 }
                 return (data, .transcodeFailureFallback(encoding))
@@ -233,36 +233,55 @@ enum EncodingSniffer {
         return (data, .utf8Passthrough)
     }
 
+    // MARK: - BOMMatch
+
+    /// A matched byte-order mark: the identified encoding and the number of BOM
+    /// bytes to skip before the payload content begins.
+    struct BOMMatch {
+        let encoding: String.Encoding
+        let bomLength: Int
+    }
+
+    // MARK: - SniffedPayload
+
+    /// A raw payload whose encoding has already been identified. Bundles the bytes
+    /// and their detected encoding together so `transcode` cannot be handed a
+    /// mismatched pair.
+    private struct SniffedPayload {
+        let data: Data
+        let encoding: String.Encoding
+    }
+
     // MARK: - BOM detection
 
     /// Returns the detected encoding and the BOM byte length, or nil if no BOM is
     /// present. Order matters: UTF-32 LE (`FF FE 00 00`) must be checked before
     /// UTF-16 LE (`FF FE`) or it would be misclassified.
-    static func detectBOM(_ data: Data) -> (encoding: String.Encoding, bomLength: Int)? {
+    static func detectBOM(_ data: Data) -> BOMMatch? {
         if data.count >= 4 {
             // UTF-32 BE
             if data[0] == 0x00 && data[1] == 0x00 && data[2] == 0xFE && data[3] == 0xFF {
-                return (.utf32BigEndian, 4)
+                return BOMMatch(encoding: .utf32BigEndian, bomLength: 4)
             }
             // UTF-32 LE
             if data[0] == 0xFF && data[1] == 0xFE && data[2] == 0x00 && data[3] == 0x00 {
-                return (.utf32LittleEndian, 4)
+                return BOMMatch(encoding: .utf32LittleEndian, bomLength: 4)
             }
         }
         if data.count >= 3 {
             // UTF-8
             if data[0] == 0xEF && data[1] == 0xBB && data[2] == 0xBF {
-                return (.utf8, 3)
+                return BOMMatch(encoding: .utf8, bomLength: 3)
             }
         }
         if data.count >= 2 {
             // UTF-16 BE
             if data[0] == 0xFE && data[1] == 0xFF {
-                return (.utf16BigEndian, 2)
+                return BOMMatch(encoding: .utf16BigEndian, bomLength: 2)
             }
             // UTF-16 LE
             if data[0] == 0xFF && data[1] == 0xFE {
-                return (.utf16LittleEndian, 2)
+                return BOMMatch(encoding: .utf16LittleEndian, bomLength: 2)
             }
         }
         return nil
@@ -353,11 +372,13 @@ enum EncodingSniffer {
 
     // MARK: - Transcoding
 
-    /// Decodes `data` using `encoding` and re-encodes as UTF-8, stripping any
-    /// `<?xml ... ?>` prolog so the downstream parser doesn't see a stale
-    /// `encoding="..."` attribute that contradicts the actual bytes. Returns nil
-    /// if decoding fails.
-    static func transcode(_ data: Data, from encoding: String.Encoding) -> Data? {
+    /// Decodes the payload bytes using the identified encoding and re-encodes as
+    /// UTF-8, stripping any `<?xml ... ?>` prolog so the downstream parser doesn't
+    /// see a stale `encoding="..."` attribute that contradicts the actual bytes.
+    /// Returns nil if decoding fails.
+    private static func transcode(_ payload: SniffedPayload) -> Data? {
+        let data = payload.data
+        let encoding = payload.encoding
         guard let decoded = String(data: data, encoding: encoding) else {
             let decodeFailureMessage = "Failed to decode feed payload as \(String(describing: encoding)); passing through unchanged"
             logger.warning("\(decodeFailureMessage, privacy: .public)")
