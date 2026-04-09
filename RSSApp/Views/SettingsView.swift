@@ -74,6 +74,12 @@ struct SettingsView: View {
             }
 
             NavigationLink {
+                BackgroundRefreshSettingsView()
+            } label: {
+                Label("Background Refresh", systemImage: "arrow.clockwise")
+            }
+
+            NavigationLink {
                 APIKeySettingsView()
             } label: {
                 Label("API Key", systemImage: "key")

@@ -6,10 +6,22 @@ struct HomeView: View {
     @State private var viewModel: HomeViewModel
     @State private var feedListViewModel: FeedListViewModel
     private let persistence: FeedPersisting
+    private let refreshService: FeedRefreshService
+    private let feedIconService: FeedIconResolving
 
-    init(persistence: FeedPersisting) {
+    init(
+        persistence: FeedPersisting,
+        refreshService: FeedRefreshService,
+        feedIconService: FeedIconResolving
+    ) {
         self.persistence = persistence
-        let feedListVM = FeedListViewModel(persistence: persistence)
+        self.refreshService = refreshService
+        self.feedIconService = feedIconService
+        let feedListVM = FeedListViewModel(
+            persistence: persistence,
+            refreshService: refreshService,
+            feedIconService: feedIconService
+        )
         _feedListViewModel = State(initialValue: feedListVM)
         _viewModel = State(initialValue: HomeViewModel(
             persistence: persistence,
@@ -43,7 +55,13 @@ struct HomeView: View {
                 case .savedArticles:
                     SavedArticlesView(persistence: persistence, homeViewModel: viewModel)
                 case .allFeeds:
-                    FeedListView(persistence: persistence, isEmbedded: true, homeViewModel: viewModel)
+                    FeedListView(
+                        persistence: persistence,
+                        refreshService: refreshService,
+                        feedIconService: feedIconService,
+                        isEmbedded: true,
+                        homeViewModel: viewModel
+                    )
                 }
             }
             .navigationDestination(for: SettingsDestination.self) { destination in

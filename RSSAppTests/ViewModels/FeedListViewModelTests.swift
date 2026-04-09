@@ -6,6 +6,53 @@ import SwiftData
 @Suite("FeedListViewModel Tests")
 struct FeedListViewModelTests {
 
+    /// Builds a view model wired to a fully-mocked `FeedRefreshService`.
+    /// Tests that only touch load/remove/OPML/unread paths use this helper;
+    /// tests that exercise refresh-specific behavior (icon cleanup,
+    /// delegation-to-error-message translation) construct the service
+    /// explicitly via `makeRefreshService` so they can override specific
+    /// mocks.
+    @MainActor
+    private static func makeViewModel(
+        persistence: FeedPersisting,
+        opmlService: OPMLServing = MockOPMLService()
+    ) -> FeedListViewModel {
+        let mockIconService = MockFeedIconService()
+        return FeedListViewModel(
+            persistence: persistence,
+            refreshService: Self.makeRefreshService(persistence: persistence, feedIconService: mockIconService),
+            feedIconService: mockIconService,
+            opmlService: opmlService
+        )
+    }
+
+    /// Builds a fully-mocked `FeedRefreshService` for tests that need to
+    /// exercise refresh behavior. Every dependency defaults to a mock so
+    /// tests never accidentally spawn real network or disk I/O — e.g.,
+    /// the default `FeedIconService()` would fetch from the feed URL's
+    /// host, and the default `NetworkMonitorService()` would start a
+    /// real `NWPathMonitor`.
+    @MainActor
+    private static func makeRefreshService(
+        persistence: FeedPersisting,
+        feedFetching: FeedFetching = MockFeedFetchingService(),
+        feedIconService: FeedIconResolving = MockFeedIconService(),
+        thumbnailPrefetcher: ThumbnailPrefetching = MockThumbnailPrefetchService(),
+        articleRetention: ArticleRetaining = MockArticleRetentionService(),
+        thumbnailService: ArticleThumbnailCaching = MockArticleThumbnailService(),
+        networkMonitor: NetworkMonitoring = MockNetworkMonitorService()
+    ) -> FeedRefreshService {
+        FeedRefreshService(
+            persistence: persistence,
+            feedFetching: feedFetching,
+            feedIconService: feedIconService,
+            thumbnailPrefetcher: thumbnailPrefetcher,
+            articleRetention: articleRetention,
+            thumbnailService: thumbnailService,
+            networkMonitor: networkMonitor
+        )
+    }
+
     @Test("loadFeeds populates feeds from persistence")
     @MainActor
     func loadFeedsFromStorage() {
@@ -15,7 +62,7 @@ struct FeedListViewModelTests {
             TestFixtures.makePersistentFeed(title: "Feed B"),
         ]
 
-        let viewModel = FeedListViewModel(persistence: mockPersistence)
+        let viewModel = Self.makeViewModel(persistence: mockPersistence)
         viewModel.loadFeeds()
 
         #expect(viewModel.feeds.count == 2)
@@ -28,7 +75,7 @@ struct FeedListViewModelTests {
     @MainActor
     func loadFeedsEmpty() {
         let mockPersistence = MockFeedPersistenceService()
-        let viewModel = FeedListViewModel(persistence: mockPersistence)
+        let viewModel = Self.makeViewModel(persistence: mockPersistence)
         viewModel.loadFeeds()
 
         #expect(viewModel.feeds.isEmpty)
@@ -40,7 +87,7 @@ struct FeedListViewModelTests {
         let mockPersistence = MockFeedPersistenceService()
         mockPersistence.errorToThrow = NSError(domain: "test", code: 1)
 
-        let viewModel = FeedListViewModel(persistence: mockPersistence)
+        let viewModel = Self.makeViewModel(persistence: mockPersistence)
         viewModel.loadFeeds()
 
         #expect(viewModel.feeds.isEmpty)
@@ -55,7 +102,7 @@ struct FeedListViewModelTests {
         let mockPersistence = MockFeedPersistenceService()
         mockPersistence.feeds = [feed1, feed2]
 
-        let viewModel = FeedListViewModel(persistence: mockPersistence)
+        let viewModel = Self.makeViewModel(persistence: mockPersistence)
         viewModel.loadFeeds()
         viewModel.removeFeed(feed2)
 
@@ -72,7 +119,7 @@ struct FeedListViewModelTests {
         let mockPersistence = MockFeedPersistenceService()
         mockPersistence.feeds = [feed1, feed2, feed3]
 
-        let viewModel = FeedListViewModel(persistence: mockPersistence)
+        let viewModel = Self.makeViewModel(persistence: mockPersistence)
         viewModel.loadFeeds()
         viewModel.removeFeed(at: IndexSet(integer: 1))
 
@@ -88,7 +135,7 @@ struct FeedListViewModelTests {
         let mockPersistence = MockFeedPersistenceService()
         mockPersistence.feeds = [feed1]
 
-        let viewModel = FeedListViewModel(persistence: mockPersistence)
+        let viewModel = Self.makeViewModel(persistence: mockPersistence)
         viewModel.loadFeeds()
 
         mockPersistence.errorToThrow = NSError(domain: "test", code: 1)
@@ -106,7 +153,7 @@ struct FeedListViewModelTests {
         let mockPersistence = MockFeedPersistenceService()
         mockPersistence.feeds = [feed1, feed2]
 
-        let viewModel = FeedListViewModel(persistence: mockPersistence)
+        let viewModel = Self.makeViewModel(persistence: mockPersistence)
         viewModel.loadFeeds()
 
         mockPersistence.errorToThrow = NSError(domain: "test", code: 1)
@@ -127,9 +174,11 @@ struct FeedListViewModelTests {
         let mockPersistence = MockFeedPersistenceService()
         mockPersistence.feeds = [feed]
         let mockIconService = MockFeedIconService()
+        let refreshService = FeedRefreshService(persistence: mockPersistence, feedIconService: mockIconService)
 
         let viewModel = FeedListViewModel(
             persistence: mockPersistence,
+            refreshService: refreshService,
             feedIconService: mockIconService
         )
         viewModel.loadFeeds()
@@ -147,9 +196,11 @@ struct FeedListViewModelTests {
         let mockPersistence = MockFeedPersistenceService()
         mockPersistence.feeds = [feed1, feed2, feed3]
         let mockIconService = MockFeedIconService()
+        let refreshService = FeedRefreshService(persistence: mockPersistence, feedIconService: mockIconService)
 
         let viewModel = FeedListViewModel(
             persistence: mockPersistence,
+            refreshService: refreshService,
             feedIconService: mockIconService
         )
         viewModel.loadFeeds()
@@ -174,7 +225,7 @@ struct FeedListViewModelTests {
             ],
         ]
 
-        let viewModel = FeedListViewModel(persistence: mockPersistence)
+        let viewModel = Self.makeViewModel(persistence: mockPersistence)
         viewModel.loadFeeds()
 
         #expect(viewModel.unreadCount(for: feed) == 2)
@@ -189,7 +240,7 @@ struct FeedListViewModelTests {
         mockPersistence.feeds = [feed]
         mockPersistence.articlesByFeedID = [feed.id: [article]]
 
-        let viewModel = FeedListViewModel(persistence: mockPersistence)
+        let viewModel = Self.makeViewModel(persistence: mockPersistence)
         viewModel.loadFeeds()
         #expect(viewModel.unreadCount(for: feed) == 1)
 
@@ -203,7 +254,7 @@ struct FeedListViewModelTests {
     @MainActor
     func unreadCountReturnsZeroForUnknownFeed() {
         let mockPersistence = MockFeedPersistenceService()
-        let viewModel = FeedListViewModel(persistence: mockPersistence)
+        let viewModel = Self.makeViewModel(persistence: mockPersistence)
         viewModel.loadFeeds()
 
         let unknownFeed = TestFixtures.makePersistentFeed(title: "Unknown")
@@ -220,7 +271,7 @@ struct FeedListViewModelTests {
             feed.id: [TestFixtures.makePersistentArticle(articleID: "1", isRead: false)],
         ]
 
-        let viewModel = FeedListViewModel(persistence: mockPersistence)
+        let viewModel = Self.makeViewModel(persistence: mockPersistence)
         viewModel.loadFeeds()
         #expect(viewModel.unreadCount(for: feed) == 1)
 
@@ -237,7 +288,7 @@ struct FeedListViewModelTests {
         mockPersistence.feeds = [feed]
         mockPersistence.unreadCountError = NSError(domain: "test", code: 1)
 
-        let viewModel = FeedListViewModel(persistence: mockPersistence)
+        let viewModel = Self.makeViewModel(persistence: mockPersistence)
         viewModel.loadFeeds()
         #expect(viewModel.unreadCount(for: feed) == 0)
     }
@@ -255,7 +306,7 @@ struct FeedListViewModelTests {
             feed2.id: [TestFixtures.makePersistentArticle(articleID: "2", isRead: false)],
         ]
 
-        let viewModel = FeedListViewModel(persistence: mockPersistence)
+        let viewModel = Self.makeViewModel(persistence: mockPersistence)
         viewModel.loadFeeds()
         #expect(viewModel.unreadCount(for: feed1) == 1)
         #expect(viewModel.unreadCount(for: feed2) == 1)
@@ -279,7 +330,7 @@ struct FeedListViewModelTests {
             ],
         ]
 
-        let viewModel = FeedListViewModel(persistence: mockPersistence)
+        let viewModel = Self.makeViewModel(persistence: mockPersistence)
         viewModel.loadFeeds()
         #expect(viewModel.unreadCount(for: feed) == 2)
 
@@ -296,7 +347,7 @@ struct FeedListViewModelTests {
         mockPersistence.feeds = [feed]
         mockPersistence.unreadCountError = NSError(domain: "test", code: 1)
 
-        let viewModel = FeedListViewModel(persistence: mockPersistence)
+        let viewModel = Self.makeViewModel(persistence: mockPersistence)
         // Do not call loadFeeds() — no previous count is established
         viewModel.refreshUnreadCount(for: feed)
         #expect(viewModel.unreadCount(for: feed) == 0)
@@ -325,7 +376,7 @@ struct FeedListViewModelTests {
             ],
         ]
 
-        let viewModel = FeedListViewModel(persistence: mockPersistence)
+        let viewModel = Self.makeViewModel(persistence: mockPersistence)
         viewModel.loadFeeds()
 
         // Establish initial counts: A=2, B=1, C=3
@@ -361,7 +412,7 @@ struct FeedListViewModelTests {
             feed.id: [TestFixtures.makePersistentArticle(articleID: "1", isRead: false)],
         ]
 
-        let viewModel = FeedListViewModel(persistence: mockPersistence)
+        let viewModel = Self.makeViewModel(persistence: mockPersistence)
         viewModel.loadFeeds()
         #expect(viewModel.errorMessage == nil)
 
@@ -380,7 +431,7 @@ struct FeedListViewModelTests {
             feed.id: [TestFixtures.makePersistentArticle(articleID: "1", isRead: false)],
         ]
 
-        let viewModel = FeedListViewModel(persistence: mockPersistence)
+        let viewModel = Self.makeViewModel(persistence: mockPersistence)
         viewModel.loadFeeds()
         #expect(viewModel.errorMessage == nil)
 
@@ -397,7 +448,7 @@ struct FeedListViewModelTests {
         mockPersistence.feeds = [feed]
         mockPersistence.unreadCountError = NSError(domain: "test", code: 1)
 
-        let viewModel = FeedListViewModel(persistence: mockPersistence)
+        let viewModel = Self.makeViewModel(persistence: mockPersistence)
         viewModel.loadFeeds()
 
         // loadFeeds clears errorMessage before calling refreshUnreadCounts,
@@ -415,7 +466,7 @@ struct FeedListViewModelTests {
             feed.id: [TestFixtures.makePersistentArticle(articleID: "1", isRead: false)],
         ]
 
-        let viewModel = FeedListViewModel(persistence: mockPersistence)
+        let viewModel = Self.makeViewModel(persistence: mockPersistence)
         viewModel.loadFeeds()
 
         // Induce an error first
@@ -439,7 +490,7 @@ struct FeedListViewModelTests {
             feed.id: [TestFixtures.makePersistentArticle(articleID: "1", isRead: false)],
         ]
 
-        let viewModel = FeedListViewModel(persistence: mockPersistence)
+        let viewModel = Self.makeViewModel(persistence: mockPersistence)
         viewModel.loadFeeds()
 
         // Induce an error first
@@ -465,7 +516,7 @@ struct FeedListViewModelTests {
             feed2.id: [TestFixtures.makePersistentArticle(articleID: "2", isRead: false)],
         ]
 
-        let viewModel = FeedListViewModel(persistence: mockPersistence)
+        let viewModel = Self.makeViewModel(persistence: mockPersistence)
         viewModel.loadFeeds()
         #expect(viewModel.unreadCount(for: feed1) == 1)
         #expect(viewModel.unreadCount(for: feed2) == 1)
@@ -484,7 +535,7 @@ struct FeedListViewModelTests {
         let mockOPML = MockOPMLService()
         mockOPML.errorToThrow = NSError(domain: "test", code: 1)
 
-        let viewModel = FeedListViewModel(persistence: mockPersistence, opmlService: mockOPML)
+        let viewModel = Self.makeViewModel(persistence: mockPersistence, opmlService: mockOPML)
         viewModel.importOPML(from: Data())
 
         #expect(viewModel.importExportErrorMessage != nil)
@@ -502,7 +553,7 @@ struct FeedListViewModelTests {
         let mockOPML = MockOPMLService()
         mockOPML.dataToReturn = Data("opml-content".utf8)
 
-        let viewModel = FeedListViewModel(persistence: mockPersistence, opmlService: mockOPML)
+        let viewModel = Self.makeViewModel(persistence: mockPersistence, opmlService: mockOPML)
         viewModel.loadFeeds()
         viewModel.exportOPML()
 
@@ -518,7 +569,7 @@ struct FeedListViewModelTests {
         let mockOPML = MockOPMLService()
         mockOPML.errorToThrow = NSError(domain: "test", code: 1)
 
-        let viewModel = FeedListViewModel(persistence: mockPersistence, opmlService: mockOPML)
+        let viewModel = Self.makeViewModel(persistence: mockPersistence, opmlService: mockOPML)
         viewModel.loadFeeds()
         viewModel.exportOPML()
 
@@ -526,155 +577,6 @@ struct FeedListViewModelTests {
         #expect(viewModel.importExportErrorMessage != nil)
     }
 
-    // MARK: - Refresh
-
-    @Test("refreshAllFeeds updates metadata from fetched feeds")
-    @MainActor
-    func refreshAllFeedsUpdatesMetadata() async {
-        let url1 = URL(string: "https://one.com/feed")!
-        let url2 = URL(string: "https://two.com/feed")!
-        let feed1 = TestFixtures.makePersistentFeed(title: "Old One", feedURL: url1, feedDescription: "")
-        let feed2 = TestFixtures.makePersistentFeed(title: "Old Two", feedURL: url2, feedDescription: "")
-
-        let mockPersistence = MockFeedPersistenceService()
-        mockPersistence.feeds = [feed1, feed2]
-        let mockFetching = MockFeedFetchingService()
-        mockFetching.feedsByURL = [
-            url1: TestFixtures.makeFeed(title: "New One", feedDescription: "Desc One"),
-            url2: TestFixtures.makeFeed(title: "New Two", feedDescription: "Desc Two"),
-        ]
-
-        let viewModel = FeedListViewModel(persistence: mockPersistence, feedFetching: mockFetching, feedIconService: MockFeedIconService(), networkMonitor: MockNetworkMonitorService())
-        viewModel.loadFeeds()
-        await viewModel.refreshAllFeeds()
-
-        #expect(viewModel.feeds[0].title == "New One")
-        #expect(viewModel.feeds[0].feedDescription == "Desc One")
-        #expect(viewModel.feeds[1].title == "New Two")
-        #expect(viewModel.feeds[1].feedDescription == "Desc Two")
-        #expect(viewModel.errorMessage == nil)
-    }
-
-    @Test("refreshAllFeeds preserves feed when fetch fails")
-    @MainActor
-    func refreshAllFeedsPreservesOnFailure() async {
-        let url = URL(string: "https://fail.com/feed")!
-        let feed = TestFixtures.makePersistentFeed(title: "Original", feedURL: url, feedDescription: "Original Desc")
-
-        let mockPersistence = MockFeedPersistenceService()
-        mockPersistence.feeds = [feed]
-        let mockFetching = MockFeedFetchingService()
-        mockFetching.errorsByURL = [url: FeedFetchingError.invalidResponse(statusCode: 500)]
-
-        let viewModel = FeedListViewModel(persistence: mockPersistence, feedFetching: mockFetching, feedIconService: MockFeedIconService(), networkMonitor: MockNetworkMonitorService())
-        viewModel.loadFeeds()
-        await viewModel.refreshAllFeeds()
-
-        #expect(viewModel.errorMessage == "1 of 1 feed(s) could not be updated.")
-        #expect(viewModel.importExportErrorMessage == nil)
-    }
-
-    @Test("refreshAllFeeds handles partial failures")
-    @MainActor
-    func refreshAllFeedsPartialFailure() async {
-        let url1 = URL(string: "https://ok.com/feed")!
-        let url2 = URL(string: "https://fail.com/feed")!
-        let feed1 = TestFixtures.makePersistentFeed(title: "Will Update", feedURL: url1, feedDescription: "")
-        let feed2 = TestFixtures.makePersistentFeed(title: "Will Fail", feedURL: url2, feedDescription: "Old")
-
-        let mockPersistence = MockFeedPersistenceService()
-        mockPersistence.feeds = [feed1, feed2]
-        let mockFetching = MockFeedFetchingService()
-        mockFetching.feedsByURL = [
-            url1: TestFixtures.makeFeed(title: "Updated", feedDescription: "New Desc"),
-        ]
-        mockFetching.errorsByURL = [url2: FeedFetchingError.invalidResponse(statusCode: 404)]
-
-        let viewModel = FeedListViewModel(persistence: mockPersistence, feedFetching: mockFetching, feedIconService: MockFeedIconService(), networkMonitor: MockNetworkMonitorService())
-        viewModel.loadFeeds()
-        await viewModel.refreshAllFeeds()
-
-        #expect(viewModel.feeds[0].title == "Updated")
-        #expect(viewModel.feeds[0].feedDescription == "New Desc")
-        #expect(viewModel.errorMessage == "1 of 2 feed(s) could not be updated.")
-    }
-
-    @Test("refreshAllFeeds is no-op when feeds is empty")
-    @MainActor
-    func refreshAllFeedsEmptyNoOp() async {
-        let mockPersistence = MockFeedPersistenceService()
-        let mockFetching = MockFeedFetchingService()
-
-        let viewModel = FeedListViewModel(persistence: mockPersistence, feedFetching: mockFetching, feedIconService: MockFeedIconService(), networkMonitor: MockNetworkMonitorService())
-        viewModel.loadFeeds()
-        await viewModel.refreshAllFeeds()
-
-        #expect(viewModel.feeds.isEmpty)
-        #expect(viewModel.isRefreshing == false)
-        #expect(viewModel.errorMessage == nil)
-    }
-
-    @Test("isRefreshing is false after refresh completes")
-    @MainActor
-    func isRefreshingFalseAfterComplete() async {
-        let url = URL(string: "https://example.com/feed")!
-        let feed = TestFixtures.makePersistentFeed(feedURL: url)
-
-        let mockPersistence = MockFeedPersistenceService()
-        mockPersistence.feeds = [feed]
-        let mockFetching = MockFeedFetchingService()
-        mockFetching.feedsByURL = [url: TestFixtures.makeFeed()]
-
-        let viewModel = FeedListViewModel(persistence: mockPersistence, feedFetching: mockFetching, feedIconService: MockFeedIconService(), networkMonitor: MockNetworkMonitorService())
-        viewModel.loadFeeds()
-        await viewModel.refreshAllFeeds()
-
-        #expect(viewModel.isRefreshing == false)
-    }
-
-    @Test("refreshAllFeeds sets error state on failed feeds")
-    @MainActor
-    func refreshAllFeedsSetsErrorState() async {
-        let url = URL(string: "https://fail.com/feed")!
-        let feed = TestFixtures.makePersistentFeed(title: "Broken", feedURL: url)
-
-        let mockPersistence = MockFeedPersistenceService()
-        mockPersistence.feeds = [feed]
-        let mockFetching = MockFeedFetchingService()
-        mockFetching.errorsByURL = [url: FeedFetchingError.invalidResponse(statusCode: 404)]
-
-        let viewModel = FeedListViewModel(persistence: mockPersistence, feedFetching: mockFetching, feedIconService: MockFeedIconService(), networkMonitor: MockNetworkMonitorService())
-        viewModel.loadFeeds()
-        await viewModel.refreshAllFeeds()
-
-        #expect(viewModel.feeds[0].lastFetchError == "HTTP 404")
-        #expect(viewModel.feeds[0].lastFetchErrorDate != nil)
-    }
-
-    @Test("refreshAllFeeds clears error state on successful feeds")
-    @MainActor
-    func refreshAllFeedsClearsErrorState() async {
-        let url = URL(string: "https://recovered.com/feed")!
-        let feed = TestFixtures.makePersistentFeed(
-            title: "Was Broken",
-            feedURL: url,
-            lastFetchError: "HTTP 404",
-            lastFetchErrorDate: Date()
-        )
-
-        let mockPersistence = MockFeedPersistenceService()
-        mockPersistence.feeds = [feed]
-        let mockFetching = MockFeedFetchingService()
-        mockFetching.feedsByURL = [url: TestFixtures.makeFeed(title: "Fixed")]
-
-        let viewModel = FeedListViewModel(persistence: mockPersistence, feedFetching: mockFetching, feedIconService: MockFeedIconService(), networkMonitor: MockNetworkMonitorService())
-        viewModel.loadFeeds()
-        await viewModel.refreshAllFeeds()
-
-        #expect(viewModel.feeds[0].lastFetchError == nil)
-        #expect(viewModel.feeds[0].lastFetchErrorDate == nil)
-        #expect(viewModel.feeds[0].title == "Fixed")
-    }
 
     // MARK: - OPML Import (Happy Paths)
 
@@ -688,7 +590,7 @@ struct FeedListViewModelTests {
             TestFixtures.makeOPMLFeedEntry(title: "Feed B", feedURL: URL(string: "https://b.com/feed")!),
         ]
 
-        let viewModel = FeedListViewModel(persistence: mockPersistence, opmlService: mockOPML)
+        let viewModel = Self.makeViewModel(persistence: mockPersistence, opmlService: mockOPML)
         viewModel.importOPML(from: Data())
 
         #expect(viewModel.feeds.count == 2)
@@ -711,7 +613,7 @@ struct FeedListViewModelTests {
             TestFixtures.makeOPMLFeedEntry(title: "New Feed", feedURL: URL(string: "https://new.com/feed")!),
         ]
 
-        let viewModel = FeedListViewModel(persistence: mockPersistence, opmlService: mockOPML)
+        let viewModel = Self.makeViewModel(persistence: mockPersistence, opmlService: mockOPML)
         viewModel.loadFeeds()
         viewModel.importOPML(from: Data())
 
@@ -733,7 +635,7 @@ struct FeedListViewModelTests {
             TestFixtures.makeOPMLFeedEntry(feedURL: URL(string: "https://a.com/feed")!),
         ]
 
-        let viewModel = FeedListViewModel(persistence: mockPersistence, opmlService: mockOPML)
+        let viewModel = Self.makeViewModel(persistence: mockPersistence, opmlService: mockOPML)
         viewModel.loadFeeds()
         viewModel.importOPML(from: Data())
 
@@ -757,7 +659,7 @@ struct FeedListViewModelTests {
             TestFixtures.makeOPMLFeedEntry(feedURL: URL(string: "https://new2.com/feed")!),
         ]
 
-        let viewModel = FeedListViewModel(persistence: mockPersistence, opmlService: mockOPML)
+        let viewModel = Self.makeViewModel(persistence: mockPersistence, opmlService: mockOPML)
         viewModel.loadFeeds()
         viewModel.importOPML(from: Data())
 
@@ -783,12 +685,18 @@ struct FeedListViewModelTests {
             url2: TestFixtures.makeFeed(title: "Real Two", feedDescription: "Real Desc"),
         ]
 
+        let mockIconService = MockFeedIconService()
+        let refreshService = FeedRefreshService(
+            persistence: mockPersistence,
+            feedFetching: mockFetching,
+            feedIconService: mockIconService,
+            networkMonitor: MockNetworkMonitorService()
+        )
         let viewModel = FeedListViewModel(
             persistence: mockPersistence,
-            opmlService: mockOPML,
-            feedFetching: mockFetching,
-            feedIconService: MockFeedIconService(),
-            networkMonitor: MockNetworkMonitorService()
+            refreshService: refreshService,
+            feedIconService: mockIconService,
+            opmlService: mockOPML
         )
         await viewModel.importOPMLAndRefresh(from: Data())
 
@@ -807,7 +715,7 @@ struct FeedListViewModelTests {
             TestFixtures.makeOPMLFeedEntry(title: "Feed B", feedURL: URL(string: "https://b.com/feed")!),
         ]
 
-        let viewModel = FeedListViewModel(persistence: mockPersistence, opmlService: mockOPML)
+        let viewModel = Self.makeViewModel(persistence: mockPersistence, opmlService: mockOPML)
         viewModel.importOPML(from: Data())
 
         #expect(viewModel.feeds.count == 2)
@@ -828,7 +736,7 @@ struct FeedListViewModelTests {
             TestFixtures.makeOPMLFeedEntry(title: "Feed C", feedURL: URL(string: "https://c.com/feed")!),
         ]
 
-        let viewModel = FeedListViewModel(persistence: mockPersistence, opmlService: mockOPML)
+        let viewModel = Self.makeViewModel(persistence: mockPersistence, opmlService: mockOPML)
         viewModel.importOPML(from: Data())
 
         // Only the first feed should have been added — import aborts on second
@@ -847,7 +755,7 @@ struct FeedListViewModelTests {
         let mockOPML = MockOPMLService()
         mockOPML.errorToThrow = NSError(domain: "test", code: 1)
 
-        let viewModel = FeedListViewModel(persistence: mockPersistence, opmlService: mockOPML)
+        let viewModel = Self.makeViewModel(persistence: mockPersistence, opmlService: mockOPML)
         viewModel.importOPML(from: Data())
 
         #expect(viewModel.importExportErrorMessage != nil)
@@ -862,7 +770,7 @@ struct FeedListViewModelTests {
         let mockOPML = MockOPMLService()
         mockOPML.errorToThrow = NSError(domain: "test", code: 1)
 
-        let viewModel = FeedListViewModel(persistence: mockPersistence, opmlService: mockOPML)
+        let viewModel = Self.makeViewModel(persistence: mockPersistence, opmlService: mockOPML)
         viewModel.loadFeeds()
         viewModel.exportOPML()
 
@@ -876,7 +784,7 @@ struct FeedListViewModelTests {
         let mockPersistence = MockFeedPersistenceService()
         mockPersistence.errorToThrow = NSError(domain: "test", code: 1)
 
-        let viewModel = FeedListViewModel(persistence: mockPersistence)
+        let viewModel = Self.makeViewModel(persistence: mockPersistence)
         viewModel.loadFeeds()
 
         #expect(viewModel.errorMessage != nil)
@@ -890,7 +798,7 @@ struct FeedListViewModelTests {
         let mockPersistence = MockFeedPersistenceService()
         mockPersistence.feeds = [feed]
 
-        let viewModel = FeedListViewModel(persistence: mockPersistence)
+        let viewModel = Self.makeViewModel(persistence: mockPersistence)
         viewModel.loadFeeds()
 
         mockPersistence.errorToThrow = NSError(domain: "test", code: 1)
@@ -909,7 +817,7 @@ struct FeedListViewModelTests {
             TestFixtures.makeOPMLFeedEntry(title: "Feed A", feedURL: URL(string: "https://a.com/feed")!),
         ]
 
-        let viewModel = FeedListViewModel(persistence: mockPersistence, opmlService: mockOPML)
+        let viewModel = Self.makeViewModel(persistence: mockPersistence, opmlService: mockOPML)
         // Simulate stale error from a previous operation
         viewModel.importExportErrorMessage = "Previous error"
         viewModel.importOPML(from: Data())
@@ -926,7 +834,7 @@ struct FeedListViewModelTests {
         let nonexistentURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("nonexistent-\(UUID().uuidString).opml")
 
-        let viewModel = FeedListViewModel(persistence: mockPersistence, opmlService: mockOPML)
+        let viewModel = Self.makeViewModel(persistence: mockPersistence, opmlService: mockOPML)
         viewModel.importOPML(from: nonexistentURL)
 
         #expect(viewModel.importExportErrorMessage == "Unable to read the selected file.")
@@ -941,12 +849,7 @@ struct FeedListViewModelTests {
         let nonexistentURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("nonexistent-\(UUID().uuidString).opml")
 
-        let viewModel = FeedListViewModel(
-            persistence: mockPersistence,
-            opmlService: mockOPML,
-            feedIconService: MockFeedIconService(),
-            networkMonitor: MockNetworkMonitorService()
-        )
+        let viewModel = Self.makeViewModel(persistence: mockPersistence, opmlService: mockOPML)
         await viewModel.importOPMLAndRefresh(from: nonexistentURL)
 
         #expect(viewModel.importExportErrorMessage == "Unable to read the selected file.")
@@ -961,7 +864,7 @@ struct FeedListViewModelTests {
         let mockOPML = MockOPMLService()
         mockOPML.dataToReturn = Data("opml-content".utf8)
 
-        let viewModel = FeedListViewModel(persistence: mockPersistence, opmlService: mockOPML)
+        let viewModel = Self.makeViewModel(persistence: mockPersistence, opmlService: mockOPML)
         viewModel.loadFeeds()
         // Simulate stale error from a previous operation
         viewModel.importExportErrorMessage = "Previous error"
@@ -971,572 +874,189 @@ struct FeedListViewModelTests {
         #expect(viewModel.opmlExportURL != nil)
     }
 
-    // MARK: - Icon Resolution During Refresh
+    // MARK: - Refresh Delegation — outcome → errorMessage translation
+    //
+    // These tests defend the `refreshAllFeeds()` switch that maps a
+    // `FeedRefreshService.Outcome` into the viewmodel's `errorMessage`. The
+    // underlying refresh pipeline is covered by FeedRefreshServiceTests; the
+    // tests here pin:
+    //   - exact user-facing strings (string format + interpolation)
+    //   - priority ordering (save > failureCount > retention)
+    //   - .setupFailed → distinct "load your feeds" message
+    //   - .cancelled → no user-visible error (silent)
+    // A refactor that reorders the switch arms, swaps loadFeeds() before or
+    // after the outcome translation, or changes the exact strings will fail
+    // these tests.
 
-    @Test("refreshAllFeeds resolves icons for fetched feeds")
+    @Test("refreshAllFeeds clears errorMessage on happy-path outcome")
     @MainActor
-    func refreshAllFeedsResolvesIcons() async {
+    func refreshHappyPathClearsErrorMessage() async {
         let url = URL(string: "https://example.com/feed")!
         let feed = TestFixtures.makePersistentFeed(feedURL: url)
-
         let mockPersistence = MockFeedPersistenceService()
         mockPersistence.feeds = [feed]
         let mockFetching = MockFeedFetchingService()
         mockFetching.feedsByURL = [url: TestFixtures.makeFeed()]
-        let mockIconService = MockFeedIconService()
 
-        let viewModel = FeedListViewModel(
+        let mockIconService = MockFeedIconService()
+        let refreshService = Self.makeRefreshService(
             persistence: mockPersistence,
             feedFetching: mockFetching,
-            feedIconService: mockIconService,
-            networkMonitor: MockNetworkMonitorService()
+            feedIconService: mockIconService
         )
-        viewModel.loadFeeds()
-        await viewModel.refreshAllFeeds()
-
-        // Allow fire-and-forget icon resolution tasks to complete
-        for _ in 0..<10 { await Task.yield() }
-
-        #expect(mockIconService.resolveAndCacheCallCount == 1)
-    }
-
-    @Test("refreshAllFeeds skips icon resolution when icon already cached")
-    @MainActor
-    func refreshAllFeedsSkipsIconWhenCached() async {
-        let url = URL(string: "https://example.com/feed")!
-        let feed = TestFixtures.makePersistentFeed(feedURL: url)
-
-        let mockPersistence = MockFeedPersistenceService()
-        mockPersistence.feeds = [feed]
-        let mockFetching = MockFeedFetchingService()
-        mockFetching.feedsByURL = [url: TestFixtures.makeFeed()]
-        let mockIconService = MockFeedIconService()
-        mockIconService.cachedFileURL = URL(filePath: "/tmp/cached-icon.png")
-
         let viewModel = FeedListViewModel(
             persistence: mockPersistence,
-            feedFetching: mockFetching,
-            feedIconService: mockIconService,
-            networkMonitor: MockNetworkMonitorService()
+            refreshService: refreshService,
+            feedIconService: mockIconService
         )
-        viewModel.loadFeeds()
+        viewModel.errorMessage = "stale error"
         await viewModel.refreshAllFeeds()
 
-        // Allow fire-and-forget icon resolution tasks to complete
-        for _ in 0..<10 { await Task.yield() }
-
-        #expect(mockIconService.resolveAndCacheCallCount == 0)
-    }
-
-    // MARK: - 304 Not Modified
-
-    @Test("refreshAllFeeds handles 304 Not Modified")
-    @MainActor
-    func refreshAllFeeds304NotModified() async {
-        let url = URL(string: "https://example.com/feed")!
-        let feed = TestFixtures.makePersistentFeed(
-            title: "Existing",
-            feedURL: url,
-            lastFetchError: "HTTP 500",
-            lastFetchErrorDate: Date()
-        )
-
-        let mockPersistence = MockFeedPersistenceService()
-        mockPersistence.feeds = [feed]
-        let mockFetching = MockFeedFetchingService()
-        mockFetching.shouldReturn304 = true
-
-        let viewModel = FeedListViewModel(persistence: mockPersistence, feedFetching: mockFetching, feedIconService: MockFeedIconService(), networkMonitor: MockNetworkMonitorService())
-        viewModel.loadFeeds()
-        await viewModel.refreshAllFeeds()
-
-        // Title should not change (304 means no new data)
-        #expect(viewModel.feeds[0].title == "Existing")
-        // Error state should be cleared
-        #expect(viewModel.feeds[0].lastFetchError == nil)
         #expect(viewModel.errorMessage == nil)
     }
 
-    // MARK: - Save Failure Feedback
-
-    @Test("refreshAllFeeds sets errorMessage when final save fails")
+    @Test("refreshAllFeeds surfaces exact fetch-failure message format")
     @MainActor
-    func refreshAllFeedsSaveFailureSetsErrorMessage() async {
-        let url = URL(string: "https://example.com/feed")!
-        let feed = TestFixtures.makePersistentFeed(title: "Feed", feedURL: url)
-
-        let mockPersistence = MockFeedPersistenceService()
-        mockPersistence.feeds = [feed]
-        let mockFetching = MockFeedFetchingService()
-        mockFetching.feedsByURL = [url: TestFixtures.makeFeed(title: "Updated")]
-        mockPersistence.saveError = NSError(domain: "test", code: 1)
-
-        let viewModel = FeedListViewModel(
-            persistence: mockPersistence,
-            feedFetching: mockFetching,
-            feedIconService: MockFeedIconService(),
-            networkMonitor: MockNetworkMonitorService()
-        )
-        viewModel.loadFeeds()
-        await viewModel.refreshAllFeeds()
-
-        #expect(viewModel.errorMessage == "Unable to save updated feeds.")
-    }
-
-    @Test("refreshAllFeeds save failure sets errorMessage not importExportErrorMessage")
-    @MainActor
-    func refreshAllFeedsSaveFailureDoesNotSetImportExportError() async {
-        let url = URL(string: "https://example.com/feed")!
-        let feed = TestFixtures.makePersistentFeed(title: "Feed", feedURL: url)
-
-        let mockPersistence = MockFeedPersistenceService()
-        mockPersistence.feeds = [feed]
-        let mockFetching = MockFeedFetchingService()
-        mockFetching.feedsByURL = [url: TestFixtures.makeFeed(title: "Updated")]
-        mockPersistence.saveError = NSError(domain: "test", code: 1)
-
-        let viewModel = FeedListViewModel(
-            persistence: mockPersistence,
-            feedFetching: mockFetching,
-            feedIconService: MockFeedIconService(),
-            networkMonitor: MockNetworkMonitorService()
-        )
-        viewModel.loadFeeds()
-        await viewModel.refreshAllFeeds()
-
-        #expect(viewModel.errorMessage != nil)
-        #expect(viewModel.importExportErrorMessage == nil)
-    }
-
-    @Test("refreshAllFeeds counts 304 persistence failure in failure total")
-    @MainActor
-    func refreshAllFeeds304PersistenceFailureCounted() async {
-        let url = URL(string: "https://example.com/feed")!
-        let feed = TestFixtures.makePersistentFeed(title: "Feed", feedURL: url)
-
-        let mockPersistence = MockFeedPersistenceService()
-        mockPersistence.feeds = [feed]
-        let mockFetching = MockFeedFetchingService()
-        mockFetching.shouldReturn304 = true
-        // Make only updateFeedError throw to simulate persistence failure on 304 path
-        mockPersistence.updateFeedErrorError = NSError(domain: "test", code: 1)
-
-        let viewModel = FeedListViewModel(
-            persistence: mockPersistence,
-            feedFetching: mockFetching,
-            feedIconService: MockFeedIconService(),
-            networkMonitor: MockNetworkMonitorService()
-        )
-        viewModel.loadFeeds()
-        await viewModel.refreshAllFeeds()
-
-        #expect(viewModel.errorMessage != nil)
-        #expect(viewModel.errorMessage?.contains("1 of 1") == true)
-    }
-
-    @Test("refreshAllFeeds counts fetch failure even when updateFeedError persistence also fails")
-    @MainActor
-    func refreshAllFeedsFetchFailureCountedWhenErrorPersistenceFails() async {
+    func refreshFetchFailureExactMessage() async {
         let url = URL(string: "https://fail.com/feed")!
-        let feed = TestFixtures.makePersistentFeed(title: "Broken", feedURL: url)
-
+        let feed = TestFixtures.makePersistentFeed(feedURL: url)
         let mockPersistence = MockFeedPersistenceService()
         mockPersistence.feeds = [feed]
         let mockFetching = MockFeedFetchingService()
-        mockFetching.errorsByURL = [url: FeedFetchingError.invalidResponse(statusCode: 503)]
-        // Make updateFeedError throw to simulate persistence failure on .failure path
-        mockPersistence.updateFeedErrorError = NSError(domain: "test", code: 1)
+        mockFetching.errorsByURL = [url: FeedFetchingError.invalidResponse(statusCode: 500)]
 
-        let viewModel = FeedListViewModel(
+        let mockIconService = MockFeedIconService()
+        let refreshService = Self.makeRefreshService(
             persistence: mockPersistence,
             feedFetching: mockFetching,
-            feedIconService: MockFeedIconService(),
-            networkMonitor: MockNetworkMonitorService()
+            feedIconService: mockIconService
         )
-        viewModel.loadFeeds()
+        let viewModel = FeedListViewModel(
+            persistence: mockPersistence,
+            refreshService: refreshService,
+            feedIconService: mockIconService
+        )
         await viewModel.refreshAllFeeds()
 
-        // Fetch failure is still counted even though error state persistence also failed
         #expect(viewModel.errorMessage == "1 of 1 feed(s) could not be updated.")
-        // Error state was not persisted since updateFeedError threw
-        #expect(feed.lastFetchError == nil)
     }
 
-    @Test("refreshAllFeeds save failure takes priority over fetch failure message")
+    @Test("refreshAllFeeds prioritizes save failure over fetch failure")
     @MainActor
-    func refreshAllFeedsSaveFailurePriorityOverFetchFailure() async {
-        let url1 = URL(string: "https://ok.com/feed")!
-        let url2 = URL(string: "https://fail.com/feed")!
-        let feed1 = TestFixtures.makePersistentFeed(title: "Good Feed", feedURL: url1)
-        let feed2 = TestFixtures.makePersistentFeed(title: "Bad Feed", feedURL: url2)
-
+    func refreshSaveFailureShadowsFetchFailure() async {
+        // A refresh with BOTH a fetch failure AND a save failure should
+        // surface the save message. Documents a non-obvious priority order
+        // in the outcome-translation switch — a future refactor that flips
+        // the branch order will fail this test.
+        let url = URL(string: "https://fail.com/feed")!
+        let feed = TestFixtures.makePersistentFeed(feedURL: url)
         let mockPersistence = MockFeedPersistenceService()
-        mockPersistence.feeds = [feed1, feed2]
-        let mockFetching = MockFeedFetchingService()
-        mockFetching.feedsByURL = [url1: TestFixtures.makeFeed(title: "Updated")]
-        mockFetching.errorsByURL = [url2: FeedFetchingError.invalidResponse(statusCode: 500)]
-        // Both a fetch failure AND a save failure occur
+        mockPersistence.feeds = [feed]
         mockPersistence.saveError = NSError(domain: "test", code: 1)
+        let mockFetching = MockFeedFetchingService()
+        mockFetching.errorsByURL = [url: FeedFetchingError.invalidResponse(statusCode: 500)]
 
-        let viewModel = FeedListViewModel(
+        let mockIconService = MockFeedIconService()
+        let refreshService = Self.makeRefreshService(
             persistence: mockPersistence,
             feedFetching: mockFetching,
-            feedIconService: MockFeedIconService(),
-            networkMonitor: MockNetworkMonitorService()
+            feedIconService: mockIconService
         )
-        viewModel.loadFeeds()
+        let viewModel = FeedListViewModel(
+            persistence: mockPersistence,
+            refreshService: refreshService,
+            feedIconService: mockIconService
+        )
         await viewModel.refreshAllFeeds()
 
-        // Save failure must take priority over the fetch failure count message
         #expect(viewModel.errorMessage == "Unable to save updated feeds.")
     }
 
-    @Test("refreshAllFeeds save failure message survives loadFeeds failure")
+    @Test("refreshAllFeeds surfaces retention failure message when no higher-priority failure exists")
     @MainActor
-    func refreshAllFeedsSaveFailureMessageSurvivesLoadFeedsFailure() async {
-        let url = URL(string: "https://example.com/feed")!
-        let feed = TestFixtures.makePersistentFeed(title: "Feed", feedURL: url)
-
-        let mockPersistence = MockFeedPersistenceService()
-        mockPersistence.feeds = [feed]
-        let mockFetching = MockFeedFetchingService()
-        mockFetching.feedsByURL = [url: TestFixtures.makeFeed(title: "Updated")]
-        // save() will fail
-        mockPersistence.saveError = NSError(domain: "test", code: 1)
-
-        let viewModel = FeedListViewModel(
-            persistence: mockPersistence,
-            feedFetching: mockFetching,
-            feedIconService: MockFeedIconService(),
-            networkMonitor: MockNetworkMonitorService()
-        )
-        viewModel.loadFeeds()
-
-        // After refresh starts and save fails, make loadFeeds() also fail.
-        // loadFeeds() sets errorMessage to "Unable to load your feeds." on failure,
-        // but the subsequent saveDidFail check should overwrite it.
-        mockPersistence.errorToThrow = NSError(domain: "test", code: 2)
-        await viewModel.refreshAllFeeds()
-
-        // Save failure message must be set even when loadFeeds() itself fails
-        #expect(viewModel.errorMessage == "Unable to save updated feeds.")
-    }
-
-    // MARK: - Separate Persistence Error Handling
-
-    @Test("refreshAllFeeds continues upsert when metadata update fails")
-    @MainActor
-    func refreshAllFeedsContinuesUpsertWhenMetadataFails() async {
-        let url = URL(string: "https://example.com/feed")!
-        let feed = TestFixtures.makePersistentFeed(
-            title: "Original",
-            feedURL: url,
-            lastFetchError: "HTTP 500",
-            lastFetchErrorDate: Date()
-        )
-
-        let mockPersistence = MockFeedPersistenceService()
-        mockPersistence.feeds = [feed]
-        let mockFetching = MockFeedFetchingService()
-        let article = TestFixtures.makeArticle(id: "new-article")
-        mockFetching.feedsByURL = [url: TestFixtures.makeFeed(title: "Updated", articles: [article])]
-        mockFetching.etagToReturn = "etag-123"
-        mockFetching.lastModifiedToReturn = "Mon, 01 Jan 2024"
-
-        // Metadata update fails, but upsert and cache header update should still run
-        mockPersistence.updateFeedMetadataError = NSError(domain: "test", code: 1)
-
-        let viewModel = FeedListViewModel(
-            persistence: mockPersistence,
-            feedFetching: mockFetching,
-            feedIconService: MockFeedIconService(),
-            networkMonitor: MockNetworkMonitorService()
-        )
-        viewModel.loadFeeds()
-        await viewModel.refreshAllFeeds()
-
-        // Title should remain unchanged because metadata update failed
-        #expect(viewModel.feeds[0].title == "Original")
-        // Error state should be cleared despite metadata failure — the fetch succeeded
-        #expect(feed.lastFetchError == nil)
-        #expect(feed.lastFetchErrorDate == nil)
-        // Articles should still be upserted despite metadata failure
-        #expect(mockPersistence.articlesByFeedID[feed.id]?.isEmpty == false)
-        // Cache headers should still be written since upsert succeeded
-        #expect(feed.etag == "etag-123")
-        #expect(feed.lastModifiedHeader == "Mon, 01 Jan 2024")
-        // Metadata failure is cosmetic — should not count as a feed failure
-        #expect(viewModel.errorMessage == nil)
-    }
-
-    @Test("refreshAllFeeds skips cache header update when upsert fails")
-    @MainActor
-    func refreshAllFeedsSkipsCacheHeadersWhenUpsertFails() async {
-        let url = URL(string: "https://example.com/feed")!
-        let feed = TestFixtures.makePersistentFeed(title: "Feed", feedURL: url)
-
-        let mockPersistence = MockFeedPersistenceService()
-        mockPersistence.feeds = [feed]
-        let mockFetching = MockFeedFetchingService()
-        mockFetching.feedsByURL = [url: TestFixtures.makeFeed(title: "Updated")]
-        mockFetching.etagToReturn = "etag-should-not-be-written"
-        mockFetching.lastModifiedToReturn = "should-not-be-written"
-
-        // Upsert fails — cache headers must NOT be written
-        mockPersistence.upsertArticlesError = NSError(domain: "test", code: 1)
-
-        let viewModel = FeedListViewModel(
-            persistence: mockPersistence,
-            feedFetching: mockFetching,
-            feedIconService: MockFeedIconService(),
-            networkMonitor: MockNetworkMonitorService()
-        )
-        viewModel.loadFeeds()
-        await viewModel.refreshAllFeeds()
-
-        // Cache headers should remain nil since upsert failed
-        #expect(feed.etag == nil)
-        #expect(feed.lastModifiedHeader == nil)
-        // Upsert failure counts toward the failure total
-        #expect(viewModel.errorMessage == "1 of 1 feed(s) could not be updated.")
-    }
-
-    @Test("refreshAllFeeds updates metadata even when cache header update fails")
-    @MainActor
-    func refreshAllFeedsUpdatesMetadataWhenCacheHeadersFail() async {
-        let url = URL(string: "https://example.com/feed")!
-        let feed = TestFixtures.makePersistentFeed(title: "Old Title", feedURL: url)
-
-        let mockPersistence = MockFeedPersistenceService()
-        mockPersistence.feeds = [feed]
-        let mockFetching = MockFeedFetchingService()
-        let article = TestFixtures.makeArticle(id: "article-1")
-        mockFetching.feedsByURL = [url: TestFixtures.makeFeed(title: "New Title", articles: [article])]
-
-        // Cache header update fails — should not affect metadata or articles
-        mockPersistence.updateFeedCacheHeadersError = NSError(domain: "test", code: 1)
-
-        let viewModel = FeedListViewModel(
-            persistence: mockPersistence,
-            feedFetching: mockFetching,
-            feedIconService: MockFeedIconService(),
-            networkMonitor: MockNetworkMonitorService()
-        )
-        viewModel.loadFeeds()
-        await viewModel.refreshAllFeeds()
-
-        // Metadata should be updated
-        #expect(viewModel.feeds[0].title == "New Title")
-        // Articles should be upserted
-        #expect(mockPersistence.articlesByFeedID[feed.id]?.isEmpty == false)
-        // Cache header failure is non-critical — should not count as a feed failure
-        #expect(viewModel.errorMessage == nil)
-    }
-
-    @Test("refreshAllFeeds resolves icon even when metadata update fails")
-    @MainActor
-    func refreshAllFeedsResolvesIconWhenMetadataFails() async {
+    func refreshRetentionFailureExactMessage() async {
         let url = URL(string: "https://example.com/feed")!
         let feed = TestFixtures.makePersistentFeed(feedURL: url)
-
         let mockPersistence = MockFeedPersistenceService()
         mockPersistence.feeds = [feed]
         let mockFetching = MockFeedFetchingService()
         mockFetching.feedsByURL = [url: TestFixtures.makeFeed()]
-        let mockIconService = MockFeedIconService()
-
-        // Metadata update fails, but icon resolution should still happen
-        mockPersistence.updateFeedMetadataError = NSError(domain: "test", code: 1)
-
-        let viewModel = FeedListViewModel(
-            persistence: mockPersistence,
-            feedFetching: mockFetching,
-            feedIconService: mockIconService,
-            networkMonitor: MockNetworkMonitorService()
-        )
-        viewModel.loadFeeds()
-        await viewModel.refreshAllFeeds()
-
-        // Allow fire-and-forget icon resolution tasks to complete
-        for _ in 0..<10 { await Task.yield() }
-
-        #expect(mockIconService.resolveAndCacheCallCount == 1)
-    }
-
-    @Test("refreshAllFeeds resolves icon even when upsert fails")
-    @MainActor
-    func refreshAllFeedsResolvesIconWhenUpsertFails() async {
-        let url = URL(string: "https://example.com/feed")!
-        let feed = TestFixtures.makePersistentFeed(feedURL: url)
-
-        let mockPersistence = MockFeedPersistenceService()
-        mockPersistence.feeds = [feed]
-        let mockFetching = MockFeedFetchingService()
-        mockFetching.feedsByURL = [url: TestFixtures.makeFeed()]
-        let mockIconService = MockFeedIconService()
-
-        // Upsert fails, but icon resolution should still happen
-        mockPersistence.upsertArticlesError = NSError(domain: "test", code: 1)
-
-        let viewModel = FeedListViewModel(
-            persistence: mockPersistence,
-            feedFetching: mockFetching,
-            feedIconService: mockIconService,
-            networkMonitor: MockNetworkMonitorService()
-        )
-        viewModel.loadFeeds()
-        await viewModel.refreshAllFeeds()
-
-        // Allow fire-and-forget icon resolution tasks to complete
-        for _ in 0..<10 { await Task.yield() }
-
-        #expect(mockIconService.resolveAndCacheCallCount == 1)
-    }
-
-    @Test("refreshAllFeeds counts exactly one failure when both metadata and upsert fail")
-    @MainActor
-    func refreshAllFeedsCompoundMetadataAndUpsertFailure() async {
-        let url = URL(string: "https://example.com/feed")!
-        let feed = TestFixtures.makePersistentFeed(feedURL: url)
-
-        let mockPersistence = MockFeedPersistenceService()
-        mockPersistence.feeds = [feed]
-        let mockFetching = MockFeedFetchingService()
-        mockFetching.feedsByURL = [url: TestFixtures.makeFeed()]
-        mockFetching.etagToReturn = "etag-should-not-be-written"
-        mockFetching.lastModifiedToReturn = "should-not-be-written"
-        let mockIconService = MockFeedIconService()
-
-        // Both metadata and upsert fail
-        mockPersistence.updateFeedMetadataError = NSError(domain: "test", code: 1)
-        mockPersistence.upsertArticlesError = NSError(domain: "test", code: 2)
-
-        let viewModel = FeedListViewModel(
-            persistence: mockPersistence,
-            feedFetching: mockFetching,
-            feedIconService: mockIconService,
-            networkMonitor: MockNetworkMonitorService()
-        )
-        viewModel.loadFeeds()
-        await viewModel.refreshAllFeeds()
-
-        // Allow fire-and-forget icon resolution tasks to complete
-        for _ in 0..<10 { await Task.yield() }
-
-        // Only upsert failure counts — metadata is cosmetic, so exactly 1 failure
-        #expect(viewModel.errorMessage == "1 of 1 feed(s) could not be updated.")
-        // Cache headers must NOT be written since upsert failed
-        #expect(feed.etag == nil)
-        #expect(feed.lastModifiedHeader == nil)
-        // Icon resolution still fires despite both persistence failures
-        #expect(mockIconService.resolveAndCacheCallCount == 1)
-    }
-
-    // MARK: - Thumbnail Prefetch
-
-    @Test("refreshAllFeeds invokes thumbnail prefetcher after refresh")
-    @MainActor
-    func refreshAllFeedsInvokesPrefetcher() async {
-        let url = URL(string: "https://example.com/feed")!
-        let feed = TestFixtures.makePersistentFeed(title: "Feed", feedURL: url)
-
-        let mockPersistence = MockFeedPersistenceService()
-        mockPersistence.feeds = [feed]
-        let mockFetching = MockFeedFetchingService()
-        mockFetching.feedsByURL = [url: TestFixtures.makeFeed(title: "Updated")]
-
-        let mockPrefetcher = MockThumbnailPrefetchService()
-
-        let viewModel = FeedListViewModel(
-            persistence: mockPersistence,
-            feedFetching: mockFetching,
-            feedIconService: MockFeedIconService(),
-            thumbnailPrefetcher: mockPrefetcher,
-            networkMonitor: MockNetworkMonitorService()
-        )
-        viewModel.loadFeeds()
-
-        // Set up a continuation so we can await the fire-and-forget prefetch Task
-        await withCheckedContinuation { continuation in
-            mockPrefetcher.prefetchContinuation = continuation
-            Task {
-                await viewModel.refreshAllFeeds()
-            }
-        }
-
-        #expect(mockPrefetcher.prefetchCallCount == 1)
-    }
-
-    // MARK: - Article Retention Cleanup
-
-    @Test("refreshAllFeeds invokes article retention enforcement after refresh")
-    @MainActor
-    func refreshAllFeedsInvokesRetentionCleanup() async {
-        let url = URL(string: "https://example.com/feed")!
-        let feed = TestFixtures.makePersistentFeed(title: "Feed", feedURL: url)
-
-        let mockPersistence = MockFeedPersistenceService()
-        mockPersistence.feeds = [feed]
-        let mockFetching = MockFeedFetchingService()
-        mockFetching.feedsByURL = [url: TestFixtures.makeFeed(title: "Updated")]
-        let mockRetention = MockArticleRetentionService()
-        let mockPrefetcher = MockThumbnailPrefetchService()
-
-        let viewModel = FeedListViewModel(
-            persistence: mockPersistence,
-            feedFetching: mockFetching,
-            feedIconService: MockFeedIconService(),
-            thumbnailPrefetcher: mockPrefetcher,
-            articleRetention: mockRetention,
-            networkMonitor: MockNetworkMonitorService()
-        )
-        viewModel.loadFeeds()
-
-        await withCheckedContinuation { continuation in
-            mockPrefetcher.prefetchContinuation = continuation
-            Task {
-                await viewModel.refreshAllFeeds()
-            }
-        }
-
-        #expect(mockRetention.enforceCallCount == 1)
-    }
-
-    @Test("refreshAllFeeds continues normally when retention enforcement fails")
-    @MainActor
-    func refreshAllFeedsContinuesOnRetentionError() async {
-        let url = URL(string: "https://example.com/feed")!
-        let feed = TestFixtures.makePersistentFeed(title: "Feed", feedURL: url)
-
-        let mockPersistence = MockFeedPersistenceService()
-        mockPersistence.feeds = [feed]
-        let mockFetching = MockFeedFetchingService()
-        mockFetching.feedsByURL = [url: TestFixtures.makeFeed(title: "Updated")]
         let mockRetention = MockArticleRetentionService()
         mockRetention.enforceError = NSError(domain: "test", code: 1)
-        let mockPrefetcher = MockThumbnailPrefetchService()
 
-        let viewModel = FeedListViewModel(
+        let mockIconService = MockFeedIconService()
+        let refreshService = Self.makeRefreshService(
             persistence: mockPersistence,
             feedFetching: mockFetching,
-            feedIconService: MockFeedIconService(),
-            thumbnailPrefetcher: mockPrefetcher,
-            articleRetention: mockRetention,
-            networkMonitor: MockNetworkMonitorService()
+            feedIconService: mockIconService,
+            articleRetention: mockRetention
         )
-        viewModel.loadFeeds()
+        let viewModel = FeedListViewModel(
+            persistence: mockPersistence,
+            refreshService: refreshService,
+            feedIconService: mockIconService
+        )
+        await viewModel.refreshAllFeeds()
 
-        await withCheckedContinuation { continuation in
-            mockPrefetcher.prefetchContinuation = continuation
-            Task {
-                await viewModel.refreshAllFeeds()
-            }
-        }
-
-        // Retention failed but refresh still completed successfully
-        #expect(mockRetention.enforceCallCount == 1)
-        #expect(mockPrefetcher.prefetchCallCount == 1)
-        // The retention error should not override the refresh success state
-        #expect(viewModel.isRefreshing == false)
+        #expect(viewModel.errorMessage == "Article cleanup could not complete.")
     }
+
+    @Test("refreshAllFeeds surfaces setupFailed with distinct 'load your feeds' message")
+    @MainActor
+    func refreshSetupFailedExactMessage() async {
+        // persistence.allFeeds() throws on the FIRST call (triggering
+        // .setupFailed) but succeeds on the second (so loadFeeds() in the
+        // viewmodel's post-refresh reload does NOT set its own
+        // "Unable to load your feeds." error). This isolates the assertion
+        // to the `.setupFailed` switch arm — a refactor that silently
+        // dropped the arm would leave errorMessage nil and fail this test,
+        // which is exactly the regression we want to catch.
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.allFeedsFailureCount = 1  // fail once, then succeed
+
+        let mockIconService = MockFeedIconService()
+        let refreshService = Self.makeRefreshService(
+            persistence: mockPersistence,
+            feedIconService: mockIconService
+        )
+        let viewModel = FeedListViewModel(
+            persistence: mockPersistence,
+            refreshService: refreshService,
+            feedIconService: mockIconService
+        )
+        await viewModel.refreshAllFeeds()
+
+        #expect(viewModel.errorMessage == "Unable to load your feeds.")
+    }
+
+    @Test("refreshAllFeeds leaves errorMessage nil on cancellation")
+    @MainActor
+    func refreshCancelledDoesNotSurfaceError() async {
+        // Cancellation (BG task expiration, view teardown) must not set a
+        // user-visible error — the next refresh picks up where this one
+        // left off. Tested by injecting a CancellationError into the fetch
+        // task group.
+        let url = URL(string: "https://example.com/feed")!
+        let feed = TestFixtures.makePersistentFeed(feedURL: url)
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+        let mockFetching = MockFeedFetchingService()
+        mockFetching.errorsByURL = [url: CancellationError()]
+
+        let mockIconService = MockFeedIconService()
+        let refreshService = Self.makeRefreshService(
+            persistence: mockPersistence,
+            feedFetching: mockFetching,
+            feedIconService: mockIconService
+        )
+        let viewModel = FeedListViewModel(
+            persistence: mockPersistence,
+            refreshService: refreshService,
+            feedIconService: mockIconService
+        )
+        await viewModel.refreshAllFeeds()
+
+        #expect(viewModel.errorMessage == nil)
+    }
+
 }
