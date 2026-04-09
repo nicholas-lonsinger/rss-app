@@ -186,7 +186,7 @@ RSSAppTests/
 │   └── EditGroupViewModelTests.swift       # Feed loading, membership toggle round-trips, name save
 ```
 
-**Total: 79 source files + 1 resource + 1 Info.plist, 71 test source files + 1 fixture.**
+**Total: 83 source files + 1 resource + 1 Info.plist, 77 test source files + 1 fixture.**
 
 ## Key Components
 

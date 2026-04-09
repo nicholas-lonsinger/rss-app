@@ -25,10 +25,11 @@ final class HomeViewModel {
     /// (shared with the BG refresh path) and compares it against
     /// `entryRefreshInterval`. Returns `true` when no refresh has ever
     /// completed on this install, or when the most recent completion is
-    /// older than the interval. Used by `AllArticlesSource` and
-    /// `UnreadArticlesSource` to gate the `refreshAllFeeds()` call in their
-    /// `initialLoad()`; `SavedArticlesSource` does not consult it at all
-    /// because saved articles never benefit from a feed refresh.
+    /// older than the interval. Used by `AllArticlesSource`,
+    /// `UnreadArticlesSource`, and `GroupArticleSource` to gate the
+    /// `refreshAllFeeds()` call in their `initialLoad()`;
+    /// `SavedArticlesSource` does not consult it at all because saved
+    /// articles never benefit from a feed refresh.
     var shouldRefreshOnEntry: Bool {
         guard let last = FeedRefreshService.lastRefreshCompletedAt else {
             return true
@@ -455,6 +456,7 @@ final class HomeViewModel {
         do {
             try persistence.renameGroup(group, to: name)
             loadGroups()
+            Self.logger.notice("Renamed group to '\(name, privacy: .public)'")
         } catch {
             errorMessage = "Unable to rename group."
             Self.logger.error("Failed to rename group: \(error, privacy: .public)")

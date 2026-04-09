@@ -12,8 +12,8 @@ struct EmptyStateContent: Sendable, Equatable {
 }
 
 /// Data-and-behavior seam between `ArticleListScreen` and the various
-/// concrete article lists in the app (per-feed, All, Unread, Saved — and,
-/// prospectively, feed groups and labels).
+/// concrete article lists in the app (per-feed, All, Unread, Saved, and
+/// user-created feed groups).
 ///
 /// `ArticleListScreen` is generic over this protocol and renders the list,
 /// toolbar, swipe actions, pagination trigger, empty/error/loading states,

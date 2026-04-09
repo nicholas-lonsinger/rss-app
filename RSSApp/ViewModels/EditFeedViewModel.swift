@@ -261,6 +261,7 @@ final class EditFeedViewModel {
             memberGroupIDs = Set(feedGroups.map(\.id))
             Self.logger.debug("Feed '\(self.feed.title, privacy: .public)' belongs to \(self.memberGroupIDs.count, privacy: .public) of \(self.allGroups.count, privacy: .public) groups")
         } catch {
+            errorMessage = "Unable to load groups."
             Self.logger.error("Failed to load groups for feed: \(error, privacy: .public)")
         }
     }

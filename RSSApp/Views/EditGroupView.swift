@@ -63,7 +63,9 @@ struct EditGroupView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") {
                         viewModel.saveNameIfChanged()
-                        dismiss()
+                        if viewModel.errorMessage == nil {
+                            dismiss()
+                        }
                     }
                 }
             }
