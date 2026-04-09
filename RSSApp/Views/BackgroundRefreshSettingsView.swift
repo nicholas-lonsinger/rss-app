@@ -1,0 +1,104 @@
+import SwiftUI
+import os
+
+/// Settings sub-page for configuring periodic background feed refresh.
+/// Pushed from the top-level `SettingsView`.
+struct BackgroundRefreshSettingsView: View {
+
+    private static let logger = Logger(category: "BackgroundRefreshSettingsView")
+
+    @State private var isEnabled: Bool
+    @State private var interval: BackgroundRefreshInterval
+    @State private var networkRequirement: BackgroundRefreshNetworkRequirement
+    @State private var powerRequirement: BackgroundRefreshPowerRequirement
+
+    init() {
+        _isEnabled = State(initialValue: BackgroundRefreshSettings.isEnabled)
+        _interval = State(initialValue: BackgroundRefreshSettings.interval)
+        _networkRequirement = State(initialValue: BackgroundRefreshSettings.networkRequirement)
+        _powerRequirement = State(initialValue: BackgroundRefreshSettings.powerRequirement)
+    }
+
+    var body: some View {
+        List {
+            Section {
+                Toggle(isOn: $isEnabled) {
+                    Label("Background Refresh", systemImage: "arrow.clockwise")
+                }
+                .onChange(of: isEnabled) { _, newValue in
+                    BackgroundRefreshSettings.isEnabled = newValue
+                    if newValue {
+                        BackgroundRefreshScheduler.scheduleNextRefresh()
+                    } else {
+                        BackgroundRefreshScheduler.cancelAll()
+                    }
+                }
+            } footer: {
+                Text("When enabled, feeds refresh periodically in the background so new articles appear without pull-to-refresh. The system chooses the exact timing based on your usage and the constraints below.")
+            }
+
+            Section {
+                ForEach(BackgroundRefreshInterval.allCases) { option in
+                    Button {
+                        interval = option
+                        BackgroundRefreshSettings.interval = option
+                        BackgroundRefreshScheduler.scheduleNextRefresh()
+                    } label: {
+                        HStack {
+                            Text(option.displayLabel)
+                                .foregroundStyle(.primary)
+                            Spacer()
+                            if option == interval {
+                                Image(systemName: "checkmark")
+                                    .foregroundStyle(Color.accentColor)
+                                    .fontWeight(.semibold)
+                            }
+                        }
+                    }
+                }
+            } header: {
+                Text("Refresh Interval")
+            } footer: {
+                Text("Minimum time between refreshes. The system may delay refreshes based on battery, network, and usage patterns.")
+            }
+            .disabled(!isEnabled)
+
+            Section {
+                Picker("Network", selection: $networkRequirement) {
+                    ForEach(BackgroundRefreshNetworkRequirement.allCases) { option in
+                        Text(option.displayLabel).tag(option)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .onChange(of: networkRequirement) { _, newValue in
+                    BackgroundRefreshSettings.networkRequirement = newValue
+                    BackgroundRefreshScheduler.scheduleNextRefresh()
+                }
+            } header: {
+                Text("Network")
+            } footer: {
+                Text("Select \"Wi-Fi Only\" to avoid using cellular data for background refresh.")
+            }
+            .disabled(!isEnabled)
+
+            Section {
+                Picker("Power", selection: $powerRequirement) {
+                    ForEach(BackgroundRefreshPowerRequirement.allCases) { option in
+                        Text(option.displayLabel).tag(option)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .onChange(of: powerRequirement) { _, newValue in
+                    BackgroundRefreshSettings.powerRequirement = newValue
+                    BackgroundRefreshScheduler.scheduleNextRefresh()
+                }
+            } header: {
+                Text("Power")
+            } footer: {
+                Text("Select \"Charging Only\" to reserve background refresh for when your device is plugged in. The system will not run background refresh on battery power when this is selected.")
+            }
+            .disabled(!isEnabled)
+        }
+        .navigationTitle("Background Refresh")
+    }
+}

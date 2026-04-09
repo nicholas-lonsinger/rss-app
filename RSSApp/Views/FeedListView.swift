@@ -19,20 +19,30 @@ struct FeedListView: View {
     @State private var feedToEdit: PersistentFeed?
 
     private let persistence: FeedPersisting
+    private let refreshService: FeedRefreshService
     private let thumbnailService: ArticleThumbnailCaching = ArticleThumbnailService()
     private let isEmbedded: Bool
 
     /// Creates a feed list view.
     /// - Parameters:
     ///   - persistence: The persistence service for feed data.
+    ///   - refreshService: The shared feed refresh service. Callers should pass
+    ///     the app-wide instance so foreground and background refreshes share
+    ///     in-flight state.
     ///   - isEmbedded: When `true`, omits the wrapping `NavigationStack` so this view
     ///     can be pushed inside a parent stack (e.g., from `HomeView`). Defaults to `false`.
     ///   - homeViewModel: The home view model for badge updates in settings. When nil
     ///     (standalone mode), a minimal instance is created internally.
-    init(persistence: FeedPersisting, isEmbedded: Bool = false, homeViewModel: HomeViewModel? = nil) {
+    init(
+        persistence: FeedPersisting,
+        refreshService: FeedRefreshService,
+        isEmbedded: Bool = false,
+        homeViewModel: HomeViewModel? = nil
+    ) {
         self.persistence = persistence
+        self.refreshService = refreshService
         self.isEmbedded = isEmbedded
-        _viewModel = State(initialValue: FeedListViewModel(persistence: persistence))
+        _viewModel = State(initialValue: FeedListViewModel(persistence: persistence, refreshService: refreshService))
         _homeViewModel = State(initialValue: homeViewModel ?? HomeViewModel(persistence: persistence))
     }
 
