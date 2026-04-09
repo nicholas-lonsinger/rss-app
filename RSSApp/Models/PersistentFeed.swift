@@ -30,6 +30,12 @@ final class PersistentFeed {
     var lastFetchError: String?
     var lastFetchErrorDate: Date?
 
+    // MARK: - Organization
+
+    /// The group this feed belongs to, if any. A feed can belong to at most
+    /// one group. `nil` means ungrouped.
+    var group: PersistentFeedGroup?
+
     // MARK: - Relationships
 
     @Relationship(deleteRule: .cascade, inverse: \PersistentArticle.feed)
@@ -46,7 +52,8 @@ final class PersistentFeed {
         lastModifiedHeader: String? = nil,
         iconURL: URL? = nil,
         lastFetchError: String? = nil,
-        lastFetchErrorDate: Date? = nil
+        lastFetchErrorDate: Date? = nil,
+        group: PersistentFeedGroup? = nil
     ) {
         self.id = id
         self.title = title
@@ -59,6 +66,7 @@ final class PersistentFeed {
         self.iconURL = iconURL
         self.lastFetchError = lastFetchError
         self.lastFetchErrorDate = lastFetchErrorDate
+        self.group = group
         self.articles = []
     }
 }

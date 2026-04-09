@@ -21,6 +21,12 @@ final class AddFeedViewModel {
     /// setting `didAddFeed = true` and allowing the sheet to dismiss.
     var atomFallbackNotice: URL?
 
+    /// Selected group for the new feed. `nil` means ungrouped.
+    var selectedGroupID: UUID?
+
+    /// Available groups for the group picker.
+    private(set) var availableGroups: [PersistentFeedGroup] = []
+
     var canSubmit: Bool {
         !urlInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isValidating
     }
@@ -40,6 +46,15 @@ final class AddFeedViewModel {
         self.persistence = persistence
         self.feedIconService = feedIconService
         self.atomDiscovery = atomDiscovery
+        loadGroups()
+    }
+
+    private func loadGroups() {
+        do {
+            availableGroups = try persistence.allGroups()
+        } catch {
+            Self.logger.error("Failed to load groups for picker: \(error, privacy: .public)")
+        }
     }
 
     func addFeed() async {
@@ -232,6 +247,11 @@ final class AddFeedViewModel {
         )
         do {
             try persistence.addFeed(newFeed)
+            // Assign to selected group if one was chosen
+            if let groupID = selectedGroupID,
+               let group = availableGroups.first(where: { $0.id == groupID }) {
+                try persistence.assignFeed(newFeed, to: group)
+            }
         } catch {
             errorMessage = "Could not save the feed. Please try again."
             Self.logger.error("Failed to persist feed \(url, privacy: .public): \(error, privacy: .public)")

@@ -18,14 +18,15 @@ RSSApp/
 │   ├── ArticleContent.swift            # Extracted article data — htmlContent + textContent
 │   ├── ChatMessage.swift               # Chat message with role (user/assistant) and content
 │   ├── DOMNode.swift                   # SerializedDOM + DOMNode tree from domSerializer.js
-│   ├── HomeGroup.swift                 # Enum — Home screen group types (allArticles, unreadArticles, savedArticles, allFeeds) with Identifiable, Hashable, CaseIterable
+│   ├── HomeGroup.swift                 # Enum — Home screen item types (allArticles, unreadArticles, savedArticles, feedGroup(PersistentFeedGroup), allFeeds) with Identifiable, Hashable; user-created groups use the `.feedGroup` associated value
+│   ├── PersistentFeedGroup.swift       # @Model — user-created feed group with name, sortOrder, createdDate, and one-to-many nullify relationship to PersistentFeed
 │   ├── LoadMoreResult.swift            # Enum — pagination load-more outcome (loaded, exhausted, failed) for article reader navigation error feedback
 │   ├── ModelConversion.swift           # Bidirectional conversion: PersistentFeed↔SubscribedFeed, PersistentArticle↔Article, PersistentArticleContent↔ArticleContent
 │   ├── OPMLFeedEntry.swift              # Intermediate OPML parsed entry (title, feedURL, siteURL, description)
 │   ├── OPMLImportResult.swift           # OPML import outcome counts (added, skipped, total)
 │   ├── PersistentArticle.swift         # @Model — persisted article with read/unread status, saved/bookmarked status, `updatedDate` + `wasUpdated` flag for content-update detection (issue #74), `displayedPublishedDate` computed helper, relationship to feed and content
 │   ├── PersistentArticleContent.swift  # @Model — cached extracted HTML/text content, relationship to article
-│   ├── PersistentFeed.swift            # @Model — persisted feed subscription with caching headers, icon URL, cascade to articles
+│   ├── PersistentFeed.swift            # @Model — persisted feed subscription with caching headers, icon URL, optional group assignment, cascade to articles
 │   ├── AtomAlternatePrompt.swift       # Shared value struct — discovered Atom URL + the already-fetched RSS feed for the "Keep RSS" path; failing init enforces "RSS format + distinct URLs" invariants that `AtomDiscoveryService` and the view-model call sites already establish
 │   ├── RSSFeed.swift                   # Feed container with channel info, imageURL, articles, and `FeedFormat` (rss/atom) — transient parser output
 │   └── SubscribedFeed.swift            # Legacy feed subscription struct (Codable) — retained for UserDefaults migration and OPML export
@@ -64,13 +65,14 @@ RSSApp/
 ├── ViewModels/                         # View state management
 │   ├── AddFeedViewModel.swift          # @Observable @MainActor — URL validation + feed subscription via FeedPersisting + icon resolution; consults `AtomDiscovering` after RSS feed fetch and pauses via `atomAlternatePrompt` so the view can offer a Switch to Atom / Keep RSS choice before persisting
 │   ├── ArticleListSource.swift         # Protocol + `EmptyStateContent` — data/behavior seam between `ArticleListScreen` and the concrete article lists (per-feed, All, Unread, Saved). Generic views bind to this protocol so every list gets identical snapshot preservation, toolbars, pagination, and lifecycle handling for free. Shape is deliberately built around the snapshot-stable rule: per-item and bulk mutations update row visuals without re-querying, only `initialLoad` / `refresh` / `reload` / explicit filter+sort toggles re-query
-│   ├── ArticleListSources.swift        # Four `@Observable @MainActor` adapters conforming to `ArticleListSource`: `FeedArticleSource` (wraps `FeedViewModel`), `AllArticlesSource` / `UnreadArticlesSource` / `SavedArticlesSource` (wrap `HomeViewModel` slices). Adapters are thin projections — all state lives on the backing view model, properties are computed forwarders so observation tracking flows through the backing registrar. Cross-feed adapters implement cache-first + await refresh + reload in `initialLoad()` so entering the view triggers a network refresh for consistency with the per-feed source
+│   ├── ArticleListSources.swift        # Five `@Observable @MainActor` adapters conforming to `ArticleListSource`: `FeedArticleSource` (wraps `FeedViewModel`), `FeedGroupArticleSource` (wraps `FeedGroupViewModel` + `HomeViewModel`), `AllArticlesSource` / `UnreadArticlesSource` / `SavedArticlesSource` (wrap `HomeViewModel` slices). Adapters are thin projections — all state lives on the backing view model, properties are computed forwarders so observation tracking flows through the backing registrar. Cross-feed adapters implement cache-first + await refresh + reload in `initialLoad()` so entering the view triggers a network refresh for consistency with the per-feed source
 │   ├── EditFeedViewModel.swift         # @Observable @MainActor — URL editing + validation + feed update via FeedPersisting; same `AtomDiscovering` prompt flow as `AddFeedViewModel` when the edited URL resolves to an RSS feed
 │   ├── ArticleSummaryViewModel.swift   # @Observable @MainActor — extraction state machine
 │   ├── DiscussionViewModel.swift       # @Observable @MainActor — chat history + Claude streaming
-│   ├── FeedListViewModel.swift         # @Observable @MainActor — feed list management, OPML, unread counts, feed removal, and a thin `refreshAllFeeds()` wrapper that delegates to the shared `FeedRefreshService` and translates the returned `Outcome` into `errorMessage`. Handles all four `Outcome` cases: `.skipped` / `.cancelled` leave `errorMessage` nil, `.setupFailed` → "Unable to load your feeds.", `.completed(Summary)` translates in priority order (save > per-feed failureCount > retention). Owns its own `feedIconService` dependency (passed in from `RSSAppApp.init()` alongside the shared `FeedRefreshService`) rather than forwarding through the refresh service. Refresh body itself lives in `FeedRefreshService` (issue #76)
+│   ├── FeedGroupViewModel.swift        # @Observable @MainActor — per-group article list pagination and mutations (analogous to FeedViewModel for individual feeds). Owns articles snapshot, sort order, markAllAsRead scoped to group. Refresh delegated to HomeViewModel
+│   ├── FeedListViewModel.swift         # @Observable @MainActor — feed list management, OPML, unread counts, feed removal, group-sectioned feed display (`FeedSection`), feed-to-group assignment, and a thin `refreshAllFeeds()` wrapper that delegates to the shared `FeedRefreshService` and translates the returned `Outcome` into `errorMessage`. Handles all four `Outcome` cases: `.skipped` / `.cancelled` leave `errorMessage` nil, `.setupFailed` → "Unable to load your feeds.", `.completed(Summary)` translates in priority order (save > per-feed failureCount > retention). Owns its own `feedIconService` dependency (passed in from `RSSAppApp.init()` alongside the shared `FeedRefreshService`) rather than forwarding through the refresh service. Refresh body itself lives in `FeedRefreshService` (issue #76)
 │   ├── FeedViewModel.swift             # @Observable @MainActor — cached + network article loading, read/unread, sort order, read filter via FeedPersisting. `markAsRead(_:)` returns `Bool` so `ArticleListScreen` can gate the reader push on success. `markAllAsRead()` mutates in place without re-querying the list — per the snapshot-stable rule, bulk mutations update row visuals but leave list composition intact
-│   └── HomeViewModel.swift             # @Observable @MainActor — total unread count, cross-feed article queries (paginated `allArticlesList` / `unreadArticlesList` / `savedArticlesList`), read/unread, sort order, mark all as read via FeedPersisting; app icon badge updates via AppBadgeUpdating; handleBadgeToggleEnabled() for permission-check-and-revert logic. `markAllAsRead()` preserves all three list snapshots (snapshot-stable rule); the saved list honors the same global `sortAscending` as the other cross-feed lists via `allSavedArticles(offset:limit:ascending:)`
+│   └── HomeViewModel.swift             # @Observable @MainActor — total unread count, cross-feed article queries (paginated `allArticlesList` / `unreadArticlesList` / `savedArticlesList`), feed group CRUD (loadGroups, addGroup, renameGroup, deleteGroup, moveGroup, loadGroupUnreadCounts), read/unread, sort order, mark all as read via FeedPersisting; app icon badge updates via AppBadgeUpdating; handleBadgeToggleEnabled() for permission-check-and-revert logic. `markAllAsRead()` preserves all three list snapshots (snapshot-stable rule); the saved list honors the same global `sortAscending` as the other cross-feed lists via `allSavedArticles(offset:limit:ascending:)`
 ├── Views/                              # SwiftUI views
 │   ├── ActivityShareView.swift          # UIViewControllerRepresentable wrapping UIActivityViewController
 │   ├── AddFeedView.swift               # Sheet for adding a new feed — URL input + validation
@@ -86,9 +88,9 @@ RSSApp/
 │   ├── ContentView.swift               # Root view — receives the shared `FeedPersisting` and `FeedRefreshService` instances from `RSSAppApp` (constructed there so the same refresh service is reachable from both the SwiftUI tree and the `BackgroundRefreshCoordinator`), hosts HomeView
 │   ├── EditFeedView.swift              # Sheet for editing a feed URL — pre-populated input + validation
 │   ├── FeedIconView.swift              # Feed icon display — loads cached PNG from disk, fallback globe placeholder
-│   ├── FeedListView.swift              # Subscribed feed list — NavigationStack root with add/remove, settings gear, unread badges. Per-feed navigation pushes `ArticleListScreen(source: FeedArticleSource(...))` for that feed
+│   ├── FeedListView.swift              # Subscribed feed list — NavigationStack root with add/remove, settings gear, unread badges, group-sectioned display. Per-feed navigation pushes `ArticleListScreen(source: FeedArticleSource(...))` for that feed. Context menu provides "Move to Group" for feed-to-group assignment
 │   ├── FeedRowView.swift               # Single feed row — icon, title, description, unread count badge
-│   ├── HomeView.swift                  # Home screen — NavigationStack root with All Articles, Unread Articles, Saved Articles, All Feeds rows. Each list destination constructs an `ArticleListScreen(source:)` with the appropriate `AllArticlesSource` / `UnreadArticlesSource` / `SavedArticlesSource` wrapping the shared `HomeViewModel`
+│   ├── HomeView.swift                  # Home screen — NavigationStack root with All Articles, Unread Articles, Saved Articles, user-created feed groups, and All Feeds rows. Groups support CRUD (create, rename, delete, reorder) via toolbar menu, swipe actions, and context menus. Each list destination constructs an `ArticleListScreen(source:)` with the appropriate source adapter wrapping the shared `HomeViewModel`
 │   └── SettingsView.swift              # Top-level settings page with inline badge toggle (reverts and shows permission-denied alert when notifications are disabled), Network section with WiFi-only image download toggle, and NavigationLink rows pushing Background Refresh (issue #76), API Key, Article Limit, and Import/Export sub-screens
 └── Resources/
     ├── domSerializer.js                # Bundled DOM serializer — walks DOM tree, emits JSON for Swift extraction
@@ -166,8 +168,10 @@ RSSAppTests/
 │   ├── DiscussionViewModelTests.swift      # Message flow, streaming, no-key behavior
 │   ├── FeedListViewModelTests.swift        # Load, remove by object, remove by IndexSet, unread counts, OPML import/export/error isolation, and refresh-delegation tests that pin the exact user-facing strings + priority ordering of the outcome → errorMessage translation (happy path, fetch-failure string format, save-failure priority over fetch-failure, retention-only message, setupFailed → "Unable to load your feeds.", cancelled → silent). Refresh pipeline itself is tested in `FeedRefreshServiceTests`
 │   ├── FeedViewModelTests.swift            # Load success/failure, state transitions, sort order, read filter, mark-as-read Bool return, mark-all-as-read snapshot-stable invariant under showUnreadOnly
+│   ├── FeedGroupViewModelTests.swift       # Per-group article loading, pagination, mutations (markAsRead, markAllAsRead, toggleSaved), sort order toggle, error handling
 │   ├── HomeViewModelBadgeTests.swift        # Badge integration: loadUnreadCount triggers badge update, error path skips badge, mark-read/toggle/mark-all-as-read cascade badge updates
 │   ├── HomeViewModelBadgeToggleTests.swift  # Badge toggle permission flow: denied reverts, authorized proceeds, notDetermined-then-denied reverts, notDetermined-then-granted proceeds
+│   ├── HomeViewModelGroupTests.swift       # Feed group CRUD (add, rename, delete, reorder), loadGroups, loadGroupUnreadCounts, error handling
 │   └── HomeViewModelTests.swift            # Unread count, saved count, cross-feed article queries, read/unread status, saved status, sort order, mark-all-as-read snapshot-stable invariants (unread list preserved, allArticlesList items mutated in place)
 ```
 
@@ -221,7 +225,7 @@ The `Outcome` enum makes illegal states unrepresentable: `.setupFailed` is a dis
 
 ```
 RSSAppApp (@main)
-  ├── ModelContainer (PersistentFeed, PersistentArticle, PersistentArticleContent)
+  ├── ModelContainer (PersistentFeed, PersistentArticle, PersistentArticleContent, PersistentFeedGroup)
   ├── UserDefaultsMigrationService → one-time migration from UserDefaults
   ├── SwiftDataFeedPersistenceService (shared instance)
   ├── FeedIconService (shared instance, passed to both refresh service and view models)
@@ -231,9 +235,10 @@ RSSAppApp (@main)
   └── WindowGroup (.modelContainer)
       └── ContentView (receives shared persistence + refreshService + feedIconService)
           └── HomeView (NavigationStack root, HomeViewModel)
-              ├── ArticleListScreen<AllArticlesSource>     (cross-feed, shared HomeViewModel)
-              ├── ArticleListScreen<UnreadArticlesSource>  (cross-feed, filtered unread)
-              ├── ArticleListScreen<SavedArticlesSource>   (cross-feed, paginated saved)
+              ├── ArticleListScreen<AllArticlesSource>          (cross-feed, shared HomeViewModel)
+              ├── ArticleListScreen<UnreadArticlesSource>       (cross-feed, filtered unread)
+              ├── ArticleListScreen<SavedArticlesSource>        (cross-feed, paginated saved)
+              ├── ArticleListScreen<FeedGroupArticleSource>     (per-group, FeedGroupViewModel + HomeViewModel)
               └── FeedListView (FeedListViewModel + FeedPersisting/OPMLServing/FeedFetching/FeedIconResolving)
                   └── ArticleListScreen<FeedArticleSource> (per feed, cache-first + network refresh)
                       └── ArticleReaderView (WKWebView + domSerializer.js early extraction)
@@ -277,7 +282,8 @@ RSSAppApp (@main)
 | Feed title fetched at add-time | Validates the URL is a real feed; better UX than requiring manual title entry |
 | `FeedViewModel` with cache-first loading | Shows cached articles immediately from SwiftData, then fetches from network and upserts; enables offline browsing |
 | Home screen as app root | Provides meta-groups (All Articles, Unread Articles, Saved Articles, All Feeds) above the feed list; pushes `FeedListView` via NavigationStack rather than replacing it |
-| `HomeGroup` enum for group types | Four fixed cases with `CaseIterable`; enum-based approach accommodates future user-created groups (folders, tags) by adding new cases |
+| `HomeGroup` enum for group types | Fixed cases plus `.feedGroup(PersistentFeedGroup)` associated value; dropped `CaseIterable` since associated values prevent synthesis. Home items computed dynamically: fixed top items + user groups (by sortOrder) + All Feeds |
+| `FeedGroupViewModel` for per-group state | Separate view model per group (analogous to `FeedViewModel` for individual feeds) rather than adding N groups' pagination state to `HomeViewModel`. `FeedGroupArticleSource` wraps it as the `ArticleListSource` adapter |
 | Cross-feed article queries in `FeedPersisting` | `allArticles()`, `allUnreadArticles()`, `totalUnreadCount()`, `allSavedArticles()`, `savedCount()` are protocol methods so they work with both SwiftData and mock implementations |
 | Offset-based pagination (page size 50) | Simple `fetchOffset`/`fetchLimit` on `FetchDescriptor`; deduplication filter on append prevents duplicates from dataset shifts; `hasMore` flag preserved on error so user can retry by tapping next again (errors are transient and surfaced via `LoadMoreResult.failed`); previous list preserved on reload failure |
 | Snapshot-stable list rule | `ArticleListScreen` and every `ArticleListSource` are built around a single rule: list composition and order are preserved across all per-item and bulk mutations (mark-read, toggle-saved, mark-all-as-read). Row visuals update in place via `@Observable` propagation on the underlying `PersistentArticle` references, but the rows themselves never get added, removed, or reordered in response to a mutation. The list is re-queried only on explicit list-level triggers: pull-to-refresh, sort/filter toggle, and re-entry via `.task` on fresh navigation into the view. Reader push/pop is NOT a re-query trigger — the two-gate mechanism (see below) explicitly suppresses it. This keeps scroll position and the currently-focused row stable mid-action, unifies behavior across per-feed and cross-feed lists, and means a just-unsaved article stays visible (now flag-less) in the Saved list until the user triggers a refresh, rather than yanking out from under them |

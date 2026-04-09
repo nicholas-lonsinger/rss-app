@@ -28,6 +28,21 @@ struct AddFeedView: View {
                     Text("Enter the URL of an RSS feed.")
                 }
 
+                if !viewModel.availableGroups.isEmpty {
+                    Section {
+                        Picker("Group", selection: $viewModel.selectedGroupID) {
+                            Text("None").tag(Optional<UUID>.none)
+                            ForEach(viewModel.availableGroups, id: \.id) { group in
+                                Text(group.name).tag(Optional(group.id))
+                            }
+                        }
+                    } header: {
+                        Text("Group")
+                    } footer: {
+                        Text("Optionally assign this feed to a group.")
+                    }
+                }
+
                 if let error = viewModel.errorMessage {
                     Section {
                         Label(error, systemImage: "exclamationmark.triangle")

@@ -12,6 +12,7 @@ enum SwiftDataTestHelpers {
         )
         return try ModelContainer(
             for: PersistentFeed.self, PersistentArticle.self, PersistentArticleContent.self,
+            PersistentFeedGroup.self,
             configurations: configuration
         )
     }

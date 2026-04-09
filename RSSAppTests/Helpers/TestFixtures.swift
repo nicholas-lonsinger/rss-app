@@ -848,6 +848,20 @@ enum TestFixtures {
         )
     }
 
+    static func makePersistentFeedGroup(
+        id: UUID = UUID(),
+        name: String = "Test Group",
+        createdDate: Date = Date(timeIntervalSince1970: 1_711_800_000),
+        sortOrder: Int = 0
+    ) -> PersistentFeedGroup {
+        PersistentFeedGroup(
+            id: id,
+            name: name,
+            createdDate: createdDate,
+            sortOrder: sortOrder
+        )
+    }
+
     static func makeArticleContent(
         title: String = "Test Article",
         byline: String? = "Test Author",

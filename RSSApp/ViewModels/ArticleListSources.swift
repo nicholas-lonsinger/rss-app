@@ -100,6 +100,112 @@ final class FeedArticleSource: ArticleListSource {
     }
 }
 
+// MARK: - Feed Group Source
+
+/// Cross-feed source filtered to articles from feeds in a specific group.
+/// Wraps a `FeedGroupViewModel` for per-group pagination and mutation state,
+/// and delegates refresh to `HomeViewModel.refreshAllFeeds()` — the same
+/// pattern used by `AllArticlesSource` and `UnreadArticlesSource`.
+@MainActor
+@Observable
+final class FeedGroupArticleSource: ArticleListSource {
+
+    private let groupViewModel: FeedGroupViewModel
+    private let homeViewModel: HomeViewModel
+
+    init(groupViewModel: FeedGroupViewModel, homeViewModel: HomeViewModel) {
+        self.groupViewModel = groupViewModel
+        self.homeViewModel = homeViewModel
+    }
+
+    // MARK: Data
+
+    var articles: [PersistentArticle] { groupViewModel.articles }
+    var hasMore: Bool { groupViewModel.hasMore }
+    var isLoading: Bool { homeViewModel.isRefreshing }
+    var errorMessage: String? { groupViewModel.errorMessage }
+
+    // MARK: Display
+
+    var title: String { groupViewModel.groupTitle }
+    var emptyState: EmptyStateContent {
+        EmptyStateContent(
+            label: "No Articles",
+            systemImage: "folder",
+            description: "Articles from feeds in this group will appear here."
+        )
+    }
+    var supportsSort: Bool { true }
+    var supportsUnreadFilter: Bool { false }
+
+    // MARK: Filter/sort
+
+    var sortAscending: Bool {
+        get { groupViewModel.sortAscending }
+        set { groupViewModel.sortAscending = newValue }
+    }
+    var showUnreadOnly: Bool {
+        get { false }
+        set { /* no-op */ }
+    }
+
+    // MARK: Lifecycle
+
+    func initialLoad() async {
+        groupViewModel.loadArticles()
+        if homeViewModel.shouldRefreshOnEntry {
+            await homeViewModel.refreshAllFeeds()
+            groupViewModel.loadArticles()
+        }
+        homeViewModel.loadUnreadCount()
+    }
+
+    func refresh() async {
+        await homeViewModel.refreshAllFeeds()
+        groupViewModel.loadArticles()
+        homeViewModel.loadUnreadCount()
+    }
+
+    func reload() {
+        groupViewModel.loadArticles()
+    }
+
+    // MARK: Pagination
+
+    func loadMoreAndReport() -> LoadMoreResult {
+        groupViewModel.loadMoreAndReport()
+    }
+
+    // MARK: Mutations (snapshot-stable)
+
+    @discardableResult
+    func markAsRead(_ article: PersistentArticle) -> Bool {
+        groupViewModel.markAsRead(article)
+    }
+
+    func toggleReadStatus(_ article: PersistentArticle) {
+        groupViewModel.toggleReadStatus(article)
+    }
+
+    func toggleSaved(_ article: PersistentArticle) {
+        groupViewModel.toggleSaved(article)
+    }
+
+    /// Group-scoped: only marks articles in this group's feeds as read.
+    func markAllAsRead() {
+        groupViewModel.markAllAsRead()
+    }
+
+    func onDisappear() {
+        homeViewModel.loadUnreadCount()
+        homeViewModel.loadGroupUnreadCounts()
+    }
+
+    func clearError() {
+        groupViewModel.clearError()
+    }
+}
+
 // MARK: - All Articles Source
 
 /// Cross-feed source showing every article across every feed. Wraps the

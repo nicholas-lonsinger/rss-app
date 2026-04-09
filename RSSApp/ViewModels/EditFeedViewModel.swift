@@ -21,6 +21,12 @@ final class EditFeedViewModel {
     /// `didSave = true` and allowing the sheet to dismiss.
     private(set) var atomFallbackNotice: URL?
 
+    /// Selected group for this feed. `nil` means ungrouped.
+    var selectedGroupID: UUID?
+
+    /// Available groups for the group picker.
+    private(set) var availableGroups: [PersistentFeedGroup] = []
+
     var canSubmit: Bool {
         !urlInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isValidating
     }
@@ -38,9 +44,19 @@ final class EditFeedViewModel {
     ) {
         self.feed = feed
         self.urlInput = feed.feedURL.absoluteString
+        self.selectedGroupID = feed.group?.id
         self.feedFetching = feedFetching
         self.persistence = persistence
         self.atomDiscovery = atomDiscovery
+        loadGroups()
+    }
+
+    private func loadGroups() {
+        do {
+            availableGroups = try persistence.allGroups()
+        } catch {
+            Self.logger.error("Failed to load groups for picker: \(error, privacy: .public)")
+        }
     }
 
     func saveFeed() async {
@@ -58,9 +74,21 @@ final class EditFeedViewModel {
             return
         }
 
-        // No change — dismiss without saving
+        // URL unchanged — only update group assignment if it changed
         if url == feed.feedURL {
-            Self.logger.debug("URL unchanged, dismissing without save")
+            if feed.group?.id != selectedGroupID {
+                let newGroup = selectedGroupID.flatMap { id in
+                    availableGroups.first { $0.id == id }
+                }
+                do {
+                    try persistence.assignFeed(feed, to: newGroup)
+                } catch {
+                    errorMessage = "Unable to save changes. Please try again."
+                    Self.logger.error("Failed to update group assignment: \(error, privacy: .public)")
+                    return
+                }
+            }
+            Self.logger.debug("URL unchanged, dismissing")
             didSave = true
             return
         }
@@ -237,6 +265,13 @@ final class EditFeedViewModel {
         do {
             try persistence.updateFeedURL(feed, newURL: url)
             try persistence.updateFeedMetadata(feed, title: rssFeed.title, description: rssFeed.feedDescription)
+            // Update group assignment if it changed
+            let newGroup = selectedGroupID.flatMap { id in
+                availableGroups.first { $0.id == id }
+            }
+            if feed.group?.id != selectedGroupID {
+                try persistence.assignFeed(feed, to: newGroup)
+            }
         } catch {
             errorMessage = "Unable to save changes. Please try again."
             Self.logger.error("Failed to persist edited feed: \(error, privacy: .public)")

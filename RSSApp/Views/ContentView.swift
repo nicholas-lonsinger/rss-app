@@ -18,6 +18,7 @@ struct ContentView: View {
 #Preview {
     let previewContainer = try! ModelContainer(
         for: PersistentFeed.self, PersistentArticle.self, PersistentArticleContent.self,
+        PersistentFeedGroup.self,
         configurations: ModelConfiguration(isStoredInMemoryOnly: true)
     )
     let persistence = SwiftDataFeedPersistenceService(modelContext: previewContainer.mainContext)

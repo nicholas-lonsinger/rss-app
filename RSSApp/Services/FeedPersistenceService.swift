@@ -116,6 +116,34 @@ protocol FeedPersisting: Sendable {
     /// - Parameter articleIDs: The set of article IDs to delete.
     func deleteArticles(withIDs articleIDs: Set<String>) throws
 
+    // MARK: Feed group operations
+
+    /// Returns all feed groups, sorted by `sortOrder` ascending.
+    func allGroups() throws -> [PersistentFeedGroup]
+    /// Inserts a new feed group.
+    func addGroup(_ group: PersistentFeedGroup) throws
+    /// Updates the display name of a feed group.
+    func updateGroupName(_ group: PersistentFeedGroup, name: String) throws
+    /// Deletes a feed group. Feeds in the group become ungrouped (not deleted).
+    func deleteGroup(_ group: PersistentFeedGroup) throws
+    /// Writes the `sortOrder` property of each group to match its position in
+    /// the array. Callers pass the reordered array after a drag-and-drop move.
+    func reorderGroups(_ groups: [PersistentFeedGroup]) throws
+    /// Assigns a feed to a group, or removes it from its current group when
+    /// `group` is `nil`.
+    func assignFeed(_ feed: PersistentFeed, to group: PersistentFeedGroup?) throws
+
+    // MARK: Group article queries
+
+    /// Returns a page of articles across all feeds in the given group, sorted
+    /// by `sortDate`.
+    func articlesInGroup(_ group: PersistentFeedGroup, offset: Int, limit: Int, ascending: Bool) throws -> [PersistentArticle]
+    /// Returns the number of unread articles across all feeds in the given group.
+    func unreadCountInGroup(_ group: PersistentFeedGroup) throws -> Int
+    /// Marks all unread articles in the given group as read. Same `readDate` /
+    /// `wasUpdated` contract as `markAllArticlesRead(for:)`.
+    func markAllArticlesRead(inGroup group: PersistentFeedGroup) throws
+
     // MARK: Persistence
 
     func save() throws
@@ -673,6 +701,103 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
             predicate: #Predicate { $0.isSaved }
         )
         return try modelContext.fetchCount(descriptor)
+    }
+
+    // MARK: - Feed Group Operations
+
+    func allGroups() throws -> [PersistentFeedGroup] {
+        let descriptor = FetchDescriptor<PersistentFeedGroup>(
+            sortBy: [SortDescriptor(\.sortOrder, order: .forward)]
+        )
+        let groups = try modelContext.fetch(descriptor)
+        Self.logger.debug("Fetched \(groups.count, privacy: .public) groups")
+        return groups
+    }
+
+    func addGroup(_ group: PersistentFeedGroup) throws {
+        modelContext.insert(group)
+        try modelContext.save()
+        Self.logger.notice("Added group '\(group.name, privacy: .public)'")
+    }
+
+    func updateGroupName(_ group: PersistentFeedGroup, name: String) throws {
+        group.name = name
+        try modelContext.save()
+        Self.logger.notice("Renamed group to '\(name, privacy: .public)'")
+    }
+
+    func deleteGroup(_ group: PersistentFeedGroup) throws {
+        let name = group.name
+        modelContext.delete(group)
+        try modelContext.save()
+        Self.logger.notice("Deleted group '\(name, privacy: .public)'")
+    }
+
+    func reorderGroups(_ groups: [PersistentFeedGroup]) throws {
+        for (index, group) in groups.enumerated() {
+            group.sortOrder = index
+        }
+        try modelContext.save()
+        Self.logger.debug("Reordered \(groups.count, privacy: .public) groups")
+    }
+
+    func assignFeed(_ feed: PersistentFeed, to group: PersistentFeedGroup?) throws {
+        feed.group = group
+        try modelContext.save()
+        if let group {
+            Self.logger.notice("Assigned feed '\(feed.title, privacy: .public)' to group '\(group.name, privacy: .public)'")
+        } else {
+            Self.logger.notice("Removed feed '\(feed.title, privacy: .public)' from its group")
+        }
+    }
+
+    // MARK: - Group Article Queries
+
+    func articlesInGroup(_ group: PersistentFeedGroup, offset: Int, limit: Int, ascending: Bool = false) throws -> [PersistentArticle] {
+        let groupID = group.persistentModelID
+        let sortOrder: SortOrder = ascending ? .forward : .reverse
+        var descriptor = FetchDescriptor<PersistentArticle>(
+            predicate: #Predicate { $0.feed?.group?.persistentModelID == groupID },
+            sortBy: [
+                SortDescriptor(\.sortDate, order: sortOrder),
+                SortDescriptor(\.articleID, order: .forward)
+            ]
+        )
+        descriptor.fetchOffset = offset
+        descriptor.fetchLimit = limit
+        let articles = try modelContext.fetch(descriptor)
+        Self.logger.debug("Fetched \(articles.count, privacy: .public) articles in group '\(group.name, privacy: .public)' (offset: \(offset, privacy: .public), limit: \(limit, privacy: .public))")
+        return articles
+    }
+
+    func unreadCountInGroup(_ group: PersistentFeedGroup) throws -> Int {
+        let groupID = group.persistentModelID
+        let descriptor = FetchDescriptor<PersistentArticle>(
+            predicate: #Predicate { $0.feed?.group?.persistentModelID == groupID && !$0.isRead }
+        )
+        return try modelContext.fetchCount(descriptor)
+    }
+
+    func markAllArticlesRead(inGroup group: PersistentFeedGroup) throws {
+        let groupID = group.persistentModelID
+        let descriptor = FetchDescriptor<PersistentArticle>(
+            predicate: #Predicate { $0.feed?.group?.persistentModelID == groupID && !$0.isRead }
+        )
+        let unreadArticles = try modelContext.fetch(descriptor)
+        guard !unreadArticles.isEmpty else {
+            Self.logger.debug("No unread articles to mark as read in group '\(group.name, privacy: .public)'")
+            return
+        }
+        let now = Date()
+        for article in unreadArticles {
+            article.isRead = true
+            if article.readDate == nil {
+                article.readDate = now
+            }
+            article.wasUpdated = false
+        }
+        try modelContext.save()
+        Self.logger.notice("Marked \(unreadArticles.count, privacy: .public) articles as read in group '\(group.name, privacy: .public)'")
     }
 
     // MARK: - Thumbnail Tracking

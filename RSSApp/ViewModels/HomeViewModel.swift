@@ -41,6 +41,11 @@ final class HomeViewModel {
     private(set) var isRefreshing = false
     private(set) var errorMessage: String?
 
+    // MARK: - Feed groups
+
+    private(set) var groups: [PersistentFeedGroup] = []
+    private(set) var groupUnreadCounts: [UUID: Int] = [:]
+
     // MARK: - Pagination state for all articles
 
     private(set) var allArticlesList: [PersistentArticle] = []
@@ -392,6 +397,80 @@ final class HomeViewModel {
         } catch {
             errorMessage = "Unable to mark all saved articles as read."
             Self.logger.error("Failed to mark all saved articles as read: \(error, privacy: .public)")
+        }
+    }
+
+    // MARK: - Feed Groups
+
+    func loadGroups() {
+        do {
+            groups = try persistence.allGroups()
+            Self.logger.debug("Loaded \(self.groups.count, privacy: .public) groups")
+        } catch {
+            errorMessage = "Unable to load groups."
+            Self.logger.error("Failed to load groups: \(error, privacy: .public)")
+        }
+    }
+
+    func loadGroupUnreadCounts() {
+        var counts: [UUID: Int] = [:]
+        for group in groups {
+            do {
+                counts[group.id] = try persistence.unreadCountInGroup(group)
+            } catch {
+                Self.logger.error("Failed to load unread count for group '\(group.name, privacy: .public)': \(error, privacy: .public)")
+            }
+        }
+        groupUnreadCounts = counts
+    }
+
+    func addGroup(name: String) {
+        let nextSortOrder = (groups.map(\.sortOrder).max() ?? -1) + 1
+        let group = PersistentFeedGroup(name: name, sortOrder: nextSortOrder)
+        do {
+            try persistence.addGroup(group)
+            loadGroups()
+            Self.logger.notice("Created group '\(name, privacy: .public)'")
+        } catch {
+            errorMessage = "Unable to create group."
+            Self.logger.error("Failed to create group '\(name, privacy: .public)': \(error, privacy: .public)")
+        }
+    }
+
+    func renameGroup(_ group: PersistentFeedGroup, to name: String) {
+        do {
+            try persistence.updateGroupName(group, name: name)
+            loadGroups()
+            Self.logger.notice("Renamed group to '\(name, privacy: .public)'")
+        } catch {
+            errorMessage = "Unable to rename group."
+            Self.logger.error("Failed to rename group: \(error, privacy: .public)")
+        }
+    }
+
+    func deleteGroup(_ group: PersistentFeedGroup) {
+        let name = group.name
+        do {
+            try persistence.deleteGroup(group)
+            loadGroups()
+            loadGroupUnreadCounts()
+            Self.logger.notice("Deleted group '\(name, privacy: .public)'")
+        } catch {
+            errorMessage = "Unable to delete group."
+            Self.logger.error("Failed to delete group '\(name, privacy: .public)': \(error, privacy: .public)")
+        }
+    }
+
+    func moveGroup(from source: IndexSet, to destination: Int) {
+        var reordered = groups
+        reordered.move(fromOffsets: source, toOffset: destination)
+        do {
+            try persistence.reorderGroups(reordered)
+            groups = reordered
+            Self.logger.debug("Reordered groups")
+        } catch {
+            errorMessage = "Unable to reorder groups."
+            Self.logger.error("Failed to reorder groups: \(error, privacy: .public)")
         }
     }
 }

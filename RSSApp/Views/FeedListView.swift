@@ -114,6 +114,7 @@ struct FeedListView: View {
             }
             .task {
                 viewModel.loadFeeds()
+                viewModel.loadGroups()
             }
     }
 
@@ -134,25 +135,17 @@ struct FeedListView: View {
             }
         } else {
             List {
-                ForEach(viewModel.feeds, id: \.id) { feed in
-                    NavigationLink(value: feed.id) {
-                        FeedRowView(
-                            feed: feed,
-                            unreadCount: viewModel.unreadCount(for: feed),
-                            iconService: viewModel.feedIconService
-                        )
-                    }
-                    .swipeActions(edge: .leading) {
-                        Button {
-                            feedToEdit = feed
-                        } label: {
-                            Label("Edit", systemImage: "pencil")
+                let sections = viewModel.feedSections
+                ForEach(sections) { section in
+                    Section {
+                        ForEach(section.feeds, id: \.id) { feed in
+                            feedRow(feed)
                         }
-                        .tint(.blue)
+                    } header: {
+                        if let title = section.title {
+                            Text(title)
+                        }
                     }
-                }
-                .onDelete { offsets in
-                    viewModel.removeFeed(at: offsets)
                 }
             }
             .listStyle(.plain)
@@ -178,6 +171,60 @@ struct FeedListView: View {
                     Image(systemName: "gear")
                 }
                 .accessibilityLabel("Settings")
+            }
+        }
+    }
+
+    // MARK: - Feed Row
+
+    @ViewBuilder
+    private func feedRow(_ feed: PersistentFeed) -> some View {
+        NavigationLink(value: feed.id) {
+            FeedRowView(
+                feed: feed,
+                unreadCount: viewModel.unreadCount(for: feed),
+                iconService: viewModel.feedIconService
+            )
+        }
+        .swipeActions(edge: .leading) {
+            Button {
+                feedToEdit = feed
+            } label: {
+                Label("Edit", systemImage: "pencil")
+            }
+            .tint(.blue)
+        }
+        .contextMenu {
+            if !viewModel.groups.isEmpty {
+                Menu {
+                    Button {
+                        viewModel.assignFeed(feed, to: nil)
+                    } label: {
+                        if feed.group == nil {
+                            Label("None (Ungrouped)", systemImage: "checkmark")
+                        } else {
+                            Text("None (Ungrouped)")
+                        }
+                    }
+                    ForEach(viewModel.groups, id: \.id) { group in
+                        Button {
+                            viewModel.assignFeed(feed, to: group)
+                        } label: {
+                            if feed.group?.id == group.id {
+                                Label(group.name, systemImage: "checkmark")
+                            } else {
+                                Text(group.name)
+                            }
+                        }
+                    }
+                } label: {
+                    Label("Move to Group", systemImage: "folder")
+                }
+            }
+            Button {
+                feedToEdit = feed
+            } label: {
+                Label("Edit", systemImage: "pencil")
             }
         }
     }

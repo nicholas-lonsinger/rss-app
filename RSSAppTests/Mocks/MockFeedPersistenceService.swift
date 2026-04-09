@@ -26,6 +26,8 @@ final class MockFeedPersistenceService: FeedPersisting {
     var allFeedsFailureCount = 0
 
     var articlesByFeedID: [UUID: [PersistentArticle]] = [:]
+    var groups: [PersistentFeedGroup] = []
+    var groupError: (any Error)?
     private var contentByArticleID: [String: PersistentArticleContent] = [:]
     private var addFeedCallCount = 0
 
@@ -332,6 +334,83 @@ final class MockFeedPersistenceService: FeedPersisting {
         lastDeletedArticleIDs = articleIDs
         for feedID in articlesByFeedID.keys {
             articlesByFeedID[feedID]?.removeAll { articleIDs.contains($0.articleID) }
+        }
+    }
+
+    // MARK: - Feed Group Operations
+
+    func allGroups() throws -> [PersistentFeedGroup] {
+        if let error = groupError ?? errorToThrow { throw error }
+        return groups.sorted { $0.sortOrder < $1.sortOrder }
+    }
+
+    func addGroup(_ group: PersistentFeedGroup) throws {
+        if let error = groupError ?? errorToThrow { throw error }
+        groups.append(group)
+    }
+
+    func updateGroupName(_ group: PersistentFeedGroup, name: String) throws {
+        if let error = groupError ?? errorToThrow { throw error }
+        group.name = name
+    }
+
+    func deleteGroup(_ group: PersistentFeedGroup) throws {
+        if let error = groupError ?? errorToThrow { throw error }
+        // Nullify the relationship for feeds in this group
+        for feed in feeds where feed.group?.id == group.id {
+            feed.group = nil
+        }
+        groups.removeAll { $0.id == group.id }
+    }
+
+    func reorderGroups(_ groups: [PersistentFeedGroup]) throws {
+        if let error = groupError ?? errorToThrow { throw error }
+        for (index, group) in groups.enumerated() {
+            group.sortOrder = index
+        }
+    }
+
+    func assignFeed(_ feed: PersistentFeed, to group: PersistentFeedGroup?) throws {
+        if let error = groupError ?? errorToThrow { throw error }
+        feed.group = group
+    }
+
+    // MARK: - Group Article Queries
+
+    func articlesInGroup(_ group: PersistentFeedGroup, offset: Int, limit: Int, ascending: Bool = false) throws -> [PersistentArticle] {
+        if let error = groupError ?? errorToThrow { throw error }
+        let feedIDs = Set(feeds.filter { $0.group?.id == group.id }.map(\.id))
+        let all = articlesByFeedID
+            .filter { feedIDs.contains($0.key) }
+            .values
+            .flatMap { $0 }
+            .sorted(by: ascending ? Self.sortAscending : Self.sortDescending)
+        return Array(all.dropFirst(offset).prefix(limit))
+    }
+
+    func unreadCountInGroup(_ group: PersistentFeedGroup) throws -> Int {
+        if let error = groupError ?? errorToThrow { throw error }
+        let feedIDs = Set(feeds.filter { $0.group?.id == group.id }.map(\.id))
+        return articlesByFeedID
+            .filter { feedIDs.contains($0.key) }
+            .values
+            .flatMap { $0 }
+            .filter { !$0.isRead }
+            .count
+    }
+
+    func markAllArticlesRead(inGroup group: PersistentFeedGroup) throws {
+        if let error = groupError ?? errorToThrow { throw error }
+        let feedIDs = Set(feeds.filter { $0.group?.id == group.id }.map(\.id))
+        let now = Date()
+        for (feedID, articles) in articlesByFeedID where feedIDs.contains(feedID) {
+            for article in articles where !article.isRead {
+                article.isRead = true
+                if article.readDate == nil {
+                    article.readDate = now
+                }
+                article.wasUpdated = false
+            }
         }
     }
 

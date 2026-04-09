@@ -1,6 +1,14 @@
 import Foundation
 import os
 
+/// A section of feeds for display in `FeedListView`. Groups feeds by their
+/// assigned `PersistentFeedGroup` with ungrouped feeds in a separate section.
+struct FeedSection: Identifiable {
+    let id: String
+    let title: String?
+    let feeds: [PersistentFeed]
+}
+
 @MainActor
 @Observable
 final class FeedListViewModel {
@@ -115,6 +123,65 @@ final class FeedListViewModel {
 
     func unreadCount(for feed: PersistentFeed) -> Int {
         unreadCounts[feed.id] ?? 0
+    }
+
+    // MARK: - Feed Group Assignment
+
+    private(set) var groups: [PersistentFeedGroup] = []
+
+    func loadGroups() {
+        do {
+            groups = try persistence.allGroups()
+        } catch {
+            Self.logger.error("Failed to load groups: \(error, privacy: .public)")
+        }
+    }
+
+    /// Feed list organized into sections by group. Grouped feeds appear
+    /// in per-group sections (ordered by `sortOrder`), ungrouped feeds in
+    /// a final section. When no groups exist, returns a single section
+    /// with no header so the UI is identical to the flat list.
+    var feedSections: [FeedSection] {
+        if groups.isEmpty {
+            return [FeedSection(id: "all", title: nil, feeds: feeds)]
+        }
+
+        var sections: [FeedSection] = []
+
+        // One section per group, in sortOrder
+        for group in groups {
+            let groupFeeds = feeds.filter { $0.group?.id == group.id }
+            if !groupFeeds.isEmpty {
+                sections.append(FeedSection(
+                    id: "group-\(group.id.uuidString)",
+                    title: group.name,
+                    feeds: groupFeeds
+                ))
+            }
+        }
+
+        // Ungrouped feeds
+        let ungrouped = feeds.filter { $0.group == nil }
+        if !ungrouped.isEmpty {
+            let title = sections.isEmpty ? nil : "Ungrouped"
+            sections.append(FeedSection(id: "ungrouped", title: title, feeds: ungrouped))
+        }
+
+        return sections
+    }
+
+    func assignFeed(_ feed: PersistentFeed, to group: PersistentFeedGroup?) {
+        do {
+            try persistence.assignFeed(feed, to: group)
+            if let group {
+                Self.logger.notice("Assigned feed '\(feed.title, privacy: .public)' to group '\(group.name, privacy: .public)'")
+            } else {
+                Self.logger.notice("Removed feed '\(feed.title, privacy: .public)' from its group")
+            }
+        } catch {
+            errorMessage = "Unable to update group assignment."
+            Self.logger.error("Failed to assign feed to group: \(error, privacy: .public)")
+        }
     }
 
     // MARK: - OPML Import/Export
