@@ -133,7 +133,7 @@ enum EncodingSniffer {
 
     /// Describes which path `transcodeToUTF8IfNeeded` took so `parse()` can
     /// escalate its log level when a fallback was needed but produced no articles.
-    enum SnifferOutcome: Sendable {
+    enum SnifferOutcome: Sendable, Equatable {
         /// Payload was already UTF-8 (or ASCII-compatible); returned as-is.
         case utf8Passthrough
         /// UTF-8 BOM (3 bytes) was stripped; bytes otherwise unchanged (lossless).

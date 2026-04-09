@@ -376,9 +376,7 @@ struct RSSParsingEncodingTests {
         let input = Data(xml.utf8)
         let (output, outcome) = EncodingSniffer.transcodeToUTF8IfNeeded(input)
         #expect(output == input, "Expected identity return for declared encoding '\(declared)'")
-        if case .utf8Passthrough = outcome { } else {
-            Issue.record("Expected .utf8Passthrough outcome for declared encoding '\(declared)', got: \(outcome)")
-        }
+        #expect(outcome == .utf8Passthrough, "Expected .utf8Passthrough outcome for declared encoding '\(declared)', got: \(outcome)")
     }
 
     // MARK: - Malformed declarations
@@ -492,18 +490,14 @@ struct SnifferOutcomeTests {
     func utf8DeclarationReturnsPassthrough() {
         let xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><rss/>"
         let (_, outcome) = EncodingSniffer.transcodeToUTF8IfNeeded(Data(xml.utf8))
-        if case .utf8Passthrough = outcome { } else {
-            Issue.record("Expected .utf8Passthrough, got: \(outcome)")
-        }
+        #expect(outcome == .utf8Passthrough)
     }
 
     @Test("No declaration returns .utf8Passthrough outcome")
     func noDeclarationReturnsPassthrough() {
         let xml = "<rss version=\"2.0\"/>"
         let (_, outcome) = EncodingSniffer.transcodeToUTF8IfNeeded(Data(xml.utf8))
-        if case .utf8Passthrough = outcome { } else {
-            Issue.record("Expected .utf8Passthrough, got: \(outcome)")
-        }
+        #expect(outcome == .utf8Passthrough)
     }
 
     @Test("UTF-8 BOM returns .bomStrippedUTF8 outcome")
@@ -511,9 +505,7 @@ struct SnifferOutcomeTests {
         var data = Data([0xEF, 0xBB, 0xBF])
         data.append(Data("<rss/>".utf8))
         let (_, outcome) = EncodingSniffer.transcodeToUTF8IfNeeded(data)
-        if case .bomStrippedUTF8 = outcome { } else {
-            Issue.record("Expected .bomStrippedUTF8, got: \(outcome)")
-        }
+        #expect(outcome == .bomStrippedUTF8)
     }
 
     @Test("UTF-16 LE BOM returns .bomStrippedAndTranscoded(.utf16LittleEndian) outcome")
@@ -522,11 +514,7 @@ struct SnifferOutcomeTests {
         var data = Data([0xFF, 0xFE])
         data.append(xml.data(using: .utf16LittleEndian)!)
         let (_, outcome) = EncodingSniffer.transcodeToUTF8IfNeeded(data)
-        if case .bomStrippedAndTranscoded(let enc) = outcome {
-            #expect(enc == .utf16LittleEndian)
-        } else {
-            Issue.record("Expected .bomStrippedAndTranscoded(.utf16LittleEndian), got: \(outcome)")
-        }
+        #expect(outcome == .bomStrippedAndTranscoded(.utf16LittleEndian))
     }
 
     @Test("Named non-UTF-8 encoding returns .transcoded outcome")
@@ -534,11 +522,7 @@ struct SnifferOutcomeTests {
         let head = Data("<?xml version=\"1.0\" encoding=\"ISO-8859-1\"?>".utf8)
         let body = Data("<rss/>".utf8)
         let (_, outcome) = EncodingSniffer.transcodeToUTF8IfNeeded(head + body)
-        if case .transcoded(let enc) = outcome {
-            #expect(enc == .isoLatin1)
-        } else {
-            Issue.record("Expected .transcoded(from: .isoLatin1), got: \(outcome)")
-        }
+        #expect(outcome == .transcoded(from: .isoLatin1))
     }
 
     @Test("Unknown encoding name returns .unknownEncodingFallback outcome")
@@ -546,11 +530,7 @@ struct SnifferOutcomeTests {
         let uniqueName = "x-snifferoutcome-unknown-273"
         let xml = "<?xml version=\"1.0\" encoding=\"\(uniqueName)\"?><rss/>"
         let (_, outcome) = EncodingSniffer.transcodeToUTF8IfNeeded(Data(xml.utf8))
-        if case .unknownEncodingFallback(let name) = outcome {
-            #expect(name == uniqueName)
-        } else {
-            Issue.record("Expected .unknownEncodingFallback(\(uniqueName)), got: \(outcome)")
-        }
+        #expect(outcome == .unknownEncodingFallback(uniqueName))
     }
 }
 
