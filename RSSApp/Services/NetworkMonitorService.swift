@@ -4,7 +4,8 @@ import os
 
 // MARK: - Protocol
 
-/// Provides network path status for gating background image downloads.
+/// Provides network path status for gating background image downloads and
+/// background refresh.
 protocol NetworkMonitoring: Sendable {
 
     /// Returns `true` when background image downloads are allowed on the current network.
@@ -15,6 +16,19 @@ protocol NetworkMonitoring: Sendable {
     /// - When WiFi-only is **on**, returns `true` only when the path uses WiFi **and**
     ///   is not constrained (Low Data Mode).
     func isBackgroundDownloadAllowed() -> Bool
+
+    /// Returns `true` when the current network path is using WiFi and is not
+    /// constrained (Low Data Mode).
+    ///
+    /// This is a path-only check with no user-preference component. It is used
+    /// by `BackgroundRefreshCoordinator` to enforce the
+    /// `BackgroundRefreshSettings.networkRequirement == .wifiOnly` gate at
+    /// runtime, independent of the image-download WiFi preference.
+    ///
+    /// Returns `false` when no path is available yet (conservative default
+    /// matches the WiFi-only intent: skip rather than fetch over an unknown
+    /// interface).
+    func currentPathIsWiFi() -> Bool
 }
 
 // MARK: - Path snapshot abstraction
@@ -169,6 +183,22 @@ final class NetworkMonitorService: NetworkMonitoring, @unchecked Sendable {
         }
 
         return true
+    }
+
+    func currentPathIsWiFi() -> Bool {
+        guard let path = currentSnapshot() else {
+            // No path yet — conservatively deny. A WiFi-only BG refresh skips
+            // rather than risks fetching over an unknown interface.
+            Self.logger.debug("currentPathIsWiFi() — no path yet, returning false")
+            return false
+        }
+        guard path.status == .satisfied else {
+            Self.logger.debug("currentPathIsWiFi() — path not satisfied, returning false")
+            return false
+        }
+        let isWiFi = path.usesInterfaceType(.wifi) && !path.isConstrained
+        Self.logger.debug("currentPathIsWiFi() — usesWiFi=\(path.usesInterfaceType(.wifi), privacy: .public) isConstrained=\(path.isConstrained, privacy: .public) → \(isWiFi, privacy: .public)")
+        return isWiFi
     }
 }
 

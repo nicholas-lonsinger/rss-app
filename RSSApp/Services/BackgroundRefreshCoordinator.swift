@@ -12,9 +12,14 @@ final class BackgroundRefreshCoordinator: Sendable {
     private static let logger = Logger(category: "BackgroundRefreshCoordinator")
 
     private let refreshService: FeedRefreshService
+    private let networkMonitor: NetworkMonitoring
 
-    init(refreshService: FeedRefreshService) {
+    init(
+        refreshService: FeedRefreshService,
+        networkMonitor: NetworkMonitoring
+    ) {
         self.refreshService = refreshService
+        self.networkMonitor = networkMonitor
     }
 
     /// Called from `BGTaskScheduler`'s launch handler when either refresh task
@@ -23,6 +28,14 @@ final class BackgroundRefreshCoordinator: Sendable {
     /// wires up `expirationHandler` to cancel the work task, and guarantees
     /// `setTaskCompleted(success:)` is called exactly once with a value that
     /// reflects the actual refresh outcome (not just cancellation).
+    ///
+    /// If `BackgroundRefreshSettings.networkRequirement` is `.wifiOnly` and the
+    /// current network path is not using WiFi (or is constrained / unavailable),
+    /// the task is completed immediately with `success: true` and the refresh
+    /// loop is skipped. Reporting success (not failure) here is intentional —
+    /// skipping on cellular honors the user's preference without signalling iOS
+    /// that this feature is broken; iOS should keep scheduling at the configured
+    /// cadence rather than backing off.
     func handle(_ task: BGTask) {
         Self.logger.notice("BGTask launched: \(task.description, privacy: .public)")
 
@@ -38,6 +51,18 @@ final class BackgroundRefreshCoordinator: Sendable {
             try BackgroundRefreshScheduler.scheduleNextRefresh()
         } catch {
             Self.logger.error("Failed to reschedule next background refresh: \(error, privacy: .public)")
+        }
+
+        // Enforce the WiFi-only constraint at runtime before dispatching the
+        // refresh work. `BGProcessingTaskRequest.requiresNetworkConnectivity`
+        // only guarantees that *some* network is available — it does not
+        // constrain the task to WiFi. The coordinator therefore checks the
+        // current NWPath via `NetworkMonitorService.currentPathIsWiFi()` and
+        // short-circuits here when the path is cellular or constrained.
+        if BackgroundRefreshSettings.networkRequirement == .wifiOnly && !networkMonitor.currentPathIsWiFi() {
+            Self.logger.notice("BGTask skipped — WiFi-only preference set but current path is not WiFi; completing with success=true to preserve schedule cadence")
+            task.setTaskCompleted(success: true)
+            return
         }
 
         // RATIONALE: BGTask is a framework class that is not formally Sendable

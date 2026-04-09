@@ -47,25 +47,36 @@ struct RSSAppApp: App {
             )
         }
 
-        // Build the shared persistence + icon service + refresh service
-        // stack here so the background task coordinator and the SwiftUI view
-        // tree reference the same instances. A single process-wide
-        // FeedRefreshService is the coordination point that prevents the
-        // foreground pull-to-refresh and a concurrent BGTask launch from
-        // running the refresh loop twice against the same ModelContext. The
-        // shared FeedIconService is passed to both the refresh service
-        // (which writes new icons during refresh) and the view models (which
-        // read cached icons for display) so both sides see the same cache.
+        // Build the shared persistence + icon service + network monitor +
+        // refresh service stack here so the background task coordinator and
+        // the SwiftUI view tree reference the same instances. A single
+        // process-wide FeedRefreshService is the coordination point that
+        // prevents the foreground pull-to-refresh and a concurrent BGTask
+        // launch from running the refresh loop twice against the same
+        // ModelContext. The shared FeedIconService is passed to both the
+        // refresh service (which writes new icons during refresh) and the
+        // view models (which read cached icons for display) so both sides
+        // see the same cache.
+        //
+        // NetworkMonitorService is constructed once and shared between
+        // FeedRefreshService (image-download WiFi gate) and
+        // BackgroundRefreshCoordinator (feed XML WiFi gate) so both gates
+        // read from the same live NWPathMonitor.
         let persistence = SwiftDataFeedPersistenceService(modelContext: modelContainer.mainContext)
         let feedIconService = FeedIconService()
+        let networkMonitor = NetworkMonitorService()
         let refreshService = FeedRefreshService(
             persistence: persistence,
-            feedIconService: feedIconService
+            feedIconService: feedIconService,
+            networkMonitor: networkMonitor
         )
         self.persistence = persistence
         self.feedIconService = feedIconService
         self.refreshService = refreshService
-        self.backgroundRefreshCoordinator = BackgroundRefreshCoordinator(refreshService: refreshService)
+        self.backgroundRefreshCoordinator = BackgroundRefreshCoordinator(
+            refreshService: refreshService,
+            networkMonitor: networkMonitor
+        )
 
         // BGTaskScheduler.register(...) must be called before
         // didFinishLaunchingWithOptions returns. In a SwiftUI @main App struct,

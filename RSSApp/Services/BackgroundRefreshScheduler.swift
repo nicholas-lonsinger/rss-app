@@ -4,9 +4,11 @@ import os
 
 /// Which `BGTaskScheduler` task flavor a given `BackgroundRefreshSettings`
 /// combination maps to. `BGAppRefreshTask` is best for frequent short windows;
-/// `BGProcessingTask` is the only flavor that natively supports
-/// `requiresNetworkConnectivity` / `requiresExternalPower`, so any constraint
-/// tightening beyond the default "any network, any power" pushes us to it.
+/// `BGProcessingTask` supports `requiresNetworkConnectivity` /
+/// `requiresExternalPower`, so any constraint tightening beyond the default
+/// "any network, any power" pushes us to it. Note that
+/// `requiresNetworkConnectivity` only guarantees *some* network, not Wi-Fi —
+/// runtime Wi-Fi enforcement is handled by `BackgroundRefreshCoordinator`.
 enum BackgroundTaskType: Sendable, Equatable {
     case appRefresh
     case processing
@@ -148,8 +150,13 @@ enum BackgroundRefreshScheduler {
     ///
     /// Rule:
     /// - If the user requires Wi-Fi Only OR Charging Only: use
-    ///   `BGProcessingTask`, which natively enforces
-    ///   `requiresNetworkConnectivity` / `requiresExternalPower`.
+    ///   `BGProcessingTask`, which supports `requiresNetworkConnectivity`
+    ///   and `requiresExternalPower`. Note: `requiresNetworkConnectivity`
+    ///   only guarantees that *some* network is reachable — it does not
+    ///   constrain the task to Wi-Fi. Runtime Wi-Fi enforcement lives in
+    ///   `BackgroundRefreshCoordinator.handle(_:)`, which checks the current
+    ///   `NWPath` via `NetworkMonitorService.currentPathIsWiFi()` before
+    ///   dispatching the refresh loop.
     /// - Otherwise, if the interval is 1 hour or shorter: use
     ///   `BGAppRefreshTask`, which the system schedules more frequently for
     ///   short refresh windows.
