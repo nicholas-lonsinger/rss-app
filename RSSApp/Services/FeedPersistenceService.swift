@@ -118,7 +118,7 @@ protocol FeedPersisting: Sendable {
 
     // MARK: Group operations
 
-    /// Returns all feed groups, sorted by `sortOrder`.
+    /// Returns all feed groups, sorted by `sortOrder` then `createdDate`.
     func allGroups() throws -> [PersistentFeedGroup]
     func addGroup(_ group: PersistentFeedGroup) throws
     func deleteGroup(_ group: PersistentFeedGroup) throws
@@ -841,6 +841,10 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
     }
 
     func addGroup(_ group: PersistentFeedGroup) throws {
+        guard !group.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            Self.logger.warning("Attempted to add group with empty name — skipping")
+            return
+        }
         modelContext.insert(group)
         try modelContext.save()
         Self.logger.notice("Added group '\(group.name, privacy: .public)'")
@@ -854,6 +858,10 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
     }
 
     func renameGroup(_ group: PersistentFeedGroup, to name: String) throws {
+        guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            Self.logger.warning("Attempted to rename group '\(group.name, privacy: .public)' to empty name — skipping")
+            return
+        }
         let previousName = group.name
         group.name = name
         try modelContext.save()
@@ -899,13 +907,15 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
     }
 
     func feeds(in group: PersistentFeedGroup) throws -> [PersistentFeed] {
-        let feeds = group.memberships.compactMap(\.feed).sorted { $0.addedDate < $1.addedDate }
+        let feeds = feedsFromMemberships(group.memberships, context: "group '\(group.name)'")
+            .sorted { $0.addedDate < $1.addedDate }
         Self.logger.debug("Group '\(group.name, privacy: .public)' contains \(feeds.count, privacy: .public) feeds")
         return feeds
     }
 
     func groups(for feed: PersistentFeed) throws -> [PersistentFeedGroup] {
-        let groups = feed.groupMemberships.compactMap(\.group).sorted { $0.sortOrder < $1.sortOrder }
+        let groups = groupsFromMemberships(feed.groupMemberships, context: "feed '\(feed.title)'")
+            .sorted { $0.sortOrder < $1.sortOrder }
         Self.logger.debug("Feed '\(feed.title, privacy: .public)' belongs to \(groups.count, privacy: .public) groups")
         return groups
     }
@@ -916,7 +926,7 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
     // correct. The per-feed cap of `offset + limit` ensures we fetch at most enough
     // rows to fill the requested page after merge-sorting.
     func articles(in group: PersistentFeedGroup, offset: Int, limit: Int, ascending: Bool = false) throws -> [PersistentArticle] {
-        let feeds = group.memberships.compactMap(\.feed)
+        let feeds = feedsFromMemberships(group.memberships, context: "group '\(group.name)'")
         guard !feeds.isEmpty else { return [] }
 
         let sortOrder: SortOrder = ascending ? .forward : .reverse
@@ -953,7 +963,7 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
     }
 
     func unreadCount(in group: PersistentFeedGroup) throws -> Int {
-        let feeds = group.memberships.compactMap(\.feed)
+        let feeds = feedsFromMemberships(group.memberships, context: "group '\(group.name)'")
         var total = 0
         for feed in feeds {
             total += try unreadCount(for: feed)
@@ -962,10 +972,42 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
     }
 
     func markAllArticlesRead(in group: PersistentFeedGroup) throws {
-        let feeds = group.memberships.compactMap(\.feed)
+        let feeds = feedsFromMemberships(group.memberships, context: "group '\(group.name)'")
         for feed in feeds {
             try markAllArticlesRead(for: feed)
         }
         Self.logger.notice("Marked all articles as read in group '\(group.name, privacy: .public)' (\(feeds.count, privacy: .public) feeds)")
+    }
+
+    // MARK: - Group Membership Helpers
+
+    /// Extracts feeds from memberships, logging a `.warning` for any orphaned
+    /// membership where the feed relationship is nil (data corruption indicator).
+    private func feedsFromMemberships(
+        _ memberships: [PersistentFeedGroupMembership],
+        context: String
+    ) -> [PersistentFeed] {
+        memberships.compactMap { membership in
+            guard let feed = membership.feed else {
+                Self.logger.warning("Orphaned membership \(membership.id, privacy: .public) in \(context, privacy: .public) has nil feed")
+                return nil
+            }
+            return feed
+        }
+    }
+
+    /// Extracts groups from memberships, logging a `.warning` for any orphaned
+    /// membership where the group relationship is nil (data corruption indicator).
+    private func groupsFromMemberships(
+        _ memberships: [PersistentFeedGroupMembership],
+        context: String
+    ) -> [PersistentFeedGroup] {
+        memberships.compactMap { membership in
+            guard let group = membership.group else {
+                Self.logger.warning("Orphaned membership \(membership.id, privacy: .public) in \(context, privacy: .public) has nil group")
+                return nil
+            }
+            return group
+        }
     }
 }
