@@ -30,6 +30,28 @@ struct EditFeedView: View {
                     }
                 }
 
+                if !viewModel.allGroups.isEmpty {
+                    Section {
+                        ForEach(viewModel.allGroups, id: \.id) { group in
+                            Button {
+                                viewModel.toggleGroupMembership(group)
+                            } label: {
+                                HStack {
+                                    Label(group.name, systemImage: "folder")
+                                        .foregroundStyle(.primary)
+                                    Spacer()
+                                    if viewModel.memberGroupIDs.contains(group.id) {
+                                        Image(systemName: "checkmark")
+                                            .foregroundStyle(.blue)
+                                    }
+                                }
+                            }
+                        }
+                    } header: {
+                        Text("Groups")
+                    }
+                }
+
                 Section {
                     Button {
                         Task { await viewModel.saveFeed() }
@@ -53,6 +75,9 @@ struct EditFeedView: View {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Cancel") { dismiss() }
                 }
+            }
+            .task {
+                viewModel.loadGroups()
             }
             .onChange(of: viewModel.didSave) { _, newValue in
                 if newValue { dismiss() }

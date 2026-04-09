@@ -35,6 +35,9 @@ final class PersistentFeed {
     @Relationship(deleteRule: .cascade, inverse: \PersistentArticle.feed)
     var articles: [PersistentArticle]
 
+    @Relationship(deleteRule: .cascade, inverse: \PersistentFeedGroupMembership.feed)
+    var groupMemberships: [PersistentFeedGroupMembership]
+
     init(
         id: UUID = UUID(),
         title: String,
@@ -60,5 +63,6 @@ final class PersistentFeed {
         self.lastFetchError = lastFetchError
         self.lastFetchErrorDate = lastFetchErrorDate
         self.articles = []
+        self.groupMemberships = []
     }
 }

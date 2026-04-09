@@ -1,11 +1,11 @@
 import Foundation
 
-/// Represents a top-level group on the Home screen.
+/// Represents a built-in top-level group on the Home screen.
 ///
-/// The four fixed cases cover the current launch groups. If user-created groups
-/// (e.g., folders, tags) are needed in the future, the design would likely move to
-/// a protocol or struct-based approach, since `CaseIterable` conformance cannot be
-/// synthesized for enums with associated values.
+/// The four fixed cases cover the built-in groups. User-created groups
+/// (`PersistentFeedGroup`) are rendered in a separate section of `HomeView`
+/// and navigate via `GroupDestination`, keeping this enum as a simple
+/// `CaseIterable` without associated values.
 enum HomeGroup: Hashable, Identifiable, CaseIterable {
     case allArticles
     case unreadArticles

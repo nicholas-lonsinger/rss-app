@@ -390,4 +390,80 @@ struct EditFeedViewModelTests {
         // stale if the user stares at it during the dismissal animation.
         #expect(viewModel.urlInput == currentURL.absoluteString)
     }
+
+    // MARK: - Group Membership
+
+    @Test("loadGroups populates allGroups and identifies member groups")
+    @MainActor
+    func loadGroupsSuccess() {
+        let feed = TestFixtures.makePersistentFeed()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+
+        let group1 = PersistentFeedGroup(name: "Tech", sortOrder: 0)
+        let group2 = PersistentFeedGroup(name: "News", sortOrder: 1)
+        mockPersistence.groups = [group1, group2]
+        mockPersistence.memberships = [PersistentFeedGroupMembership(feed: feed, group: group1)]
+
+        let viewModel = EditFeedViewModel(feed: feed, persistence: mockPersistence)
+        viewModel.loadGroups()
+
+        #expect(viewModel.allGroups.count == 2)
+        #expect(viewModel.memberGroupIDs == Set([group1.id]))
+        #expect(viewModel.errorMessage == nil)
+    }
+
+    @Test("loadGroups sets errorMessage on failure")
+    @MainActor
+    func loadGroupsError() {
+        let feed = TestFixtures.makePersistentFeed()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.errorToThrow = NSError(domain: "test", code: 1)
+
+        let viewModel = EditFeedViewModel(feed: feed, persistence: mockPersistence)
+        viewModel.loadGroups()
+
+        #expect(viewModel.errorMessage != nil)
+    }
+
+    @Test("toggleGroupMembership adds feed to group")
+    @MainActor
+    func toggleGroupMembershipAdd() {
+        let feed = TestFixtures.makePersistentFeed()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+
+        let group = PersistentFeedGroup(name: "Tech")
+        mockPersistence.groups = [group]
+
+        let viewModel = EditFeedViewModel(feed: feed, persistence: mockPersistence)
+        viewModel.loadGroups()
+        #expect(!viewModel.memberGroupIDs.contains(group.id))
+
+        viewModel.toggleGroupMembership(group)
+
+        #expect(viewModel.memberGroupIDs.contains(group.id))
+        #expect(mockPersistence.memberships.count == 1)
+    }
+
+    @Test("toggleGroupMembership removes feed from group")
+    @MainActor
+    func toggleGroupMembershipRemove() {
+        let feed = TestFixtures.makePersistentFeed()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+
+        let group = PersistentFeedGroup(name: "Tech")
+        mockPersistence.groups = [group]
+        mockPersistence.memberships = [PersistentFeedGroupMembership(feed: feed, group: group)]
+
+        let viewModel = EditFeedViewModel(feed: feed, persistence: mockPersistence)
+        viewModel.loadGroups()
+        #expect(viewModel.memberGroupIDs.contains(group.id))
+
+        viewModel.toggleGroupMembership(group)
+
+        #expect(!viewModel.memberGroupIDs.contains(group.id))
+        #expect(mockPersistence.memberships.isEmpty)
+    }
 }

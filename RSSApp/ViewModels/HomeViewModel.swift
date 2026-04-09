@@ -25,10 +25,11 @@ final class HomeViewModel {
     /// (shared with the BG refresh path) and compares it against
     /// `entryRefreshInterval`. Returns `true` when no refresh has ever
     /// completed on this install, or when the most recent completion is
-    /// older than the interval. Used by `AllArticlesSource` and
-    /// `UnreadArticlesSource` to gate the `refreshAllFeeds()` call in their
-    /// `initialLoad()`; `SavedArticlesSource` does not consult it at all
-    /// because saved articles never benefit from a feed refresh.
+    /// older than the interval. Used by `AllArticlesSource`,
+    /// `UnreadArticlesSource`, and `GroupArticleSource` to gate the
+    /// `refreshAllFeeds()` call in their `initialLoad()`;
+    /// `SavedArticlesSource` does not consult it at all because saved
+    /// articles never benefit from a feed refresh.
     var shouldRefreshOnEntry: Bool {
         guard let last = FeedRefreshService.lastRefreshCompletedAt else {
             return true
@@ -40,6 +41,11 @@ final class HomeViewModel {
     private(set) var savedCount: Int = 0
     private(set) var isRefreshing = false
     private(set) var errorMessage: String?
+
+    // MARK: - Group state
+
+    private(set) var groups: [PersistentFeedGroup] = []
+    private(set) var groupUnreadCounts: [UUID: Int] = [:]
 
     // MARK: - Pagination state for all articles
 
@@ -392,6 +398,94 @@ final class HomeViewModel {
         } catch {
             errorMessage = "Unable to mark all saved articles as read."
             Self.logger.error("Failed to mark all saved articles as read: \(error, privacy: .public)")
+        }
+    }
+
+    // MARK: - Groups
+
+    func loadGroups() {
+        do {
+            groups = try persistence.allGroups()
+            loadGroupUnreadCounts()
+            Self.logger.debug("Loaded \(self.groups.count, privacy: .public) groups")
+        } catch {
+            errorMessage = "Unable to load groups."
+            Self.logger.error("Failed to load groups: \(error, privacy: .public)")
+        }
+    }
+
+    func loadGroupUnreadCounts() {
+        var counts: [UUID: Int] = [:]
+        var feedUnreadCache: [UUID: Int] = [:]
+        for group in groups {
+            do {
+                let feeds = try persistence.feeds(in: group)
+                var total = 0
+                for feed in feeds {
+                    if let cached = feedUnreadCache[feed.id] {
+                        total += cached
+                    } else {
+                        let count = try persistence.unreadCount(for: feed)
+                        feedUnreadCache[feed.id] = count
+                        total += count
+                    }
+                }
+                counts[group.id] = total
+            } catch {
+                Self.logger.error("Failed to load unread count for group '\(group.name, privacy: .public)': \(error, privacy: .public)")
+                counts[group.id] = 0
+            }
+        }
+        groupUnreadCounts = counts
+    }
+
+    func addGroup(name: String) {
+        let nextSortOrder = (groups.map(\.sortOrder).max() ?? -1) + 1
+        let group = PersistentFeedGroup(name: name, sortOrder: nextSortOrder)
+        do {
+            try persistence.addGroup(group)
+            loadGroups()
+            Self.logger.notice("Created group '\(name, privacy: .public)' at sortOrder \(nextSortOrder, privacy: .public)")
+        } catch {
+            errorMessage = "Unable to create group."
+            Self.logger.error("Failed to create group '\(name, privacy: .public)': \(error, privacy: .public)")
+        }
+    }
+
+    func deleteGroup(_ group: PersistentFeedGroup) {
+        let name = group.name
+        do {
+            try persistence.deleteGroup(group)
+            loadGroups()
+            Self.logger.notice("Deleted group '\(name, privacy: .public)'")
+        } catch {
+            errorMessage = "Unable to delete group."
+            Self.logger.error("Failed to delete group '\(name, privacy: .public)': \(error, privacy: .public)")
+        }
+    }
+
+    func renameGroup(_ group: PersistentFeedGroup, to name: String) {
+        do {
+            try persistence.renameGroup(group, to: name)
+            loadGroups()
+            Self.logger.notice("Renamed group to '\(name, privacy: .public)'")
+        } catch {
+            errorMessage = "Unable to rename group."
+            Self.logger.error("Failed to rename group: \(error, privacy: .public)")
+        }
+    }
+
+    /// Marks all articles in a group as read. Scoped to the group's feeds
+    /// only — same pattern as `markAllSavedArticlesRead()` scoping to saved.
+    func markAllArticlesReadInGroup(_ group: PersistentFeedGroup) {
+        do {
+            try persistence.markAllArticlesRead(in: group)
+            loadUnreadCount()
+            loadGroupUnreadCounts()
+            Self.logger.notice("Marked all articles as read in group '\(group.name, privacy: .public)'")
+        } catch {
+            errorMessage = "Unable to mark all articles as read."
+            Self.logger.error("Failed to mark all articles as read in group '\(group.name, privacy: .public)': \(error, privacy: .public)")
         }
     }
 }

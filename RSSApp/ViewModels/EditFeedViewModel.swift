@@ -21,6 +21,11 @@ final class EditFeedViewModel {
     /// `didSave = true` and allowing the sheet to dismiss.
     private(set) var atomFallbackNotice: URL?
 
+    // MARK: - Group membership state
+
+    private(set) var allGroups: [PersistentFeedGroup] = []
+    private(set) var memberGroupIDs: Set<UUID> = []
+
     var canSubmit: Bool {
         !urlInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isValidating
     }
@@ -245,5 +250,36 @@ final class EditFeedViewModel {
 
         Self.logger.notice("Updated feed '\(rssFeed.title, privacy: .public)' URL to \(url, privacy: .public)")
         return true
+    }
+
+    // MARK: - Group Membership
+
+    func loadGroups() {
+        do {
+            allGroups = try persistence.allGroups()
+            let feedGroups = try persistence.groups(for: feed)
+            memberGroupIDs = Set(feedGroups.map(\.id))
+            Self.logger.debug("Feed '\(self.feed.title, privacy: .public)' belongs to \(self.memberGroupIDs.count, privacy: .public) of \(self.allGroups.count, privacy: .public) groups")
+        } catch {
+            errorMessage = "Unable to load groups."
+            Self.logger.error("Failed to load groups for feed: \(error, privacy: .public)")
+        }
+    }
+
+    func toggleGroupMembership(_ group: PersistentFeedGroup) {
+        do {
+            if memberGroupIDs.contains(group.id) {
+                try persistence.removeFeed(feed, from: group)
+                memberGroupIDs.remove(group.id)
+                Self.logger.notice("Removed feed '\(self.feed.title, privacy: .public)' from group '\(group.name, privacy: .public)'")
+            } else {
+                try persistence.addFeed(feed, to: group)
+                memberGroupIDs.insert(group.id)
+                Self.logger.notice("Added feed '\(self.feed.title, privacy: .public)' to group '\(group.name, privacy: .public)'")
+            }
+        } catch {
+            errorMessage = "Unable to update group membership."
+            Self.logger.error("Failed to toggle group membership: \(error, privacy: .public)")
+        }
     }
 }
