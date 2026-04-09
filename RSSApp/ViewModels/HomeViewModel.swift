@@ -38,7 +38,6 @@ final class HomeViewModel {
     }
 
     private(set) var unreadCount: Int = 0
-    private(set) var savedCount: Int = 0
     private(set) var isRefreshing = false
     private(set) var errorMessage: String?
 
@@ -176,16 +175,6 @@ final class HomeViewModel {
         }
 
         return true
-    }
-
-    func loadSavedCount() {
-        do {
-            savedCount = try persistence.savedCount()
-            Self.logger.debug("Total saved count: \(self.savedCount, privacy: .public)")
-        } catch {
-            errorMessage = "Unable to load saved count."
-            Self.logger.error("Failed to load total saved count: \(error, privacy: .public)")
-        }
     }
 
     // MARK: - All Articles (paginated)
@@ -359,7 +348,6 @@ final class HomeViewModel {
     func toggleSaved(_ article: PersistentArticle) {
         do {
             try persistence.toggleArticleSaved(article)
-            loadSavedCount()
         } catch {
             errorMessage = "Unable to update saved status."
             Self.logger.error("Failed to toggle saved status: \(error, privacy: .public)")

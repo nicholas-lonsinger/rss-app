@@ -79,9 +79,6 @@ protocol FeedPersisting: Sendable {
     /// newest-first / oldest-first preference rather than hardcoding a
     /// savedDate-descending order.
     func allSavedArticles(offset: Int, limit: Int, ascending: Bool) throws -> [PersistentArticle]
-    /// Returns the total number of saved articles across all feeds.
-    func savedCount() throws -> Int
-
     // MARK: Content cache
 
     func cachedContent(for article: PersistentArticle) throws -> PersistentArticleContent?
@@ -687,13 +684,6 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
         let articles = try modelContext.fetch(descriptor)
         Self.logger.debug("Fetched \(articles.count, privacy: .public) saved articles (offset: \(offset, privacy: .public), limit: \(limit, privacy: .public), ascending: \(ascending, privacy: .public))")
         return articles
-    }
-
-    func savedCount() throws -> Int {
-        let descriptor = FetchDescriptor<PersistentArticle>(
-            predicate: #Predicate { $0.isSaved }
-        )
-        return try modelContext.fetchCount(descriptor)
     }
 
     // MARK: - Thumbnail Tracking

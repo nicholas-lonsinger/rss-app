@@ -353,12 +353,10 @@ final class SavedArticlesSource: ArticleListSource {
 
     func initialLoad() async {
         homeViewModel.loadSavedArticles()
-        homeViewModel.loadSavedCount()
     }
 
     func refresh() async {
         homeViewModel.loadSavedArticles()
-        homeViewModel.loadSavedCount()
     }
 
     func reload() {
@@ -392,7 +390,6 @@ final class SavedArticlesSource: ArticleListSource {
     }
 
     func onDisappear() {
-        homeViewModel.loadSavedCount()
     }
 
     func clearError() {

@@ -258,11 +258,6 @@ final class MockFeedPersistenceService: FeedPersisting {
         return Array(all.dropFirst(offset).prefix(limit))
     }
 
-    func savedCount() throws -> Int {
-        if let error = errorToThrow { throw error }
-        return articlesByFeedID.values.flatMap { $0 }.filter { $0.isSaved }.count
-    }
-
     // MARK: - Content Cache
 
     func cachedContent(for article: PersistentArticle) throws -> PersistentArticleContent? {

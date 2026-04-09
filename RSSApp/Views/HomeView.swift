@@ -98,7 +98,6 @@ struct HomeView: View {
             .refreshable {
                 await viewModel.refreshAllFeeds()
                 viewModel.loadUnreadCount()
-                viewModel.loadSavedCount()
                 viewModel.loadGroupUnreadCounts()
             }
             .navigationTitle("Home")
@@ -184,7 +183,6 @@ struct HomeView: View {
             }
             .task {
                 viewModel.loadUnreadCount()
-                viewModel.loadSavedCount()
                 viewModel.loadGroups()
                 feedListViewModel.loadFeeds()
             }
@@ -234,7 +232,6 @@ struct HomeView: View {
             .onChange(of: scenePhase) { _, newPhase in
                 if newPhase == .active {
                     viewModel.loadUnreadCount()
-                    viewModel.loadSavedCount()
                     viewModel.loadGroupUnreadCounts()
                 }
             }
@@ -254,9 +251,7 @@ struct HomeView: View {
         switch group {
         case .unreadArticles:
             return viewModel.unreadCount
-        case .savedArticles:
-            return viewModel.savedCount
-        case .allArticles, .allFeeds:
+        case .savedArticles, .allArticles, .allFeeds:
             return nil
         }
     }
