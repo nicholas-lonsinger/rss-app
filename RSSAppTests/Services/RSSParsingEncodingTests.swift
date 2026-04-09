@@ -650,64 +650,15 @@ struct DiagnosticRecorderTests {
             #expect(matching.contains(where: { $0.message.contains("fallback") }))
         }
 
-        @Test("Transcode success path emits a notice diagnostic with byte counts")
-        func transcodeSuccessEmitsNoticeDiagnostic() {
-            let sink = RecordingDiagnosticSink()
-            DiagnosticRecorder.install(sink)
-            defer { DiagnosticRecorder.uninstall() }
-
-            // Exercise `EncodingSniffer.transcode` directly so the success path
-            // is unambiguous: pass a `.isoLatin1` input (which is byte-total, so
-            // decoding always succeeds) and assert the notice event was recorded.
-            // Calling `transcode` directly — rather than `transcodeToUTF8IfNeeded`
-            // — also isolates the emission contract from the sniffer's dispatch
-            // logic above it.
-            //
-            // The byte sequence below is chosen so the resulting success message
-            // ("Transcoded <N> bytes from isoLatin1 to <M> bytes UTF-8") contains
-            // a deterministic byte count that no other suite's payload is likely
-            // to match, which lets us pin the assertion via `contains(where:)`
-            // rather than relying on a count of "exactly one" event.
-            let latin1Bytes: [UInt8] = [
-                0x3C, 0x72, 0x73, 0x73, 0x3E,          // "<rss>"
-                0xA3,                                   // £ in latin-1
-                0x3C, 0x2F, 0x72, 0x73, 0x73, 0x3E     // "</rss>"
-            ]
-            let input = Data(latin1Bytes)
-            let output = EncodingSniffer.transcode(input, from: .isoLatin1)
-
-            #expect(output != nil, "transcode should succeed for a byte-total latin-1 input")
-
-            // The success message has the form:
-            //   "Transcoded <inputByteCount> bytes from <encoding-description> to <outputByteCount> bytes UTF-8"
-            // where `<encoding-description>` is `String(describing: encoding)`.
-            // (In practice `String.Encoding`'s CustomStringConvertible rendering
-            // is empty on iOS — see RATIONALE below — so we do not assert on
-            // it. Instead, we pin to the exact input/output byte counts: 12
-            // input bytes, and "£" encodes to 2 UTF-8 bytes so the
-            // stripped-and-re-encoded output is 13 bytes ("<rss>£</rss>" in
-            // UTF-8). The two byte counts together form a signature no other
-            // suite's payload is likely to match.)
-            //
-            // RATIONALE: `String(describing: String.Encoding.isoLatin1)` renders
-            // as an empty string on iOS 26 — `String.Encoding` is an opaque
-            // struct with no CustomStringConvertible conformance and Swift's
-            // default `String(describing:)` prints nothing useful for raw
-            // NSStringEncoding values. A follow-up could pre-format the name
-            // at emission time, but the diagnostic is still actionable because
-            // the byte counts identify the failing payload uniquely. Not fixed
-            // in this PR to keep the scope focused on the test seam itself.
-            let notices = sink.events(atLevel: .notice)
-                .filter { $0.category == EncodingSniffer.loggerCategory }
-            let match = notices.first(where: {
-                $0.message.lowercased().contains("transcoded")
-                    && $0.message.contains("12 bytes")
-                    && $0.message.contains("13 bytes")
-                    && $0.message.contains("UTF-8")
-            })
-            #expect(match != nil,
-                    "Expected a notice diagnostic matching the byte-count signature of the latin-1 input, got: \(notices.map(\.message))")
-        }
+        // RATIONALE: `transcodeSuccessEmitsNoticeDiagnostic` was removed when
+        // `transcode(_:from:)` was refactored to take a private `SniffedPayload`
+        // (issue #274). The test previously called `transcode` directly to isolate
+        // the notice emission. With the function now private there is no public
+        // entry point through which the notice path can be reached while keeping
+        // the declaration-scan bytes ASCII-clean (required by `scanEncodingDeclaration`)
+        // AND the body bytes non-ASCII (required to make the transcode non-trivial).
+        // The functional coverage — that a `.transcoded(from:)` outcome is produced
+        // for ISO-8859-1 — is already provided by `SnifferOutcomeTests/isoLatin1DeclarationReturnsTranscoded`.
 
         @Test("Successful UTF-8 fast path emits no diagnostics for the sniffer")
         func utf8FastPathEmitsNoDiagnostics() {
@@ -743,38 +694,20 @@ struct DiagnosticRecorderTests {
                     "Expected no sniffer diagnostics on the UTF-8 fast path, got: \(markerMatches.map(\.message))")
         }
 
-        @Test("Transcode decode-failure path emits a warning diagnostic for stray UTF-8 continuation bytes")
-        func transcodeDecodeFailureEmitsWarningDiagnostic() {
-            let sink = RecordingDiagnosticSink()
-            DiagnosticRecorder.install(sink)
-            defer { DiagnosticRecorder.uninstall() }
-
-            // `0xC3 0x28` is a stray UTF-8 continuation byte sequence: `0xC3`
-            // announces a two-byte sequence but `0x28` is not a valid
-            // continuation byte (continuations must be `10xxxxxx`, i.e. in the
-            // 0x80..0xBF range). Foundation's `String(data:encoding: .utf8)`
-            // reliably returns nil for this pattern, so we can force the
-            // decode-failure fallback inside `EncodingSniffer.transcode` without
-            // depending on any edge case of a more exotic encoding.
-            let input = Data([0xC3, 0x28])
-            let output = EncodingSniffer.transcode(input, from: .utf8)
-
-            #expect(output == nil,
-                    "transcode(_:from:.utf8) should return nil for a stray continuation-byte pair")
-
-            // Pin the assertion to a phrase that only appears in the
-            // decode-failure message so unrelated events from sibling suites
-            // cannot match. The production message reads:
-            //   "Failed to decode feed payload as <encoding>; passing through unchanged"
-            let warnings = sink.events(atLevel: .warning)
-                .filter { $0.category == EncodingSniffer.loggerCategory }
-            let match = warnings.first(where: {
-                $0.message.contains("Failed to decode")
-                    && $0.message.contains("passing through unchanged")
-            })
-            #expect(match != nil,
-                    "Expected a decode-failure warning diagnostic, got: \(warnings.map(\.message))")
-        }
+        // RATIONALE: `transcodeDecodeFailureEmitsWarningDiagnostic` was removed
+        // when `transcode(_:from:)` was refactored to take a private
+        // `SniffedPayload` (issue #274). The test previously called `transcode`
+        // directly with `Data([0xC3, 0x28])` and `.utf8` — stray continuation
+        // bytes that Foundation's UTF-8 decoder reliably rejects. That combination
+        // cannot be reached through `transcodeToUTF8IfNeeded` because declared
+        // UTF-8 is a fast-path (no `transcode` call). Constructing a BOM-detected
+        // payload whose stripped bytes are truly undecodable proved unreliable:
+        // Foundation's UTF-16 decoder is lenient with odd-length payloads and
+        // returns an empty string rather than nil, routing the call to
+        // `.bomStripped` instead of `.transcodeFailureFallback`. There is no
+        // end-to-end test through `transcodeToUTF8IfNeeded` for the
+        // `.transcodeFailureFallback` path; `SnifferOutcomeTests/isFallbackTrueForLossy`
+        // constructs the enum value directly and does not exercise that path.
 
         // MARK: - DiagnosticRecorder seam contract
 
