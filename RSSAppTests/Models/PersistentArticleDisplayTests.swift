@@ -56,18 +56,25 @@ struct PersistentArticleDisplayTests {
         #expect(row.shouldShowUpdatedSuffix == true)
     }
 
-    @Test("shouldShowUpdatedSuffix uses absolute delta — updatedDate before displayedPublishedDate still triggers")
-    func shouldShowUpdatedSuffixNegativeDelta() {
-        // Past published, past updated even further back. The abs() in the predicate
-        // means a negative delta (updated before displayed publication) still surfaces
-        // the suffix. Catches a refactor that drops the abs() and silently hides
-        // legitimate update timestamps.
+    @Test("shouldShowUpdatedSuffix returns false when updatedDate is older than displayedPublishedDate (issue #299)")
+    func shouldShowUpdatedSuffixSuppressedWhenUpdatedBeforePublished() {
+        // Past published, past updated even further back — i.e., the feed reports
+        // `updated < published`. Some feeds (e.g. NVIDIA Technical Blog) emit
+        // `<updated>` values older than `<pubDate>`. Prior to issue #299 the
+        // predicate used `abs(updated - displayed)`, which surfaced a nonsensical
+        // "Updated [older timestamp]" suffix next to the primary publish label
+        // ("4 hours ago · Updated 20 hours ago"). The predicate now requires
+        // `updated` to be strictly newer than `displayedPublishedDate`, so a
+        // feed reporting `updated <= published` is treated as not having a
+        // meaningful update and the suffix is suppressed. The orange `wasUpdated`
+        // badge is independent of this predicate and is unaffected.
         let fetched = Date(timeIntervalSince1970: 1_700_000_000)
         let published = fetched.addingTimeInterval(-3600) // 1h before fetch
         let updated = fetched.addingTimeInterval(-7200)   // 2h before fetch (and before published)
         let row = makeRow(published: published, updated: updated, fetched: fetched)
-        // displayedPublishedDate == published (past, so unchanged); |updated - published| == 3600 > 1
-        #expect(row.shouldShowUpdatedSuffix == true)
+        // displayedPublishedDate == published (past, so unchanged);
+        // updated - published == -3600, which is not > 1 → suffix hidden.
+        #expect(row.shouldShowUpdatedSuffix == false)
     }
 
     @Test("shouldShowUpdatedSuffix compares against displayedPublishedDate, not raw publishedDate")

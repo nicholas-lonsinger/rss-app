@@ -242,9 +242,8 @@ final class PersistentArticle {
 
     /// Whether row UI should display the "Updated [date]" suffix alongside the
     /// original publication time. True when the publisher has revised the article
-    /// meaningfully — i.e., `updatedDate` exists and differs from
-    /// `displayedPublishedDate` by strictly more than `Self.updateSuffixTolerance`
-    /// seconds.
+    /// meaningfully — i.e., `updatedDate` exists and is *strictly newer* than
+    /// `displayedPublishedDate` by more than `Self.updateSuffixTolerance` seconds.
     ///
     /// The 1-second tolerance suppresses noise from feeds that fill `<updated>` with
     /// the same value as `<published>` on first publish (very common in WordPress
@@ -254,6 +253,18 @@ final class PersistentArticle {
     /// predicate stays consistent with what the row actually renders for the
     /// original-time label, including the future-date clamp behavior.
     ///
+    /// **Strictly-newer check (issue #299):** an earlier revision used
+    /// `abs(updated - displayed)`, which also surfaced the suffix when
+    /// `updatedDate <= displayedPublishedDate`. Some feeds (e.g. NVIDIA Technical
+    /// Blog) emit `<updated>` values older than their `<pubDate>`, which produced
+    /// nonsensical rows like "4 hours ago · Updated 20 hours ago" — a suffix that
+    /// is older than the primary label it's attached to. The predicate now drops
+    /// `abs()` and requires `updated > displayed + tolerance`, so feeds reporting
+    /// `updated <= published` are treated as not having a meaningful update and
+    /// the suffix is suppressed. The orange `wasUpdated` badge is independent and
+    /// continues to surface on every update-detection bump — see the contract on
+    /// `wasUpdated` above.
+    ///
     /// Extracted as a computed property (rather than left inline in the row view)
     /// so the predicate is unit-testable without standing up SwiftUI machinery, and
     /// so a future refactor that accidentally compares against `publishedDate`
@@ -261,7 +272,7 @@ final class PersistentArticle {
     /// rather than slipping into a release.
     var shouldShowUpdatedSuffix: Bool {
         guard let updated = updatedDate else { return false }
-        return abs(updated.timeIntervalSince(displayedPublishedDate)) > Self.updateSuffixTolerance
+        return updated.timeIntervalSince(displayedPublishedDate) > Self.updateSuffixTolerance
     }
 
     /// Tolerance window (seconds) used by `shouldShowUpdatedSuffix` to suppress
