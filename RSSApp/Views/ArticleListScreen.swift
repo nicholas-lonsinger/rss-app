@@ -29,8 +29,13 @@ struct ArticleListScreen<Source: ArticleListSource>: View {
         self.thumbnailService = thumbnailService
     }
 
+    @Environment(\.dismiss) private var dismiss
+
     @State private var selectedArticleIndex: Int?
     @State private var showMarkAllReadConfirmation = false
+    @State private var showEditGroupSheet = false
+    @State private var showDeleteGroupConfirmation = false
+    @State private var deleteErrorMessage: String?
     @State private var hasAppeared = false
     // RATIONALE: Snapshot preservation across reader push/pop. See
     // ARCHITECTURE.md → "Snapshot preservation across reader push/pop (two gates)".
@@ -86,6 +91,38 @@ struct ArticleListScreen<Source: ArticleListSource>: View {
             Button("OK") { source.clearError() }
         } message: {
             Text(source.errorMessage ?? "")
+        }
+        .alert("Error", isPresented: deleteErrorAlertBinding) {
+            Button("OK") { deleteErrorMessage = nil }
+        } message: {
+            Text(deleteErrorMessage ?? "")
+        }
+        .alert(
+            "Delete Group?",
+            isPresented: $showDeleteGroupConfirmation,
+            presenting: source.editableGroup
+        ) { group in
+            Button("Delete", role: .destructive) {
+                source.deleteGroup()
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: { group in
+            Text("\"\(group.name)\" will be deleted. Its feeds will not be removed.")
+        }
+        .sheet(isPresented: $showEditGroupSheet, onDismiss: { source.reload() }) {
+            if let group = source.editableGroup {
+                EditGroupView(group: group, persistence: persistence)
+            }
+        }
+        .onChange(of: source.wasGroupDeleted) { _, deleted in
+            if deleted {
+                dismiss()
+            }
+        }
+        .onChange(of: source.deleteErrorMessage) { _, message in
+            if let message {
+                deleteErrorMessage = message
+            }
         }
         .task {
             // RATIONALE: First half of the two-gate snapshot-preservation
@@ -260,6 +297,22 @@ struct ArticleListScreen<Source: ArticleListSource>: View {
                 } label: {
                     Label("Mark All as Read", systemImage: "checkmark.circle")
                 }
+
+                if source.supportsGroupEdit {
+                    Divider()
+
+                    Button {
+                        showEditGroupSheet = true
+                    } label: {
+                        Label("Edit Group", systemImage: "pencil")
+                    }
+
+                    Button(role: .destructive) {
+                        showDeleteGroupConfirmation = true
+                    } label: {
+                        Label("Delete Group", systemImage: "trash")
+                    }
+                }
             } label: {
                 Image(systemName: "ellipsis.circle")
             }
@@ -275,6 +328,16 @@ struct ArticleListScreen<Source: ArticleListSource>: View {
         Binding(
             get: { source.errorMessage != nil && !source.articles.isEmpty },
             set: { if !$0 { source.clearError() } }
+        )
+    }
+
+    /// Always shown when a delete-group failure occurs, regardless of whether
+    /// the article list is empty — delete errors must surface even on empty
+    /// groups, which are the most natural targets for deletion.
+    private var deleteErrorAlertBinding: Binding<Bool> {
+        Binding(
+            get: { deleteErrorMessage != nil },
+            set: { if !$0 { deleteErrorMessage = nil } }
         )
     }
 }

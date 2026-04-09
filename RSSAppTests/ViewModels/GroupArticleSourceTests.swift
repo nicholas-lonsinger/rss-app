@@ -187,6 +187,30 @@ struct GroupArticleSourceTests {
         #expect(source.errorMessage == nil)
     }
 
+    // MARK: - Group deletion
+
+    @Test("deleteGroup() success sets wasGroupDeleted and removes group from persistence")
+    @MainActor
+    func deleteGroupSuccess() {
+        let (source, mock, group) = Self.makeFixture()
+        source.deleteGroup()
+
+        #expect(source.wasGroupDeleted == true)
+        #expect(source.deleteErrorMessage == nil)
+        #expect(!mock.groups.contains { $0.id == group.id })
+    }
+
+    @Test("deleteGroup() failure sets deleteErrorMessage and leaves wasGroupDeleted false")
+    @MainActor
+    func deleteGroupFailure() {
+        let (source, mock, _) = Self.makeFixture()
+        mock.groupError = NSError(domain: "test", code: 1)
+        source.deleteGroup()
+
+        #expect(source.wasGroupDeleted == false)
+        #expect(source.deleteErrorMessage != nil)
+    }
+
     // MARK: - Sort
 
     @Test("sortAscending toggle reloads articles in new order")

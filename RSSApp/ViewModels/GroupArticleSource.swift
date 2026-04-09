@@ -36,6 +36,26 @@ final class GroupArticleSource: ArticleListSource {
     var supportsSort: Bool { true }
     var supportsUnreadFilter: Bool { false }
 
+    // MARK: - Group editing capability
+
+    var supportsGroupEdit: Bool { true }
+    var editableGroup: PersistentFeedGroup? { group }
+    private(set) var wasGroupDeleted: Bool = false
+    private(set) var deleteErrorMessage: String?
+
+    func deleteGroup() {
+        let name = group.name
+        do {
+            try persistence.deleteGroup(group)
+            homeViewModel.loadGroups()
+            wasGroupDeleted = true
+            Self.logger.notice("Deleted group '\(name, privacy: .public)' from GroupArticleSource")
+        } catch {
+            deleteErrorMessage = "Unable to delete group."
+            Self.logger.error("Failed to delete group '\(name, privacy: .public)': \(error, privacy: .public)")
+        }
+    }
+
     var sortAscending: Bool {
         get { homeViewModel.sortAscending }
         set {
