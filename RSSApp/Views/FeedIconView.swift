@@ -3,23 +3,13 @@ import SwiftUI
 struct FeedIconView: View {
 
     enum Style {
-        /// 32pt square (at default Dynamic Type) with a tertiary-fill background and globe
-        /// placeholder while loading. Scales relative to `.headline` so it tracks the adjacent
-        /// feed title in `FeedRowView`. Used by `FeedRowView` (the row used in `FeedListView`).
+        /// 32pt square (at default Dynamic Type). Scales relative to `.headline` so it
+        /// tracks the adjacent feed title in `FeedRowView`. Used by `FeedRowView`
+        /// (the row rendered in `FeedListView`).
         case standard
-        /// 14pt square (at default Dynamic Type) with no background and no placeholder — when
-        /// no cached icon is available the view still occupies its frame but renders no visible
-        /// chrome, so surrounding text sits flush against an empty slot rather than a globe
-        /// glyph. Scales relative to `.caption` so it tracks the adjacent feed name in
-        /// cross-feed article rows.
+        /// 14pt square (at default Dynamic Type). Scales relative to `.caption` so it
+        /// tracks the adjacent feed name in the metadata footer of `ArticleRowView`.
         case inline
-
-        fileprivate var showsPlaceholder: Bool {
-            switch self {
-            case .standard: return true
-            case .inline: return false
-            }
-        }
     }
 
     let feedID: UUID
@@ -56,26 +46,27 @@ struct FeedIconView: View {
 
     var body: some View {
         ZStack {
-            // RATIONALE: Color.clear is an always-present base so the ZStack has concrete
-            // content even in the .inline style when no icon is cached. Without it, SwiftUI
-            // can resolve the subtree to EmptyView and `.task(id:)` fails to attach to the
-            // view lifecycle, leaving the icon permanently blank. Only `.inline` needs this —
-            // `.standard` always renders the RoundedRectangle base so its ZStack is never empty.
-            Color.clear
-
-            if style.showsPlaceholder {
-                RoundedRectangle(cornerRadius: cornerRadius)
-                    .fill(Color(.tertiarySystemFill))
-            }
+            // Solid black tile behind every icon so favicons without their own
+            // background (e.g. Apple Insider's transparent-edge logo) sit on a
+            // consistent chrome that matches the larger `.standard` rows in
+            // `FeedListView`. Icons with their own opaque background paint over
+            // this tile, so the black is only visible where the icon itself
+            // has transparency.
+            RoundedRectangle(cornerRadius: cornerRadius)
+                .fill(Color.black)
 
             if let iconImage {
                 Image(uiImage: iconImage)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
                     .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
-            } else if style.showsPlaceholder {
+            } else {
+                // Placeholder globe while the icon resolves (or if the feed
+                // has no icon at all). Sized relative to the frame so it
+                // tracks Dynamic Type scaling at both style sizes.
                 Image(systemName: "globe")
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: iconSize * 0.6))
+                    .foregroundStyle(.white.opacity(0.6))
             }
         }
         .frame(width: iconSize, height: iconSize)

@@ -51,14 +51,16 @@ struct ArticleRowView: View {
     /// Bottom metadata block — feed source, publish date, saved indicator, and
     /// (optionally) the "Updated" suffix and call-to-action badge, laid out as:
     ///
-    ///     [icon] Feed title    Apr 8                 [bookmark]
-    ///                          Updated 9 hours ago
+    ///     [icon] Feed title        Apr 8              [bookmark]
+    ///     Updated 9 hours ago
     ///
-    /// Uses `HStack(alignment: .firstTextBaseline)` with a nested `VStack` for
-    /// the publish date and optional updated line. Baseline-aligning the row
-    /// keeps the feed name on the same line as the publish date instead of
-    /// vertically centering against a two-line stack of dates — the original
-    /// complaint this view was built to fix.
+    /// The left column is a `VStack` holding the feed label and (when present)
+    /// the updated line — stacking the relative freshness directly under the
+    /// feed source so the right side of the row stays compact and the feed
+    /// identity + freshness read as a single left-anchored block. The outer
+    /// `HStack(alignment: .firstTextBaseline)` baseline-aligns the feed name
+    /// with the publish date so they sit on the same line instead of the feed
+    /// name vertically centering against the two-row left column.
     ///
     /// This was previously a SwiftUI `Grid` for explicit column alignment, but
     /// `Grid`'s column-sizing algorithm shrinks non-flex columns to the width
@@ -72,13 +74,13 @@ struct ArticleRowView: View {
     @ViewBuilder
     private var metadataFooter: some View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
-            feedLabel
             VStack(alignment: .leading, spacing: 2) {
-                Text(publishDateText)
+                feedLabel
                 if article.shouldShowUpdatedSuffix || article.wasUpdated {
                     updatedLine
                 }
             }
+            Text(publishDateText)
             Spacer(minLength: 0)
             savedIndicator
         }
