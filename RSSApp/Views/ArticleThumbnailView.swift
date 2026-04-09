@@ -91,6 +91,8 @@ struct ArticleThumbnailView: View {
         }
 
         guard let fileURL = thumbnailService.cachedThumbnailFileURL(for: articleID) else {
+            Self.logger.fault("Thumbnail resolved as .cached but cachedThumbnailFileURL returned nil for article \(articleID, privacy: .public)")
+            assertionFailure("Thumbnail resolved as .cached but cachedThumbnailFileURL returned nil for article: \(articleID)")
             thumbnailImage = nil
             return
         }

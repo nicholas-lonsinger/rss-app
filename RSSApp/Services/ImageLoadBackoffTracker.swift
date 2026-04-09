@@ -40,6 +40,8 @@ final class ImageLoadBackoffTracker {
     private var failures: [String: FailureRecord] = [:]
 
     init(baseInterval: TimeInterval = 30, maxInterval: TimeInterval = 1800) {
+        precondition(baseInterval >= 0, "baseInterval must be non-negative")
+        precondition(maxInterval >= baseInterval, "maxInterval must be >= baseInterval")
         self.baseInterval = baseInterval
         self.maxInterval = maxInterval
     }

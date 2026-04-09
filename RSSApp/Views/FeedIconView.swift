@@ -110,10 +110,20 @@ struct FeedIconView: View {
         }
 
         // Derive site URL from feed URL the same way FeedRefreshService does.
-        let siteURL = Self.siteURL(from: feedURL)
+        let feedSiteURL = Self.siteURL(from: feedURL)
+        if feedSiteURL == nil {
+            Self.logger.debug("Could not derive site URL from feedURL for feed \(feedID.uuidString, privacy: .public)")
+        }
+
+        // Both resolution inputs are nil — skip the service call to avoid
+        // triggering backoff escalation for a permanently unresolvable condition.
+        guard feedSiteURL != nil || iconURL != nil else {
+            Self.logger.debug("No site URL or icon URL available for feed \(feedID.uuidString, privacy: .public) — skipping on-view resolution")
+            return
+        }
 
         let resolvedURL = await iconService.resolveAndCacheIcon(
-            feedSiteURL: siteURL,
+            feedSiteURL: feedSiteURL,
             feedImageURL: iconURL,
             feedID: feedID
         )
@@ -126,7 +136,12 @@ struct FeedIconView: View {
 
         // Successfully resolved — clear any prior backoff and reload from cache.
         ImageLoadBackoffTracker.feedIcons.clearFailure(for: backoffKey)
-        iconImage = await iconService.loadValidatedIcon(for: feedID)
+        Self.logger.notice("Resolved icon on-view for feed \(feedID.uuidString, privacy: .public)")
+        let validated = await iconService.loadValidatedIcon(for: feedID)
+        if validated == nil {
+            Self.logger.warning("Icon resolved for feed \(feedID.uuidString, privacy: .public) but failed post-cache validation")
+        }
+        iconImage = validated
     }
 
     /// Derives a site root URL from a feed URL (e.g., https://example.com/feed → https://example.com).
