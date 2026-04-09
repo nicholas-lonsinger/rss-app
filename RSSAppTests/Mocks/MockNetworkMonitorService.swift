@@ -7,8 +7,15 @@ final class MockNetworkMonitorService: NetworkMonitoring, @unchecked Sendable {
     var backgroundDownloadAllowed = true
     var checkCallCount = 0
 
+    /// Controls what `currentPathIsWiFi()` returns.
+    var pathIsWiFi = true
+
     func isBackgroundDownloadAllowed() -> Bool {
         checkCallCount += 1
         return backgroundDownloadAllowed
+    }
+
+    func currentPathIsWiFi() -> Bool {
+        return pathIsWiFi
     }
 }

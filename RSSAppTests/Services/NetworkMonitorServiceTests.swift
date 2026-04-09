@@ -188,6 +188,82 @@ struct NetworkMonitorServiceTests {
             #expect(service.isBackgroundDownloadAllowed() == true)
         }
     }
+
+    // MARK: - currentPathIsWiFi
+
+    /// `currentPathIsWiFi()` is the path-only gate used by
+    /// `BackgroundRefreshCoordinator` to enforce the Wi-Fi-only setting for
+    /// feed XML fetches. It must return `true` only when the path is satisfied,
+    /// uses WiFi, and is not constrained — independent of any user preference.
+
+    @Test("currentPathIsWiFi returns false when no path is available yet")
+    func currentPathIsWiFiNilPath() {
+        let service = NetworkMonitorService(
+            wifiOnlyProvider: { false },
+            pathProvider: { nil }
+        )
+        #expect(service.currentPathIsWiFi() == false)
+    }
+
+    @Test("currentPathIsWiFi returns false when path is unsatisfied")
+    func currentPathIsWiFiUnsatisfied() {
+        let snapshot = StubNetworkPathSnapshot(status: .unsatisfied, usesWiFi: true, isConstrained: false)
+        let service = NetworkMonitorService(
+            wifiOnlyProvider: { false },
+            pathProvider: { snapshot }
+        )
+        #expect(service.currentPathIsWiFi() == false)
+    }
+
+    @Test("currentPathIsWiFi returns true when satisfied WiFi and unconstrained")
+    func currentPathIsWiFiSatisfiedWiFiUnconstrained() {
+        let snapshot = StubNetworkPathSnapshot(status: .satisfied, usesWiFi: true, isConstrained: false)
+        let service = NetworkMonitorService(
+            wifiOnlyProvider: { false },
+            pathProvider: { snapshot }
+        )
+        #expect(service.currentPathIsWiFi() == true)
+    }
+
+    @Test("currentPathIsWiFi returns false when satisfied but on cellular")
+    func currentPathIsWiFiSatisfiedCellular() {
+        let snapshot = StubNetworkPathSnapshot(status: .satisfied, usesWiFi: false, isConstrained: false)
+        let service = NetworkMonitorService(
+            wifiOnlyProvider: { false },
+            pathProvider: { snapshot }
+        )
+        #expect(service.currentPathIsWiFi() == false)
+    }
+
+    @Test("currentPathIsWiFi returns false when satisfied WiFi but constrained (Low Data Mode)")
+    func currentPathIsWiFiSatisfiedWiFiConstrained() {
+        let snapshot = StubNetworkPathSnapshot(status: .satisfied, usesWiFi: true, isConstrained: true)
+        let service = NetworkMonitorService(
+            wifiOnlyProvider: { false },
+            pathProvider: { snapshot }
+        )
+        #expect(service.currentPathIsWiFi() == false)
+    }
+
+    @Test("currentPathIsWiFi is independent of wifiOnlyProvider value")
+    func currentPathIsWiFiIgnoresPreference() {
+        // currentPathIsWiFi() must not consult wifiOnlyProvider — it is a
+        // path-only check that the coordinator uses independently of the
+        // image-download preference.
+        let snapshot = StubNetworkPathSnapshot(status: .satisfied, usesWiFi: true, isConstrained: false)
+
+        let wifiOnlyOff = NetworkMonitorService(
+            wifiOnlyProvider: { false },
+            pathProvider: { snapshot }
+        )
+        let wifiOnlyOn = NetworkMonitorService(
+            wifiOnlyProvider: { true },
+            pathProvider: { snapshot }
+        )
+
+        #expect(wifiOnlyOff.currentPathIsWiFi() == true)
+        #expect(wifiOnlyOn.currentPathIsWiFi() == true)
+    }
 }
 
 // MARK: - Test helpers
