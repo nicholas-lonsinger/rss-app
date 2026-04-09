@@ -91,6 +91,8 @@ RSSApp/
 │   ├── FeedRowView.swift               # Single feed row — icon, title, description, unread count badge
 │   ├── HomeView.swift                  # Home screen — NavigationStack root with All Articles, Unread Articles, Saved Articles, All Feeds rows. Each list destination constructs an `ArticleListScreen(source:)` with the appropriate `AllArticlesSource` / `UnreadArticlesSource` / `SavedArticlesSource` wrapping the shared `HomeViewModel`
 │   └── SettingsView.swift              # Top-level settings page with inline badge toggle (reverts and shows permission-denied alert when notifications are disabled), Network section with WiFi-only image download toggle, and NavigationLink rows pushing Background Refresh (issue #76), API Key, Article Limit, and Import/Export sub-screens
+├── Extensions/
+│   └── URL+SiteRoot.swift              # `URL.siteRoot` computed property — derives site root URL by stripping path/query/fragment; shared by FeedIconView and FeedRefreshService (issue #331)
 └── Resources/
     ├── domSerializer.js                # Bundled DOM serializer — walks DOM tree, emits JSON for Swift extraction
     └── Assets.xcassets/                # App icons and image assets
@@ -126,6 +128,8 @@ RSSAppTests/
 │   ├── MockSlowHTMLURLSessionProvider.swift # URLSessionBytesProviding mock with URLProtocol-backed initial chunk + configurable mid-stream URLError (used by ArticleThumbnailService resolveOGImage URLError(.cancelled) normalization tests)
 │   ├── MockThumbnailPrefetchService.swift  # ThumbnailPrefetching mock with call count tracking
 │   └── MockURLSessionBytesProvider.swift   # URLSessionBytesProviding mock with URLProtocol-backed controlled SSE lines
+├── Extensions/
+│   └── URLSiteRootTests.swift          # URL.siteRoot: path stripping (HTTP/HTTPS), no-path passthrough, nil for hostless URLs, schemeless boundary
 ├── Models/
 │   ├── DOMNodeTests.swift              # DOMNode accessors, text/element queries, tree traversal
 │   └── SubscribedFeedTests.swift       # updatingMetadata preserves identity, does not mutate
@@ -173,7 +177,7 @@ RSSAppTests/
 │   └── HomeViewModelTests.swift            # Unread count, saved count, cross-feed article queries, read/unread status, saved status, sort order, mark-all-as-read snapshot-stable invariants (unread list preserved, allArticlesList items mutated in place)
 ```
 
-**Total: 78 source files + 1 resource + 1 Info.plist, 70 test source files + 1 fixture.**
+**Total: 79 source files + 1 resource + 1 Info.plist, 71 test source files + 1 fixture.**
 
 ## Key Components
 

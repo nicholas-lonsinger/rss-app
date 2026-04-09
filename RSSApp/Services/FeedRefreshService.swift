@@ -351,7 +351,7 @@ final class FeedRefreshService {
                         let iconTask = Task {
                             await self.resolveAndCacheIconIfNeeded(
                                 for: feed,
-                                siteURL: Self.siteURL(from: feed.feedURL),
+                                siteURL: feed.feedURL.siteRoot,
                                 feedImageURL: feed.iconURL
                             )
                         }
@@ -514,13 +514,6 @@ final class FeedRefreshService {
             // cosmetic and self-healing — the icon is re-resolved on the next refresh.
             Self.logger.error("Failed to persist icon URL for '\(feed.title, privacy: .public)': \(error, privacy: .public)")
         }
-    }
-
-    /// Derives a site root URL from a feed URL (e.g., https://example.com/feed → https://example.com).
-    /// Returns nil if the feed URL has no host.
-    private static func siteURL(from feedURL: URL) -> URL? {
-        guard let host = feedURL.host(percentEncoded: false), !host.isEmpty else { return nil }
-        return URL(string: "\(feedURL.scheme ?? "https")://\(host)")
     }
 
     private static func errorDescription(for error: any Error) -> String {
