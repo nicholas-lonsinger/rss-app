@@ -704,10 +704,10 @@ struct DiagnosticRecorderTests {
         // payload whose stripped bytes are truly undecodable proved unreliable:
         // Foundation's UTF-16 decoder is lenient with odd-length payloads and
         // returns an empty string rather than nil, routing the call to
-        // `.bomStripped` instead of `.transcodeFailureFallback`. The warning
-        // diagnostic emission is a secondary concern; the functional fallback
-        // behavior (returning original bytes unchanged) for `.transcodeFailureFallback`
-        // is already covered by `SnifferOutcomeTests`.
+        // `.bomStripped` instead of `.transcodeFailureFallback`. There is no
+        // end-to-end test through `transcodeToUTF8IfNeeded` for the
+        // `.transcodeFailureFallback` path; `SnifferOutcomeTests/isFallbackTrueForLossy`
+        // constructs the enum value directly and does not exercise that path.
 
         // MARK: - DiagnosticRecorder seam contract
 

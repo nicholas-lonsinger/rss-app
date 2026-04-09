@@ -239,14 +239,20 @@ enum EncodingSniffer {
     /// bytes to skip before the payload content begins.
     struct BOMMatch {
         let encoding: String.Encoding
-        let bomLength: Int
+        var bomLength: Int {
+            switch encoding {
+            case .utf32BigEndian, .utf32LittleEndian: return 4
+            case .utf8:                               return 3
+            default:                                  return 2  // UTF-16 BE/LE
+            }
+        }
     }
 
     // MARK: - SniffedPayload
 
     /// A raw payload whose encoding has already been identified. Bundles the bytes
-    /// and their detected encoding together so `transcode` cannot be handed a
-    /// mismatched pair.
+    /// and their detected encoding together so `transcode` always receives a named,
+    /// coherent pair rather than two loose arguments.
     private struct SniffedPayload {
         let data: Data
         let encoding: String.Encoding
@@ -261,27 +267,27 @@ enum EncodingSniffer {
         if data.count >= 4 {
             // UTF-32 BE
             if data[0] == 0x00 && data[1] == 0x00 && data[2] == 0xFE && data[3] == 0xFF {
-                return BOMMatch(encoding: .utf32BigEndian, bomLength: 4)
+                return BOMMatch(encoding: .utf32BigEndian)
             }
             // UTF-32 LE
             if data[0] == 0xFF && data[1] == 0xFE && data[2] == 0x00 && data[3] == 0x00 {
-                return BOMMatch(encoding: .utf32LittleEndian, bomLength: 4)
+                return BOMMatch(encoding: .utf32LittleEndian)
             }
         }
         if data.count >= 3 {
             // UTF-8
             if data[0] == 0xEF && data[1] == 0xBB && data[2] == 0xBF {
-                return BOMMatch(encoding: .utf8, bomLength: 3)
+                return BOMMatch(encoding: .utf8)
             }
         }
         if data.count >= 2 {
             // UTF-16 BE
             if data[0] == 0xFE && data[1] == 0xFF {
-                return BOMMatch(encoding: .utf16BigEndian, bomLength: 2)
+                return BOMMatch(encoding: .utf16BigEndian)
             }
             // UTF-16 LE
             if data[0] == 0xFF && data[1] == 0xFE {
-                return BOMMatch(encoding: .utf16LittleEndian, bomLength: 2)
+                return BOMMatch(encoding: .utf16LittleEndian)
             }
         }
         return nil
