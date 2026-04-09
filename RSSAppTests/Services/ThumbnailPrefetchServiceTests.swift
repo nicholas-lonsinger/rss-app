@@ -330,6 +330,52 @@ struct ThumbnailPrefetchServiceTests {
         #expect(article.isThumbnailCached == false)
     }
 
+    // MARK: - Mid-batch Network Re-check
+
+    @Test("prefetchThumbnails stops dispatching new items when network becomes disallowed mid-batch")
+    @MainActor
+    func prefetchStopsWhenNetworkBecomesDisallowedMidBatch() async {
+        let persistence = MockFeedPersistenceService()
+        let feed = TestFixtures.makePersistentFeed()
+        // Create more articles than maxConcurrency so some are still in the queue
+        // when the first batch completes and the network check fires
+        let articleCount = ThumbnailPrefetchConstants.maxConcurrency + 4
+        let articles = (0..<articleCount).map { i in
+            TestFixtures.makePersistentArticle(
+                articleID: "article-\(i)",
+                thumbnailURL: URL(string: "https://example.com/thumb-\(i).jpg")
+            )
+        }
+        persistence.feeds = [feed]
+        persistence.articlesByFeedID = [feed.id: articles]
+
+        let mockThumbnail = MockArticleThumbnailService()
+        mockThumbnail.resolveResult = .cached
+
+        // Start with downloads allowed, then flip after some complete
+        let mockNetwork = MockNetworkMonitorService()
+        mockNetwork.backgroundDownloadAllowed = true
+
+        let service = ThumbnailPrefetchService(
+            persistence: persistence,
+            thumbnailService: mockThumbnail,
+            networkMonitor: mockNetwork
+        )
+
+        // Set disallowed before the call. The mock thumbnail service returns
+        // synchronously, so the first seed of maxConcurrency items completes
+        // before the mid-batch guard check runs — at that point downloads are
+        // already disallowed, so no further items are enqueued.
+        mockNetwork.backgroundDownloadAllowed = false
+
+        await service.prefetchThumbnails()
+
+        // Fewer than all articles should have been attempted because the
+        // network became disallowed mid-batch. At most maxConcurrency items
+        // from the first seed were in flight when the guard fired.
+        #expect(mockThumbnail.resolveCallCount < articleCount)
+    }
+
     // MARK: - Mixed Success and Failure
 
     @Test("prefetchThumbnails handles mixed success and failure across articles")

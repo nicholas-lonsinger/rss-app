@@ -233,6 +233,11 @@ struct HomeView: View {
                 if newPhase == .active {
                     viewModel.loadUnreadCount()
                     viewModel.loadGroupUnreadCounts()
+                    // Re-check network allowance on foreground so that a network
+                    // change (WiFi → cellular) or setting change that occurred
+                    // while the app was backgrounded cancels any still-suspended
+                    // download tasks before they resume.
+                    refreshService.cancelBackgroundDownloadTasksIfDisallowed()
                 }
             }
         }

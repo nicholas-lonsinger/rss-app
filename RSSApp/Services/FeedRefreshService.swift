@@ -7,6 +7,11 @@ import os
 /// process-wide source of truth — guarantees the foreground pull-to-refresh
 /// and a concurrent `BGTask` launch never run the upsert loop twice against
 /// the same `ModelContext`.
+///
+/// This class also cancels in-flight background download tasks (thumbnail
+/// prefetch + icon resolution) whenever network allowance is revoked, either
+/// because the user toggled the WiFi-only setting or because the app returned
+/// to the foreground on a no-longer-allowed network.
 @MainActor
 @Observable
 final class FeedRefreshService {
@@ -54,6 +59,18 @@ final class FeedRefreshService {
     /// rather than cancelled mid-flight when the OS reclaims the process.
     private var pendingIconTasks: [Task<Void, Never>] = []
 
+    /// Token for the `wifiOnlyDidChangeNotification` observer that cancels
+    /// background download tasks when the WiFi-only setting changes.
+    // RATIONALE: nonisolated(unsafe) because `NSObjectProtocol` is not `Sendable`
+    // and deinit is nonisolated, yet deinit is the right place to call
+    // `removeObserver(_:)`. The token is written exactly once in `init` (on the
+    // main actor) and read exactly once in `deinit`, so no concurrent access
+    // is possible. @ObservationIgnored prevents the @Observable macro from
+    // including this bag holder in the observable graph and generating spurious
+    // view updates.
+    @ObservationIgnored
+    private nonisolated(unsafe) var settingsObserverToken: NSObjectProtocol?
+
     init(
         persistence: FeedPersisting,
         feedFetching: FeedFetching = FeedFetchingService(),
@@ -78,10 +95,41 @@ final class FeedRefreshService {
         self.persistence = persistence
         self.feedFetching = feedFetching
         self.feedIconService = feedIconService
-        self.thumbnailPrefetcher = thumbnailPrefetcher ?? ThumbnailPrefetchService(persistence: persistence)
+        let resolvedMonitor = networkMonitor ?? NetworkMonitorService()
+        self.thumbnailPrefetcher = thumbnailPrefetcher ?? ThumbnailPrefetchService(
+            persistence: persistence,
+            networkMonitor: resolvedMonitor
+        )
         self.articleRetention = articleRetention
         self.thumbnailService = thumbnailService
-        self.networkMonitor = networkMonitor ?? NetworkMonitorService()
+        self.networkMonitor = resolvedMonitor
+
+        // Observe the WiFi-only setting change notification so that toggling
+        // the setting while a prefetch batch is in flight promptly cancels any
+        // tasks that are no longer allowed. The notification is posted by
+        // the wifiOnly property setter in BackgroundImageDownloadSettings on
+        // whatever thread writes the setting; dispatching to the main actor is
+        // required because FeedRefreshService is @MainActor.
+        //
+        // Stored on `self` so the token is available for explicit deregistration
+        // in deinit. NotificationCenter does NOT auto-remove block-based observers
+        // when the token is released — removeObserver(_:) must be called explicitly.
+        settingsObserverToken = NotificationCenter.default.addObserver(
+            forName: BackgroundImageDownloadSettings.wifiOnlyDidChangeNotification,
+            object: nil,
+            queue: nil
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.cancelBackgroundDownloadTasksIfDisallowed()
+            }
+        }
+    }
+
+    deinit {
+        // settingsObserverToken is written unconditionally in init; nil here
+        // would mean the observer was never registered and cannot be removed.
+        guard let token = settingsObserverToken else { return }
+        NotificationCenter.default.removeObserver(token)
     }
 
     // MARK: - Outcome
@@ -224,6 +272,12 @@ final class FeedRefreshService {
     /// case `await task.value` returns early on the cancelled task; the
     /// drain still releases and the OS-allotted runtime is still used,
     /// just for whatever work completed before the cancel.
+    ///
+    /// Similarly, a call to `cancelBackgroundDownloadTasksIfDisallowed()` while
+    /// this method is suspended will call `task.cancel()` on the same handle
+    /// this caller holds locally; `await task.value` returns early on the
+    /// cancelled task. This is correct — the BGTask should not block on
+    /// downloads that are no longer allowed.
     func awaitPendingWork() async {
         // Snapshot both task references synchronously, before any `await`,
         // so a concurrent `refreshAllFeeds()` cycle cannot replace the
@@ -239,6 +293,46 @@ final class FeedRefreshService {
         await prefetchTask?.value
         for task in iconTasks {
             _ = await task.value
+        }
+    }
+
+    /// Cancels in-flight thumbnail prefetch and icon resolution tasks when the
+    /// current network state no longer permits background downloads.
+    ///
+    /// Call this:
+    /// - On `scenePhase` transition to `.active` — handles the case where the
+    ///   user backgrounded the app and the network or WiFi-only setting changed
+    ///   while it was suspended.
+    /// - From the UserDefaults observer installed in `init` — handles a toggle
+    ///   change while a prefetch batch is already running.
+    ///
+    /// This is a no-op when no tasks are in flight or when the network still
+    /// allows background downloads, so calling it unconditionally on every
+    /// `.active` transition is safe.
+    ///
+    /// The mid-batch check inside `ThumbnailPrefetchService.downloadThumbnails`
+    /// catches the window *within* a single item's download slot; this cancel
+    /// handles the outer task-level granularity.
+    func cancelBackgroundDownloadTasksIfDisallowed() {
+        guard !networkMonitor.isBackgroundDownloadAllowed() else {
+            Self.logger.debug("cancelBackgroundDownloadTasksIfDisallowed() — downloads still allowed, no action")
+            return
+        }
+        var cancelledCount = 0
+        if let task = thumbnailPrefetchTask {
+            task.cancel()
+            thumbnailPrefetchTask = nil
+            cancelledCount += 1
+        }
+        if !pendingIconTasks.isEmpty {
+            cancelledCount += pendingIconTasks.count
+            for task in pendingIconTasks { task.cancel() }
+            pendingIconTasks.removeAll()
+        }
+        if cancelledCount > 0 {
+            Self.logger.notice("Cancelled \(cancelledCount, privacy: .public) background download task(s) — network no longer allows background downloads")
+        } else {
+            Self.logger.debug("cancelBackgroundDownloadTasksIfDisallowed() — network disallowed but no tasks in flight")
         }
     }
 
