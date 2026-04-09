@@ -949,10 +949,13 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
         }
 
         // Re-sort the merged set to interleave articles from different feeds correctly.
-        if ascending {
-            merged.sort { ($0.sortDate, $0.articleID) < ($1.sortDate, $1.articleID) }
-        } else {
-            merged.sort { ($0.sortDate, $0.articleID) > ($1.sortDate, $1.articleID) }
+        // articleID tie-breaker is always ascending to match the FetchDescriptor and
+        // ensure stable pagination when multiple articles share the same sortDate.
+        merged.sort {
+            if $0.sortDate != $1.sortDate {
+                return ascending ? $0.sortDate < $1.sortDate : $0.sortDate > $1.sortDate
+            }
+            return $0.articleID < $1.articleID
         }
 
         let start = min(offset, merged.count)

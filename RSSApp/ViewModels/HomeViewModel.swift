@@ -416,9 +416,21 @@ final class HomeViewModel {
 
     func loadGroupUnreadCounts() {
         var counts: [UUID: Int] = [:]
+        var feedUnreadCache: [UUID: Int] = [:]
         for group in groups {
             do {
-                counts[group.id] = try persistence.unreadCount(in: group)
+                let feeds = try persistence.feeds(in: group)
+                var total = 0
+                for feed in feeds {
+                    if let cached = feedUnreadCache[feed.id] {
+                        total += cached
+                    } else {
+                        let count = try persistence.unreadCount(for: feed)
+                        feedUnreadCache[feed.id] = count
+                        total += count
+                    }
+                }
+                counts[group.id] = total
             } catch {
                 Self.logger.error("Failed to load unread count for group '\(group.name, privacy: .public)': \(error, privacy: .public)")
                 counts[group.id] = 0
