@@ -1976,52 +1976,6 @@ struct FeedPersistenceServiceTests {
         #expect(page.count == 1)
     }
 
-    @Test("savedCount returns count of saved articles")
-    @MainActor
-    func savedCountReturnsCorrectCount() throws {
-        let (service, container) = try makeService()
-        withExtendedLifetime(container) { }
-        let feed = TestFixtures.makePersistentFeed()
-        try service.addFeed(feed)
-        try service.upsertArticles([
-            TestFixtures.makeArticle(id: "a1"),
-            TestFixtures.makeArticle(id: "a2"),
-            TestFixtures.makeArticle(id: "a3"),
-        ], for: feed)
-        try service.save()
-
-        #expect(try service.savedCount() == 0)
-
-        let articles = try service.articles(for: feed)
-        try service.toggleArticleSaved(articles[0])
-        try service.toggleArticleSaved(articles[1])
-
-        #expect(try service.savedCount() == 2)
-    }
-
-    @Test("savedCount decreases after unsaving an article")
-    @MainActor
-    func savedCountDecrementsAfterUnsave() throws {
-        let (service, container) = try makeService()
-        withExtendedLifetime(container) { }
-        let feed = TestFixtures.makePersistentFeed()
-        try service.addFeed(feed)
-        try service.upsertArticles([
-            TestFixtures.makeArticle(id: "a1"),
-            TestFixtures.makeArticle(id: "a2"),
-        ], for: feed)
-        try service.save()
-
-        let articles = try service.articles(for: feed)
-        try service.toggleArticleSaved(articles[0])
-        try service.toggleArticleSaved(articles[1])
-        #expect(try service.savedCount() == 2)
-
-        // Unsave one article
-        try service.toggleArticleSaved(articles[0])
-        #expect(try service.savedCount() == 1)
-    }
-
     @Test("allSavedArticles returns empty after unsaving all articles")
     @MainActor
     func allSavedArticlesEmptyAfterUnsave() throws {

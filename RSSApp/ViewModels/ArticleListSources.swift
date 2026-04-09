@@ -353,12 +353,10 @@ final class SavedArticlesSource: ArticleListSource {
 
     func initialLoad() async {
         homeViewModel.loadSavedArticles()
-        homeViewModel.loadSavedCount()
     }
 
     func refresh() async {
         homeViewModel.loadSavedArticles()
-        homeViewModel.loadSavedCount()
     }
 
     func reload() {
@@ -389,10 +387,6 @@ final class SavedArticlesSource: ArticleListSource {
     /// Saved list, which was not what the affordance implies.
     func markAllAsRead() {
         homeViewModel.markAllSavedArticlesRead()
-    }
-
-    func onDisappear() {
-        homeViewModel.loadSavedCount()
     }
 
     func clearError() {
