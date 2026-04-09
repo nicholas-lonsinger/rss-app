@@ -41,10 +41,15 @@ final class FeedRefreshService {
         persistence: FeedPersisting,
         feedFetching: FeedFetching = FeedFetchingService(),
         // No default for `feedIconService`: callers must pass the shared
-        // instance explicitly so the refresh service and the UI layer
-        // observe the same on-disk cache. A default-constructed
-        // `FeedIconService()` would silently create an unshared instance
-        // and break the shared-cache invariant.
+        // instance from `RSSAppApp.init()` explicitly. Today
+        // `FeedIconService` is a stateless struct whose only field is an
+        // optional cache-directory override, so two default-constructed
+        // instances would not actually diverge — the invariant is
+        // forward-looking. Requiring an explicit instance keeps call
+        // sites disciplined for when the service later gains instance-
+        // level state (URLCache, in-memory LRU, URLSession auth
+        // delegate), at which point the refresh writes and the UI reads
+        // would silently drift if each side constructed its own copy.
         feedIconService: FeedIconResolving,
         // RATIONALE: Default cannot reference the `persistence` parameter in a default-value
         // expression, so nil-coalescing is used to construct the default inside the body.
@@ -182,14 +187,21 @@ final class FeedRefreshService {
     /// The snapshot of task handles below runs synchronously at entry (before
     /// any suspension point), so a concurrent `refreshAllFeeds()` cycle that
     /// starts during one of the drain's `await` yields cannot mutate the
-    /// captured handles — this caller will always drain its own cycle's work
-    /// and nothing else. `pendingIconTasks` is cleared after snapshotting so
-    /// the next cycle starts with a clean slate even if its `performRefresh`
-    /// start-of-cycle cleanup runs before this caller resumes.
+    /// captured handles — the drain loop always walks this caller's own
+    /// cycle's task handles. A concurrent cycle's end-of-`performRefresh`
+    /// cleanup can still call `cancel()` on `thumbnailPrefetchTask` (the
+    /// stored reference, which this caller also holds locally), in which
+    /// case `await task.value` returns early on the cancelled task; the
+    /// drain still releases and the OS-allotted runtime is still used,
+    /// just for whatever work completed before the cancel.
     func awaitPendingWork() async {
         // Snapshot both task references synchronously, before any `await`,
         // so a concurrent `refreshAllFeeds()` cycle cannot replace the
-        // stored handles mid-drain.
+        // stored handles mid-drain. Clearing `pendingIconTasks` here (not
+        // merely snapshotting) is load-bearing: it prevents the next
+        // cycle's `performRefresh` start-of-cycle cleanup (which calls
+        // `cancel()` on every entry in `pendingIconTasks`) from cancelling
+        // the icon tasks this caller is about to await.
         let prefetchTask = thumbnailPrefetchTask
         let iconTasks = pendingIconTasks
         pendingIconTasks.removeAll()
