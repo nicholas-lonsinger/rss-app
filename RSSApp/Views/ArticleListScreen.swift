@@ -35,6 +35,7 @@ struct ArticleListScreen<Source: ArticleListSource>: View {
     @State private var showMarkAllReadConfirmation = false
     @State private var showEditGroupSheet = false
     @State private var showDeleteGroupConfirmation = false
+    @State private var deleteErrorMessage: String?
     @State private var hasAppeared = false
     // RATIONALE: Snapshot preservation across reader push/pop. See
     // ARCHITECTURE.md → "Snapshot preservation across reader push/pop (two gates)".
@@ -91,6 +92,11 @@ struct ArticleListScreen<Source: ArticleListSource>: View {
         } message: {
             Text(source.errorMessage ?? "")
         }
+        .alert("Error", isPresented: deleteErrorAlertBinding) {
+            Button("OK") { deleteErrorMessage = nil }
+        } message: {
+            Text(deleteErrorMessage ?? "")
+        }
         .alert(
             "Delete Group?",
             isPresented: $showDeleteGroupConfirmation,
@@ -103,7 +109,7 @@ struct ArticleListScreen<Source: ArticleListSource>: View {
         } message: { group in
             Text("\"\(group.name)\" will be deleted. Its feeds will not be removed.")
         }
-        .sheet(isPresented: $showEditGroupSheet) {
+        .sheet(isPresented: $showEditGroupSheet, onDismiss: { source.reload() }) {
             if let group = source.editableGroup {
                 EditGroupView(group: group, persistence: persistence)
             }
@@ -111,6 +117,11 @@ struct ArticleListScreen<Source: ArticleListSource>: View {
         .onChange(of: source.wasGroupDeleted) { _, deleted in
             if deleted {
                 dismiss()
+            }
+        }
+        .onChange(of: source.deleteErrorMessage) { _, message in
+            if let message {
+                deleteErrorMessage = message
             }
         }
         .task {
@@ -317,6 +328,16 @@ struct ArticleListScreen<Source: ArticleListSource>: View {
         Binding(
             get: { source.errorMessage != nil && !source.articles.isEmpty },
             set: { if !$0 { source.clearError() } }
+        )
+    }
+
+    /// Always shown when a delete-group failure occurs, regardless of whether
+    /// the article list is empty — delete errors must surface even on empty
+    /// groups, which are the most natural targets for deletion.
+    private var deleteErrorAlertBinding: Binding<Bool> {
+        Binding(
+            get: { deleteErrorMessage != nil },
+            set: { if !$0 { deleteErrorMessage = nil } }
         )
     }
 }

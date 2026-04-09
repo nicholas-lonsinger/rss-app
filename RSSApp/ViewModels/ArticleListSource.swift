@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import os
 
 /// Display content for an article list's empty state. Each `ArticleListSource`
 /// supplies its own so the shared view can render per-screen copy (e.g.
@@ -147,6 +148,10 @@ protocol ArticleListSource: AnyObject, Observable {
     func clearError()
 }
 
+/// A shared logger used by the `ArticleListSource` protocol extension defaults
+/// where no concrete type's logger is available.
+private let articleListSourceLogger = Logger(category: "ArticleListSource")
+
 extension ArticleListSource {
     func onDisappear() {}
 
@@ -163,9 +168,22 @@ extension ArticleListSource {
     /// Deletes the group backing this source. Called after the user confirms
     /// the delete alert. After this call, `wasGroupDeleted` must become `true`
     /// so `ArticleListScreen` can dismiss and pop the navigation stack.
-    func deleteGroup() {}
+    func deleteGroup() {
+        // RATIONALE: Defensive fault log + assertionFailure per project guidelines.
+        // This default fires only if a non-group source accidentally receives a
+        // deleteGroup() call — impossible in production UI but catchable in tests.
+        articleListSourceLogger.fault("deleteGroup() called on a source that does not support group editing")
+        assertionFailure("deleteGroup() called on a source that does not support group editing")
+    }
 
     /// Becomes `true` after a successful `deleteGroup()` call. Observed by
     /// `ArticleListScreen` to trigger auto-dismiss (pop back to Home).
     var wasGroupDeleted: Bool { false }
+
+    /// Error message set when `deleteGroup()` fails. Distinct from `errorMessage`
+    /// so the delete-error alert fires regardless of whether the article list is
+    /// empty — the `errorAlertBinding` gates on `!source.articles.isEmpty` to
+    /// avoid conflicts with the empty-state error row, but delete errors must
+    /// always surface to the user.
+    var deleteErrorMessage: String? { nil }
 }

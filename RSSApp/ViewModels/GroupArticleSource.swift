@@ -41,6 +41,7 @@ final class GroupArticleSource: ArticleListSource {
     var supportsGroupEdit: Bool { true }
     var editableGroup: PersistentFeedGroup? { group }
     private(set) var wasGroupDeleted: Bool = false
+    private(set) var deleteErrorMessage: String?
 
     func deleteGroup() {
         let name = group.name
@@ -50,7 +51,7 @@ final class GroupArticleSource: ArticleListSource {
             wasGroupDeleted = true
             Self.logger.notice("Deleted group '\(name, privacy: .public)' from GroupArticleSource")
         } catch {
-            errorMessage = "Unable to delete group."
+            deleteErrorMessage = "Unable to delete group."
             Self.logger.error("Failed to delete group '\(name, privacy: .public)': \(error, privacy: .public)")
         }
     }
