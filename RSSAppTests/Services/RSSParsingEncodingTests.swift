@@ -475,8 +475,8 @@ struct SnifferOutcomeTests {
     @Test("isFallback is false for non-lossy outcomes")
     func isFallbackFalseForNonLossy() {
         #expect(!EncodingSniffer.SnifferOutcome.utf8Passthrough.isFallback)
-        #expect(!EncodingSniffer.SnifferOutcome.bomStripped(.utf8).isFallback)
-        #expect(!EncodingSniffer.SnifferOutcome.bomStripped(.utf16LittleEndian).isFallback)
+        #expect(!EncodingSniffer.SnifferOutcome.bomStrippedUTF8.isFallback)
+        #expect(!EncodingSniffer.SnifferOutcome.bomStrippedAndTranscoded(.utf16LittleEndian).isFallback)
         #expect(!EncodingSniffer.SnifferOutcome.transcoded(from: .isoLatin1).isFallback)
     }
 
@@ -506,28 +506,26 @@ struct SnifferOutcomeTests {
         }
     }
 
-    @Test("UTF-8 BOM returns .bomStripped(.utf8) outcome")
+    @Test("UTF-8 BOM returns .bomStrippedUTF8 outcome")
     func utf8BOMReturnsBomStrippedUTF8() {
         var data = Data([0xEF, 0xBB, 0xBF])
         data.append(Data("<rss/>".utf8))
         let (_, outcome) = EncodingSniffer.transcodeToUTF8IfNeeded(data)
-        if case .bomStripped(let enc) = outcome {
-            #expect(enc == .utf8)
-        } else {
-            Issue.record("Expected .bomStripped(.utf8), got: \(outcome)")
+        if case .bomStrippedUTF8 = outcome { } else {
+            Issue.record("Expected .bomStrippedUTF8, got: \(outcome)")
         }
     }
 
-    @Test("UTF-16 LE BOM returns .bomStripped(.utf16LittleEndian) outcome")
-    func utf16LEBOMReturnsBomStrippedUTF16LE() {
+    @Test("UTF-16 LE BOM returns .bomStrippedAndTranscoded(.utf16LittleEndian) outcome")
+    func utf16LEBOMReturnsBomStrippedAndTranscoded() {
         let xml = "<?xml version=\"1.0\"?><rss version=\"2.0\"><channel><title>t</title></channel></rss>"
         var data = Data([0xFF, 0xFE])
         data.append(xml.data(using: .utf16LittleEndian)!)
         let (_, outcome) = EncodingSniffer.transcodeToUTF8IfNeeded(data)
-        if case .bomStripped(let enc) = outcome {
+        if case .bomStrippedAndTranscoded(let enc) = outcome {
             #expect(enc == .utf16LittleEndian)
         } else {
-            Issue.record("Expected .bomStripped(.utf16LittleEndian), got: \(outcome)")
+            Issue.record("Expected .bomStrippedAndTranscoded(.utf16LittleEndian), got: \(outcome)")
         }
     }
 

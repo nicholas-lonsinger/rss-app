@@ -136,8 +136,10 @@ enum EncodingSniffer {
     enum SnifferOutcome: Sendable {
         /// Payload was already UTF-8 (or ASCII-compatible); returned as-is.
         case utf8Passthrough
-        /// BOM was stripped and — for non-UTF-8 BOMs — the payload was transcoded.
-        case bomStripped(String.Encoding)
+        /// UTF-8 BOM (3 bytes) was stripped; bytes otherwise unchanged (lossless).
+        case bomStrippedUTF8
+        /// Non-UTF-8 BOM was stripped and the payload was fully transcoded to UTF-8.
+        case bomStrippedAndTranscoded(String.Encoding)
         /// Payload was transcoded from the declared encoding to UTF-8.
         case transcoded(from: String.Encoding)
         /// The declared IANA encoding name was not recognised; prolog was stripped
@@ -150,7 +152,7 @@ enum EncodingSniffer {
         /// — i.e. the bytes handed to XMLParser may not be correctly decoded.
         var isFallback: Bool {
             switch self {
-            case .utf8Passthrough, .bomStripped, .transcoded: return false
+            case .utf8Passthrough, .bomStrippedUTF8, .bomStrippedAndTranscoded, .transcoded: return false
             case .unknownEncodingFallback, .transcodeFailureFallback: return true
             }
         }
@@ -160,8 +162,10 @@ enum EncodingSniffer {
             switch self {
             case .utf8Passthrough:
                 return "utf8Passthrough"
-            case .bomStripped(let enc):
-                return "bomStripped(\(enc))"
+            case .bomStrippedUTF8:
+                return "bomStrippedUTF8"
+            case .bomStrippedAndTranscoded(let enc):
+                return "bomStrippedAndTranscoded(\(enc))"
             case .transcoded(let enc):
                 return "transcoded(from: \(enc))"
             case .unknownEncodingFallback(let name):
@@ -186,11 +190,11 @@ enum EncodingSniffer {
             if bom.encoding == .utf8 {
                 // UTF-8 BOM: strip it. XMLParser tolerates the BOM in practice but
                 // stripping makes the downstream byte stream canonical.
-                return (data.subdata(in: bom.bomLength..<data.count), .bomStripped(.utf8))
+                return (data.subdata(in: bom.bomLength..<data.count), .bomStrippedUTF8)
             }
             let stripped = data.subdata(in: bom.bomLength..<data.count)
             if let transcoded = transcode(SniffedPayload(data: stripped, encoding: bom.encoding)) {
-                return (transcoded, .bomStripped(bom.encoding))
+                return (transcoded, .bomStrippedAndTranscoded(bom.encoding))
             }
             return (data, .transcodeFailureFallback(bom.encoding))
         }
