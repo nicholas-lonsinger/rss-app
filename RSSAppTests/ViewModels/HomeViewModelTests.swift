@@ -458,9 +458,16 @@ struct HomeViewModelTests {
         let mockPersistence = MockFeedPersistenceService()
         mockPersistence.feeds = [feed]
 
-        // Three saved articles, one already read, two unread, with strictly distinct
-        // savedDate values so sort order is unambiguous (newest savedDate first).
-        // Expected order after load: s1, s2, s3.
+        // Isolate from any ambient sort preference. The saved list now honors
+        // the global sort toggle (sorted by sortDate with the stored direction)
+        // so leaving the pref unset from a previous test would flip ordering.
+        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
+        defer { UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey) }
+
+        // Three saved articles, one already read, two unread. publishedDate is
+        // used as the authoritative sort key under the new ordering (sortDate
+        // descending by default). Expected order after load: s1 (newest), s2,
+        // s3 (oldest).
         let saved1 = TestFixtures.makePersistentArticle(
             articleID: "s1",
             publishedDate: Date(timeIntervalSince1970: 3_000_000),
@@ -1038,6 +1045,117 @@ struct HomeViewModelTests {
         UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
     }
 
+    @Test("loadSavedArticles respects ascending sort order")
+    @MainActor
+    func loadSavedArticlesAscending() {
+        UserDefaults.standard.set(true, forKey: FeedViewModel.sortAscendingKey)
+        let feed = TestFixtures.makePersistentFeed()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+
+        let article1 = TestFixtures.makePersistentArticle(
+            articleID: "s1",
+            publishedDate: Date(timeIntervalSince1970: 1_000_000),
+            isSaved: true,
+            savedDate: Date(timeIntervalSince1970: 2_000_000)
+        )
+        article1.feed = feed
+        let article2 = TestFixtures.makePersistentArticle(
+            articleID: "s2",
+            publishedDate: Date(timeIntervalSince1970: 2_000_000),
+            isSaved: true,
+            savedDate: Date(timeIntervalSince1970: 1_000_000)
+        )
+        article2.feed = feed
+        mockPersistence.articlesByFeedID[feed.id] = [article1, article2]
+
+        let viewModel = HomeViewModel(persistence: mockPersistence)
+        viewModel.loadSavedArticles()
+
+        // Ascending: oldest sortDate first. savedDate is deliberately inverted
+        // relative to publishedDate so the test validates sorting by sortDate
+        // (derived from publishedDate), not savedDate.
+        #expect(viewModel.savedArticlesList.first?.articleID == "s1")
+        #expect(viewModel.savedArticlesList.last?.articleID == "s2")
+
+        // Clean up
+        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
+    }
+
+    // MARK: - shouldRefreshOnEntry throttle
+
+    @Test("shouldRefreshOnEntry returns true when no refresh has ever completed")
+    @MainActor
+    func shouldRefreshOnEntryNeverRefreshed() {
+        UserDefaults.standard.removeObject(forKey: FeedRefreshService.lastRefreshCompletedKey)
+        let viewModel = HomeViewModel(persistence: MockFeedPersistenceService())
+        #expect(viewModel.shouldRefreshOnEntry == true)
+    }
+
+    @Test("shouldRefreshOnEntry returns false when refresh is within throttle window")
+    @MainActor
+    func shouldRefreshOnEntryWithinWindow() {
+        UserDefaults.standard.set(
+            Date().timeIntervalSince1970,
+            forKey: FeedRefreshService.lastRefreshCompletedKey
+        )
+        defer { UserDefaults.standard.removeObject(forKey: FeedRefreshService.lastRefreshCompletedKey) }
+
+        let viewModel = HomeViewModel(persistence: MockFeedPersistenceService())
+        #expect(viewModel.shouldRefreshOnEntry == false)
+    }
+
+    @Test("shouldRefreshOnEntry returns true when refresh is older than throttle window")
+    @MainActor
+    func shouldRefreshOnEntryOutsideWindow() {
+        let sixMinutesAgo = Date().addingTimeInterval(-(6 * 60))
+        UserDefaults.standard.set(
+            sixMinutesAgo.timeIntervalSince1970,
+            forKey: FeedRefreshService.lastRefreshCompletedKey
+        )
+        defer { UserDefaults.standard.removeObject(forKey: FeedRefreshService.lastRefreshCompletedKey) }
+
+        let viewModel = HomeViewModel(persistence: MockFeedPersistenceService())
+        #expect(viewModel.shouldRefreshOnEntry == true)
+    }
+
+    // MARK: - Scoped mark-all-as-read for saved articles
+
+    @Test("markAllSavedArticlesRead marks only saved articles and leaves others unread")
+    @MainActor
+    func markAllSavedArticlesReadScoped() {
+        let feed = TestFixtures.makePersistentFeed()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+
+        let savedUnread = TestFixtures.makePersistentArticle(
+            articleID: "s1",
+            isRead: false,
+            isSaved: true,
+            savedDate: Date()
+        )
+        savedUnread.feed = feed
+        let notSavedUnread = TestFixtures.makePersistentArticle(
+            articleID: "n1",
+            isRead: false,
+            isSaved: false
+        )
+        notSavedUnread.feed = feed
+        mockPersistence.articlesByFeedID[feed.id] = [savedUnread, notSavedUnread]
+
+        let viewModel = HomeViewModel(persistence: mockPersistence)
+        viewModel.loadUnreadCount()
+        #expect(viewModel.unreadCount == 2)
+
+        viewModel.markAllSavedArticlesRead()
+
+        #expect(savedUnread.isRead == true)
+        #expect(notSavedUnread.isRead == false)
+        // Unread count reflects the scoped mutation — one unread remains.
+        #expect(viewModel.unreadCount == 1)
+        #expect(viewModel.errorMessage == nil)
+    }
+
     // MARK: - Mark All as Read
 
     @Test("markAllAsRead marks all articles as read and updates unread count")
@@ -1066,7 +1184,11 @@ struct HomeViewModelTests {
         #expect(article1.isRead == true)
         #expect(article2.isRead == true)
         #expect(viewModel.unreadCount == 0)
-        #expect(viewModel.unreadArticlesList.isEmpty)
+        // Snapshot-stable rule: markAllAsRead updates row visuals (isRead) but
+        // does NOT re-query the unread list. The rows remain visible until the
+        // user triggers an explicit refresh.
+        #expect(viewModel.unreadArticlesList.count == 2)
+        #expect(viewModel.unreadArticlesList.allSatisfy { $0.isRead })
         #expect(viewModel.errorMessage == nil)
 
         // Clean up
@@ -1085,9 +1207,9 @@ struct HomeViewModelTests {
         #expect(viewModel.errorMessage != nil)
     }
 
-    @Test("markAllAsRead clears unread articles list")
+    @Test("markAllAsRead preserves unread articles list snapshot (snapshot-stable rule)")
     @MainActor
-    func markAllAsReadClearsUnreadList() {
+    func markAllAsReadPreservesUnreadList() {
         let feed = TestFixtures.makePersistentFeed()
         let mockPersistence = MockFeedPersistenceService()
         mockPersistence.feeds = [feed]
@@ -1103,16 +1225,18 @@ struct HomeViewModelTests {
 
         viewModel.markAllAsRead()
 
-        #expect(viewModel.unreadArticlesList.isEmpty)
-        #expect(viewModel.hasMoreUnreadArticles == false)
+        // Snapshot-stable rule: the list is NOT re-queried. The item stays
+        // visible with isRead == true; the user can refresh to re-query.
+        #expect(viewModel.unreadArticlesList.count == 1)
+        #expect(viewModel.unreadArticlesList.first?.isRead == true)
 
         // Clean up
         UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
     }
 
-    @Test("markAllAsRead reloads allArticlesList with updated read state")
+    @Test("markAllAsRead updates isRead on allArticlesList items without reloading")
     @MainActor
-    func markAllAsReadReloadsAllArticlesList() {
+    func markAllAsReadMutatesAllArticlesListInPlace() {
         let feed = TestFixtures.makePersistentFeed()
         let mockPersistence = MockFeedPersistenceService()
         mockPersistence.feeds = [feed]
@@ -1130,10 +1254,11 @@ struct HomeViewModelTests {
 
         viewModel.markAllAsRead()
 
-        // allArticlesList should be reloaded (still 2 articles, but now all read)
+        // Snapshot-stable rule: the list is NOT re-queried. The row visuals
+        // update because the same PersistentArticle references are mutated
+        // in place by the persistence layer's bulk mark-read operation.
         #expect(viewModel.allArticlesList.count == 2)
-        let allRead = viewModel.allArticlesList.allSatisfy(\.isRead)
-        #expect(allRead)
+        #expect(viewModel.allArticlesList.allSatisfy { $0.isRead })
 
         // Clean up
         UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
@@ -1422,94 +1547,6 @@ struct HomeViewModelTests {
         viewModel.toggleSaved(article)
 
         #expect(viewModel.errorMessage != nil)
-    }
-
-    // MARK: - Local List Removal
-
-    @Test("removeFromSavedList removes article from savedArticlesList without reloading")
-    @MainActor
-    func removeFromSavedListRemovesArticle() {
-        let feed = TestFixtures.makePersistentFeed()
-        let mockPersistence = MockFeedPersistenceService()
-        mockPersistence.feeds = [feed]
-
-        let saved1 = TestFixtures.makePersistentArticle(
-            articleID: "s1",
-            isSaved: true,
-            savedDate: Date(timeIntervalSince1970: 1_000)
-        )
-        saved1.feed = feed
-        let saved2 = TestFixtures.makePersistentArticle(
-            articleID: "s2",
-            isSaved: true,
-            savedDate: Date(timeIntervalSince1970: 2_000)
-        )
-        saved2.feed = feed
-        mockPersistence.articlesByFeedID[feed.id] = [saved1, saved2]
-
-        let viewModel = HomeViewModel(persistence: mockPersistence)
-        viewModel.loadSavedArticles()
-        #expect(viewModel.savedArticlesList.count == 2)
-
-        viewModel.removeFromSavedList(saved1)
-
-        #expect(viewModel.savedArticlesList.count == 1)
-        #expect(viewModel.savedArticlesList.first?.articleID == "s2")
-    }
-
-    @Test("removeFromSavedList is no-op when article not in list")
-    @MainActor
-    func removeFromSavedListNoOp() {
-        let feed = TestFixtures.makePersistentFeed()
-        let mockPersistence = MockFeedPersistenceService()
-        mockPersistence.feeds = [feed]
-
-        let saved = TestFixtures.makePersistentArticle(
-            articleID: "s1",
-            isSaved: true,
-            savedDate: Date()
-        )
-        saved.feed = feed
-        mockPersistence.articlesByFeedID[feed.id] = [saved]
-
-        let viewModel = HomeViewModel(persistence: mockPersistence)
-        viewModel.loadSavedArticles()
-        #expect(viewModel.savedArticlesList.count == 1)
-
-        let notInList = TestFixtures.makePersistentArticle(articleID: "other")
-        viewModel.removeFromSavedList(notInList)
-
-        #expect(viewModel.savedArticlesList.count == 1)
-    }
-
-    @Test("removeFromSavedList preserves remaining article order")
-    @MainActor
-    func removeFromSavedListPreservesOrder() {
-        let feed = TestFixtures.makePersistentFeed()
-        let mockPersistence = MockFeedPersistenceService()
-        mockPersistence.feeds = [feed]
-
-        let articles = (0..<5).map { i in
-            let article = TestFixtures.makePersistentArticle(
-                articleID: "s\(i)",
-                isSaved: true,
-                savedDate: Date(timeIntervalSince1970: Double(i) * 1_000)
-            )
-            article.feed = feed
-            return article
-        }
-        mockPersistence.articlesByFeedID[feed.id] = articles
-
-        let viewModel = HomeViewModel(persistence: mockPersistence)
-        viewModel.loadSavedArticles()
-        #expect(viewModel.savedArticlesList.count == 5)
-
-        // Remove the middle article
-        viewModel.removeFromSavedList(articles[2])
-
-        #expect(viewModel.savedArticlesList.count == 4)
-        let remainingIDs = viewModel.savedArticlesList.map(\.articleID)
-        #expect(remainingIDs == ["s4", "s3", "s1", "s0"])
     }
 
     // MARK: - Load More And Report
@@ -1909,8 +1946,8 @@ struct HomeViewModelTests {
     }
 
     /// Regression guard for #256. Mirrors the all-articles variant for the unread pathway.
-    /// `ArticleReaderView` is presented from `UnreadArticlesView` and observes
-    /// `articleID` for the same load-bearing reasons.
+    /// `ArticleReaderView` is presented from `ArticleListScreen` (via `UnreadArticlesSource`)
+    /// and observes `articleID` for the same load-bearing reasons.
     @Test("loadUnreadArticles preserves articleID prefix on reload")
     @MainActor
     func loadUnreadArticlesPreservesArticleIDPrefixOnReload() {
@@ -1985,12 +2022,13 @@ struct HomeViewModelTests {
     }
 
     /// Regression guard for #256. Mirrors the all-articles variant for the saved-articles pathway.
-    /// `ArticleReaderView` is presented from `SavedArticlesView` and observes
-    /// `articleID` for the same load-bearing reasons. Saved articles are always sorted
-    /// by `savedDate` descending (no ascending sort option), so no UserDefaults cleanup needed.
+    /// `ArticleReaderView` is presented from `ArticleListScreen` (via `SavedArticlesSource`)
+    /// and observes `articleID` for the same load-bearing reasons.
     @Test("loadSavedArticles preserves articleID prefix on reload")
     @MainActor
     func loadSavedArticlesPreservesArticleIDPrefixOnReload() {
+        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
+        defer { UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey) }
         let feed = TestFixtures.makePersistentFeed()
         let mockPersistence = MockFeedPersistenceService()
         mockPersistence.feeds = [feed]

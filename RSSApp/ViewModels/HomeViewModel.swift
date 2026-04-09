@@ -10,6 +10,32 @@ final class HomeViewModel {
     /// Number of articles to fetch per page.
     static let pageSize = 50
 
+    /// Minimum interval between automatic on-entry network refreshes for
+    /// cross-feed lists. A user navigating between `All Articles` / `Unread
+    /// Articles` in rapid succession should see cached data on the second
+    /// entry rather than stacking redundant refreshes. Pull-to-refresh is
+    /// never throttled — it's an explicit user action that bypasses the gate.
+    /// Background refresh updates the same timestamp via
+    /// `FeedRefreshService.lastRefreshCompletedAt`, so the throttle honors BG
+    /// work as well as foreground work.
+    static let entryRefreshInterval: TimeInterval = 5 * 60
+
+    /// Whether a fresh on-entry network refresh should be triggered. Reads the
+    /// process-wide `FeedRefreshService.lastRefreshCompletedAt` timestamp
+    /// (shared with the BG refresh path) and compares it against
+    /// `entryRefreshInterval`. Returns `true` when no refresh has ever
+    /// completed on this install, or when the most recent completion is
+    /// older than the interval. Used by `AllArticlesSource` and
+    /// `UnreadArticlesSource` to gate the `refreshAllFeeds()` call in their
+    /// `initialLoad()`; `SavedArticlesSource` does not consult it at all
+    /// because saved articles never benefit from a feed refresh.
+    var shouldRefreshOnEntry: Bool {
+        guard let last = FeedRefreshService.lastRefreshCompletedAt else {
+            return true
+        }
+        return Date().timeIntervalSince(last) > Self.entryRefreshInterval
+    }
+
     private(set) var unreadCount: Int = 0
     private(set) var savedCount: Int = 0
     private(set) var isRefreshing = false
@@ -31,8 +57,8 @@ final class HomeViewModel {
     private(set) var hasMoreSavedArticles = true
 
     // RATIONALE: Unlike FeedViewModel.sortAscending which auto-reloads on set,
-    // HomeViewModel does not auto-reload because it serves three independent views
-    // (AllArticlesView, UnreadArticlesView, and SavedArticlesView) that each need
+    // HomeViewModel does not auto-reload because it serves three independent adapters
+    // (AllArticlesSource, UnreadArticlesSource, and SavedArticlesSource) that each need
     // to reload their own specific list. Callers toggle the property then call the
     // appropriate reload method (loadAllArticles, loadUnreadArticles, or
     // loadSavedArticles) for their view.
@@ -243,13 +269,16 @@ final class HomeViewModel {
     }
 
     /// Loads the next page of saved articles and appends to the existing list.
-    /// Saved articles are always sorted by `savedDate` descending (most recently saved first).
+    /// Sorted by `sortDate` with direction controlled by the global
+    /// `sortAscending` preference — same as `allArticles` / `allUnreadArticles`
+    /// so the saved list honors the user's newest-first / oldest-first choice.
     @discardableResult
     func loadMoreSavedArticles() -> LoadMoreResult {
+        let ascending = sortAscending
         return loadMorePage(
             into: &savedArticlesList,
             hasMore: &hasMoreSavedArticles,
-            fetch: { offset, limit in try self.persistence.allSavedArticles(offset: offset, limit: limit) },
+            fetch: { offset, limit in try self.persistence.allSavedArticles(offset: offset, limit: limit, ascending: ascending) },
             label: "saved articles"
         )
     }
@@ -331,25 +360,38 @@ final class HomeViewModel {
         }
     }
 
-    /// Removes an article from the local saved articles list without reloading from persistence.
-    /// Used after unsaving an article in SavedArticlesView to avoid resetting pagination and scroll position.
-    func removeFromSavedList(_ article: PersistentArticle) {
-        savedArticlesList.removeAll { $0.articleID == article.articleID }
-        Self.logger.debug("Removed article '\(article.articleID, privacy: .public)' from saved list (remaining: \(self.savedArticlesList.count, privacy: .public))")
-    }
-
-    /// Marks all articles across all feeds as read.
+    /// Marks all articles across all feeds as read. Does NOT re-query any of
+    /// the three lists — per the snapshot-stable rule, bulk mutations update
+    /// row visuals through `@Observable` propagation but leave list composition
+    /// and order intact. In the Unread Articles list specifically, the
+    /// just-read rows remain visible (now read-styled) until the user triggers
+    /// an explicit refresh. `loadUnreadCount()` is still called so the Home
+    /// badge and the sidebar count reflect the mutation immediately.
     func markAllAsRead() {
         do {
             try persistence.markAllArticlesRead()
             loadUnreadCount()
-            loadAllArticles()
-            unreadArticlesList = []
-            hasMoreUnreadArticles = false
             Self.logger.notice("Marked all articles as read across all feeds")
         } catch {
             errorMessage = "Unable to mark all articles as read."
             Self.logger.error("Failed to mark all articles as read: \(error, privacy: .public)")
+        }
+    }
+
+    /// Marks only saved articles as read. Scoped wrapper for the Saved
+    /// Articles list's "Mark All as Read" action so the sweep covers exactly
+    /// the list the user is looking at, not every article in the app. Same
+    /// snapshot-stable semantics as `markAllAsRead()`: row visuals update
+    /// via `@Observable` propagation but `savedArticlesList` composition is
+    /// preserved until the user triggers an explicit refresh.
+    func markAllSavedArticlesRead() {
+        do {
+            try persistence.markAllSavedArticlesRead()
+            loadUnreadCount()
+            Self.logger.notice("Marked all saved articles as read")
+        } catch {
+            errorMessage = "Unable to mark all saved articles as read."
+            Self.logger.error("Failed to mark all saved articles as read: \(error, privacy: .public)")
         }
     }
 }

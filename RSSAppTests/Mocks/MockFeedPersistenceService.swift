@@ -233,20 +233,28 @@ final class MockFeedPersistenceService: FeedPersisting {
         article.savedDate = newSaved ? Date() : nil
     }
 
-    func allSavedArticles(offset: Int, limit: Int) throws -> [PersistentArticle] {
+    func markAllSavedArticlesRead() throws {
         if let error = errorToThrow { throw error }
+        let now = Date()
+        for article in articlesByFeedID.values.flatMap({ $0 }) where article.isSaved && !article.isRead {
+            article.isRead = true
+            if article.readDate == nil {
+                article.readDate = now
+            }
+            article.wasUpdated = false
+        }
+    }
+
+    func allSavedArticles(offset: Int, limit: Int, ascending: Bool = false) throws -> [PersistentArticle] {
+        if let error = errorToThrow { throw error }
+        // Mirror production: sort by sortDate with the requested direction,
+        // tie-breaker by articleID ascending. Matches `allArticles` /
+        // `allUnreadArticles` ordering so the saved list honors the same
+        // global sort toggle as the other cross-feed lists.
         let all = articlesByFeedID.values
             .flatMap { $0 }
             .filter { $0.isSaved }
-            .sorted {
-                // Mirror production: primary by savedDate desc, tie-breaker by
-                // articleID asc, matching the FeedPersistenceService.allSavedArticles
-                // SortDescriptor pair.
-                let lhs = $0.savedDate ?? .distantPast
-                let rhs = $1.savedDate ?? .distantPast
-                if lhs != rhs { return lhs > rhs }
-                return $0.articleID < $1.articleID
-            }
+            .sorted(by: ascending ? Self.sortAscending : Self.sortDescending)
         return Array(all.dropFirst(offset).prefix(limit))
     }
 

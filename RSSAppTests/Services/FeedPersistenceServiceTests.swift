@@ -1582,6 +1582,44 @@ struct FeedPersistenceServiceTests {
         #expect(feed2AllUnread)
     }
 
+    @Test("markAllSavedArticlesRead marks only saved articles and leaves non-saved unread")
+    @MainActor
+    func markAllSavedArticlesReadScoped() throws {
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+        try service.upsertArticles([
+            TestFixtures.makeArticle(id: "saved"),
+            TestFixtures.makeArticle(id: "unsaved"),
+        ], for: feed)
+        try service.save()
+
+        // Save one, leave the other untouched. Both are unread at this point.
+        let articles = try service.articles(for: feed)
+        let saved = try #require(articles.first { $0.articleID == "saved" })
+        try service.toggleArticleSaved(saved)
+        try service.save()
+
+        try service.markAllSavedArticlesRead()
+
+        let after = try service.articles(for: feed)
+        let savedAfter = try #require(after.first { $0.articleID == "saved" })
+        let unsavedAfter = try #require(after.first { $0.articleID == "unsaved" })
+
+        // Saved article is now read.
+        #expect(savedAfter.isRead == true)
+        #expect(savedAfter.readDate != nil)
+
+        // Non-saved article is untouched — the old global path marked it,
+        // which was the exact bug we are fixing.
+        #expect(unsavedAfter.isRead == false)
+        #expect(unsavedAfter.readDate == nil)
+
+        // Unread count reflects the scoped mutation.
+        #expect(try service.totalUnreadCount() == 1)
+    }
+
     @Test("markAllArticlesRead() marks all articles across all feeds as read")
     @MainActor
     func markAllArticlesReadGlobal() throws {
@@ -1860,30 +1898,59 @@ struct FeedPersistenceServiceTests {
         #expect(article.savedDate == nil)
     }
 
-    @Test("allSavedArticles returns only saved articles sorted by savedDate descending")
+    @Test("allSavedArticles returns only saved articles sorted by sortDate descending by default")
     @MainActor
-    func allSavedArticlesSortedBySavedDate() throws {
+    func allSavedArticlesSortedBySortDateDescending() throws {
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+        // Distinct publish dates so the sortDate ordering is deterministic and
+        // does not collapse to the articleID tiebreaker. The saved order is
+        // intentionally the REVERSE of the publish order — a1 is saved last,
+        // a3 first — to confirm the result is ordered by sortDate, not by
+        // savedDate.
+        try service.upsertArticles([
+            TestFixtures.makeArticle(id: "a1", publishedDate: Date(timeIntervalSince1970: 3_000)),
+            TestFixtures.makeArticle(id: "a2", publishedDate: Date(timeIntervalSince1970: 2_000)),
+            TestFixtures.makeArticle(id: "a3", publishedDate: Date(timeIntervalSince1970: 1_000)),
+        ], for: feed)
+        try service.save()
+
+        let articles = try service.articles(for: feed)
+        let a1 = articles.first { $0.articleID == "a1" }!
+        let a3 = articles.first { $0.articleID == "a3" }!
+        try service.toggleArticleSaved(a3) // saved first
+        try service.toggleArticleSaved(a1) // saved last
+
+        let saved = try service.allSavedArticles(offset: 0, limit: 10, ascending: false)
+        #expect(saved.count == 2)
+        #expect(saved[0].articleID == "a1") // newest publishedDate, despite saved last
+        #expect(saved[1].articleID == "a3") // oldest publishedDate, despite saved first
+    }
+
+    @Test("allSavedArticles honors ascending: true for oldest-first ordering")
+    @MainActor
+    func allSavedArticlesSortedBySortDateAscending() throws {
         let (service, container) = try makeService()
         withExtendedLifetime(container) { }
         let feed = TestFixtures.makePersistentFeed()
         try service.addFeed(feed)
         try service.upsertArticles([
-            TestFixtures.makeArticle(id: "a1"),
-            TestFixtures.makeArticle(id: "a2"),
-            TestFixtures.makeArticle(id: "a3"),
+            TestFixtures.makeArticle(id: "a1", publishedDate: Date(timeIntervalSince1970: 3_000)),
+            TestFixtures.makeArticle(id: "a2", publishedDate: Date(timeIntervalSince1970: 2_000)),
+            TestFixtures.makeArticle(id: "a3", publishedDate: Date(timeIntervalSince1970: 1_000)),
         ], for: feed)
         try service.save()
 
         let articles = try service.articles(for: feed)
-        // Save a1 first, then a3 — a3 should appear first in results (most recently saved)
-        let a1 = articles.first { $0.articleID == "a1" }!
-        let a3 = articles.first { $0.articleID == "a3" }!
-        try service.toggleArticleSaved(a1)
-        try service.toggleArticleSaved(a3)
+        for article in articles where article.articleID != "a2" {
+            try service.toggleArticleSaved(article)
+        }
 
-        let saved = try service.allSavedArticles(offset: 0, limit: 10)
+        let saved = try service.allSavedArticles(offset: 0, limit: 10, ascending: true)
         #expect(saved.count == 2)
-        #expect(saved[0].articleID == "a3")
+        #expect(saved[0].articleID == "a3") // oldest first
         #expect(saved[1].articleID == "a1")
     }
 
@@ -1895,8 +1962,8 @@ struct FeedPersistenceServiceTests {
         let feed = TestFixtures.makePersistentFeed()
         try service.addFeed(feed)
         try service.upsertArticles([
-            TestFixtures.makeArticle(id: "a1"),
-            TestFixtures.makeArticle(id: "a2"),
+            TestFixtures.makeArticle(id: "a1", publishedDate: Date(timeIntervalSince1970: 2_000)),
+            TestFixtures.makeArticle(id: "a2", publishedDate: Date(timeIntervalSince1970: 1_000)),
         ], for: feed)
         try service.save()
 
@@ -1905,7 +1972,7 @@ struct FeedPersistenceServiceTests {
             try service.toggleArticleSaved(article)
         }
 
-        let page = try service.allSavedArticles(offset: 1, limit: 1)
+        let page = try service.allSavedArticles(offset: 1, limit: 1, ascending: false)
         #expect(page.count == 1)
     }
 
@@ -1972,12 +2039,12 @@ struct FeedPersistenceServiceTests {
         // Save both
         try service.toggleArticleSaved(articles[0])
         try service.toggleArticleSaved(articles[1])
-        #expect(try service.allSavedArticles(offset: 0, limit: 10).count == 2)
+        #expect(try service.allSavedArticles(offset: 0, limit: 10, ascending: false).count == 2)
 
         // Unsave both
         try service.toggleArticleSaved(articles[0])
         try service.toggleArticleSaved(articles[1])
-        #expect(try service.allSavedArticles(offset: 0, limit: 10).isEmpty)
+        #expect(try service.allSavedArticles(offset: 0, limit: 10, ascending: false).isEmpty)
     }
 
     @Test("oldestArticleIDsExceedingLimit excludes saved articles")

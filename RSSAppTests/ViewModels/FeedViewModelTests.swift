@@ -370,7 +370,7 @@ struct FeedViewModelTests {
     }
 
     /// Regression test for #209 (per-feed surface). When the user opens an article
-    /// from `ArticleListView` with "Show Unread Only" active, reads it (and additional
+    /// from `ArticleListScreen` (via `FeedArticleSource`) with "Show Unread Only" active, reads it (and additional
     /// articles via the reader's previous/next navigation), then returns to the list,
     /// the now-read articles must remain visible until the user explicitly leaves
     /// and returns or pulls to refresh. This covers the `FeedViewModel` half of
@@ -672,6 +672,41 @@ struct FeedViewModelTests {
         viewModel.markAllAsRead()
 
         #expect(viewModel.errorMessage != nil)
+    }
+
+    @Test("markAllAsRead preserves articles list under showUnreadOnly (snapshot-stable rule)")
+    @MainActor
+    func markAllAsReadPreservesListUnderUnreadFilter() async {
+        let feed = TestFixtures.makePersistentFeed(feedURL: URL(string: "https://example.com/feed")!)
+        let mock = MockFeedFetchingService()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+
+        let article1 = TestFixtures.makePersistentArticle(articleID: "a1", isRead: false)
+        article1.feed = feed
+        let article2 = TestFixtures.makePersistentArticle(articleID: "a2", isRead: false)
+        article2.feed = feed
+        mockPersistence.articlesByFeedID[feed.id] = [article1, article2]
+
+        mock.feedToReturn = TestFixtures.makeFeed()
+
+        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
+        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence)
+        viewModel.showUnreadOnly = true
+        await viewModel.loadFeed()
+        #expect(viewModel.articles.count == 2)
+
+        viewModel.markAllAsRead()
+
+        // Snapshot-stable rule: even under showUnreadOnly, markAllAsRead does
+        // NOT re-query the list. The just-read rows remain visible (now read-
+        // styled) until the user triggers an explicit refresh — otherwise the
+        // scroll position and currently-focused row are lost mid-action.
+        #expect(viewModel.articles.count == 2)
+        #expect(viewModel.articles.allSatisfy { $0.isRead })
+
+        // Clean up
+        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
     }
 
     // MARK: - Reload Error Paths

@@ -19,7 +19,8 @@ final class FeedViewModel {
     var errorMessage: String?
     private(set) var hasMoreArticles = true
 
-    /// When `true`, only unread articles are shown. Only used in `ArticleListView` (per-feed).
+    /// When `true`, only unread articles are shown. Toggled via
+    /// `FeedArticleSource.showUnreadOnly` in `ArticleListScreen`.
     var showUnreadOnly = false {
         didSet {
             guard oldValue != showUnreadOnly else { return }
@@ -139,21 +140,32 @@ final class FeedViewModel {
         return result
     }
 
-    func markAsRead(_ article: PersistentArticle) {
-        guard !article.isRead else { return }
+    /// Marks the article as read and returns `true` on success (or if the article
+    /// was already read), `false` on persistence failure. Callers gate reader
+    /// navigation on this return value so an open-on-row-tap never pushes the
+    /// reader when the mark did not actually persist.
+    @discardableResult
+    func markAsRead(_ article: PersistentArticle) -> Bool {
+        guard !article.isRead else { return true }
         do {
             try persistence.markArticleRead(article, isRead: true)
+            return true
         } catch {
             errorMessage = "Unable to save read status."
             Self.logger.error("Failed to mark article as read: \(error, privacy: .public)")
+            return false
         }
     }
 
-    /// Marks all articles in this feed as read.
+    /// Marks all articles in this feed as read. Does NOT re-query the list —
+    /// per the snapshot-stable rule, bulk mutations update row visuals through
+    /// `@Observable` propagation but leave list composition and order intact.
+    /// Under `showUnreadOnly`, the just-read rows remain visible until the user
+    /// triggers an explicit refresh (pull-to-refresh, sort/filter toggle, or a
+    /// fresh re-entry into the view).
     func markAllAsRead() {
         do {
             try persistence.markAllArticlesRead(for: feed)
-            reloadArticles()
             Self.logger.notice("Marked all articles as read for '\(self.feed.title, privacy: .public)'")
         } catch {
             errorMessage = "Unable to mark all articles as read."

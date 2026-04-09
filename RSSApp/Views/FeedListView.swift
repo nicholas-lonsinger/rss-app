@@ -79,8 +79,10 @@ struct FeedListView: View {
             .navigationTitle("Feeds")
             .navigationDestination(for: PersistentFeed.ID.self) { feedID in
                 if let feed = viewModel.feeds.first(where: { $0.id == feedID }) {
-                    ArticleListView(
-                        viewModel: FeedViewModel(feed: feed, persistence: persistence),
+                    ArticleListScreen(
+                        source: FeedArticleSource(
+                            viewModel: FeedViewModel(feed: feed, persistence: persistence)
+                        ),
                         persistence: persistence,
                         thumbnailService: thumbnailService
                     )
