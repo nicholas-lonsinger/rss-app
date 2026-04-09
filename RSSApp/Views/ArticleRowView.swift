@@ -109,17 +109,20 @@ struct ArticleRowView: View {
     /// Right-edge bookmark indicator, shown on every row whose article is
     /// currently saved. The orange fill matches the trailing swipe-action tint
     /// so the saved state reads consistently across all affordances.
-    @ViewBuilder
+    ///
+    /// Always rendered — hidden via `.opacity(0)` on unsaved rows rather than
+    /// replaced with a conditional placeholder. A `Color.clear` placeholder
+    /// collapses the grid column to zero width, which shifts col 2's flex
+    /// allocation and cascades into the parent `VStack`'s natural width —
+    /// making the title and snippet wrap differently on saved vs. unsaved
+    /// rows of the same article. Reserving the bookmark's width on every row
+    /// keeps the layout stable across state transitions.
     private var savedIndicator: some View {
-        if article.isSaved {
-            Image(systemName: "bookmark.fill")
-                .foregroundStyle(.orange)
-                .accessibilityLabel("Saved")
-        } else {
-            // When the article is not saved, col 3 collapses to 0 width so the
-            // publish date can fill to the right edge.
-            Color.clear
-        }
+        Image(systemName: "bookmark.fill")
+            .foregroundStyle(.orange)
+            .opacity(article.isSaved ? 1 : 0)
+            .accessibilityLabel("Saved")
+            .accessibilityHidden(!article.isSaved)
     }
 
     /// Row 2 content — the "Updated [relative date]" informational suffix and
