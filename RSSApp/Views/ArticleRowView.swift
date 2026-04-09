@@ -42,45 +42,45 @@ struct ArticleRowView: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
 
-                metadataGrid
+                metadataFooter
                     .padding(.top, 2)
             }
         }
     }
 
     /// Bottom metadata block — feed source, publish date, saved indicator, and
-    /// (optionally) the "Updated" suffix and call-to-action badge laid out in a
-    /// 3-column SwiftUI `Grid` so everything aligns:
+    /// (optionally) the "Updated" suffix and call-to-action badge, laid out as:
     ///
-    ///     | Feed icon + title | Publish date  <fills>  | bookmark.fill (if saved) |
-    ///     |     (empty)       | Updated suffix <fills> |       (empty)            |
+    ///     [icon] Feed title    Apr 8                 [bookmark]
+    ///                          Updated 9 hours ago
     ///
-    /// Using `Grid` rather than a nested HStack keeps the feed name on its own
-    /// horizontal baseline with the publish date instead of being vertically
-    /// centered against a two-line `VStack` of dates — and keeps the "Updated"
-    /// suffix horizontally aligned under the publish date it's annotating.
-    /// Row 2 exists only when there is something to show there.
+    /// Uses `HStack(alignment: .firstTextBaseline)` with a nested `VStack` for
+    /// the publish date and optional updated line. Baseline-aligning the row
+    /// keeps the feed name on the same line as the publish date instead of
+    /// vertically centering against a two-line stack of dates — the original
+    /// complaint this view was built to fix.
+    ///
+    /// This was previously a SwiftUI `Grid` for explicit column alignment, but
+    /// `Grid`'s column-sizing algorithm shrinks non-flex columns to the width
+    /// of their longest unbreakable token (longest word) rather than their
+    /// natural single-line width. That forced mid-word wraps even with plenty
+    /// of horizontal space — e.g. "AWS Architecture Blog" broke at "AWS
+    /// Architecture / Blog", and "Updated 9 hours ago" broke at "Updated 9 /
+    /// hours ago". The HStack version lets each child size to its natural
+    /// width and the trailing `Spacer` absorbs the slack, so nothing wraps
+    /// until the row actually runs out of room.
     @ViewBuilder
-    private var metadataGrid: some View {
-        Grid(alignment: .leading, horizontalSpacing: 6, verticalSpacing: 2) {
-            GridRow {
-                feedLabel
+    private var metadataFooter: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            feedLabel
+            VStack(alignment: .leading, spacing: 2) {
                 Text(publishDateText)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                savedIndicator
-            }
-
-            if article.shouldShowUpdatedSuffix || article.wasUpdated {
-                GridRow {
-                    // Empty first-column cell keeps the column's width but adds
-                    // no content, so the updated suffix below aligns under the
-                    // publish date in col 2.
-                    Color.clear
+                if article.shouldShowUpdatedSuffix || article.wasUpdated {
                     updatedLine
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    Color.clear
                 }
             }
+            Spacer(minLength: 0)
+            savedIndicator
         }
         .font(.caption)
         .foregroundStyle(.secondary)
@@ -99,9 +99,9 @@ struct ArticleRowView: View {
                 Text(feed.title)
             }
         } else {
-            // Placeholder keeps the grid column's intrinsic width at zero when
-            // the article has no feed relationship (should not happen in
-            // practice, but the grid cell still needs a view).
+            // Placeholder for articles without a feed relationship (should
+            // not happen in practice). `Color.clear` collapses to zero width
+            // so the rest of the row shifts left cleanly.
             Color.clear
         }
     }
@@ -110,13 +110,13 @@ struct ArticleRowView: View {
     /// currently saved. The orange fill matches the trailing swipe-action tint
     /// so the saved state reads consistently across all affordances.
     ///
-    /// Always rendered — hidden via `.opacity(0)` on unsaved rows rather than
-    /// replaced with a conditional placeholder. A `Color.clear` placeholder
-    /// collapses the grid column to zero width, which shifts col 2's flex
-    /// allocation and cascades into the parent `VStack`'s natural width —
-    /// making the title and snippet wrap differently on saved vs. unsaved
-    /// rows of the same article. Reserving the bookmark's width on every row
-    /// keeps the layout stable across state transitions.
+    /// Always rendered and hidden via `.opacity(0)` on unsaved rows so the
+    /// bookmark's footprint is reserved regardless of saved state. Conditional
+    /// rendering would mostly work in the current `HStack` + `Spacer` layout
+    /// (the `Spacer` absorbs the delta), but reserving the width makes the
+    /// layout bit-identical across `isSaved` transitions and avoids a subtle
+    /// reflow if the row ever runs tight on horizontal space and the `Spacer`
+    /// collapses to its `minLength`.
     private var savedIndicator: some View {
         Image(systemName: "bookmark.fill")
             .foregroundStyle(.orange)
