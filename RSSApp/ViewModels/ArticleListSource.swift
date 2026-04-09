@@ -149,4 +149,23 @@ protocol ArticleListSource: AnyObject, Observable {
 
 extension ArticleListSource {
     func onDisappear() {}
+
+    // MARK: - Group editing (optional capability)
+
+    /// Whether this source supports in-screen group editing (Edit Group /
+    /// Delete Group). Only `GroupArticleSource` returns `true`.
+    var supportsGroupEdit: Bool { false }
+
+    /// The underlying `PersistentFeedGroup` for sources that support group
+    /// editing. `nil` for all non-group sources.
+    var editableGroup: PersistentFeedGroup? { nil }
+
+    /// Deletes the group backing this source. Called after the user confirms
+    /// the delete alert. After this call, `wasGroupDeleted` must become `true`
+    /// so `ArticleListScreen` can dismiss and pop the navigation stack.
+    func deleteGroup() {}
+
+    /// Becomes `true` after a successful `deleteGroup()` call. Observed by
+    /// `ArticleListScreen` to trigger auto-dismiss (pop back to Home).
+    var wasGroupDeleted: Bool { false }
 }
