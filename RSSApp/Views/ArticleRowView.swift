@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Article row used by every list view in the app. Always shows the article's
-/// source feed (icon + title) on the second line, regardless of whether the
+/// source feed (icon + title) on the bottom line, regardless of whether the
 /// containing list is cross-feed (All / Unread / Saved / Group / Label) or
 /// single-feed (a feed's own article list). Unified so every row is
 /// self-describing — removing per-list row variants and keeping behavior
@@ -42,92 +42,126 @@ struct ArticleRowView: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
 
-                HStack(spacing: 3) {
-                    if let feed = article.feed {
-                        FeedIconView(
-                            feedID: feed.id,
-                            iconURL: feed.iconURL,
-                            iconService: iconService,
-                            style: .inline
-                        )
-
-                        Text(feed.title)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-
-                        Text("\u{00B7}")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    ArticleRowDateLine(article: article)
-                }
-                .padding(.top, 2)
+                metadataGrid
+                    .padding(.top, 2)
             }
         }
     }
-}
 
-/// Two-line date block for article rows (issue #300).
-///
-/// **Line 1 (always):** the article's publish date as an absolute short date —
-/// `Apr 7` for items in the current year, `Apr 7, 2025` when the year differs.
-/// Absolute rather than relative so readers can scan a list and compare items
-/// by real calendar position instead of parsing "2 days ago" phrases. Sourced
-/// from `displayedPublishedDate` (not `sortDate`) so the future-date clamp and
-/// the `sortDate`-vs-`publishedDate` distinction on `PersistentArticle` are
-/// preserved — see the RATIONALE on `PersistentArticle.sortDate`.
-///
-/// **Line 2 (conditional):** rendered only when `shouldShowUpdatedSuffix` or
-/// `wasUpdated` is true. Contains up to two adjacent elements:
-/// - An *informational* "Updated [relative date]" suffix when
-///   `shouldShowUpdatedSuffix` is true — kept relative so freshness reads at a
-///   glance ("Updated 3 days ago"). Independent of the user's read state, so
-///   it remains visible even after reading the latest version.
-/// - An *orange capsule badge* — the `wasUpdated` call-to-action — rendered
-///   when `wasUpdated == true`. Appears only when the article has new content
-///   the user hasn't read yet; clears on every read transition
-///   (`markArticleRead`, `markAllArticlesRead`). When the suffix is suppressed
-///   (e.g., because a feed reports `updated <= published` per issue #299) but
-///   `wasUpdated` is still true, the badge stands alone on line 2 so the call
-///   to action is never lost.
-struct ArticleRowDateLine: View {
-    let article: PersistentArticle
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(publishDateText)
+    /// Bottom metadata block — feed source, publish date, saved indicator, and
+    /// (optionally) the "Updated" suffix and call-to-action badge laid out in a
+    /// 3-column SwiftUI `Grid` so everything aligns:
+    ///
+    ///     | Feed icon + title | Publish date  <fills>  | bookmark.fill (if saved) |
+    ///     |     (empty)       | Updated suffix <fills> |       (empty)            |
+    ///
+    /// Using `Grid` rather than a nested HStack keeps the feed name on its own
+    /// horizontal baseline with the publish date instead of being vertically
+    /// centered against a two-line `VStack` of dates — and keeps the "Updated"
+    /// suffix horizontally aligned under the publish date it's annotating.
+    /// Row 2 exists only when there is something to show there.
+    @ViewBuilder
+    private var metadataGrid: some View {
+        Grid(alignment: .leading, horizontalSpacing: 6, verticalSpacing: 2) {
+            GridRow {
+                feedLabel
+                Text(publishDateText)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                savedIndicator
+            }
 
             if article.shouldShowUpdatedSuffix || article.wasUpdated {
-                HStack(spacing: 6) {
-                    if article.shouldShowUpdatedSuffix, let updated = article.updatedDate {
-                        Text("Updated \(updated, format: .relative(presentation: .named))")
-                    }
-
-                    if article.wasUpdated {
-                        Text("Updated")
-                            .font(.caption2)
-                            .fontWeight(.semibold)
-                            .foregroundStyle(.orange)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Color.orange.opacity(0.15), in: Capsule())
-                    }
+                GridRow {
+                    // Empty first-column cell keeps the column's width but adds
+                    // no content, so the updated suffix below aligns under the
+                    // publish date in col 2.
+                    Color.clear
+                    updatedLine
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Color.clear
                 }
             }
         }
-        // Apply caption font and secondary color to the whole VStack so both
-        // the absolute-date line and the "Updated [date]" suffix text inherit
-        // them. The orange badge overrides both via its own modifier chain.
         .font(.caption)
         .foregroundStyle(.secondary)
+    }
+
+    @ViewBuilder
+    private var feedLabel: some View {
+        if let feed = article.feed {
+            HStack(spacing: 3) {
+                FeedIconView(
+                    feedID: feed.id,
+                    iconURL: feed.iconURL,
+                    iconService: iconService,
+                    style: .inline
+                )
+                Text(feed.title)
+            }
+        } else {
+            // Placeholder keeps the grid column's intrinsic width at zero when
+            // the article has no feed relationship (should not happen in
+            // practice, but the grid cell still needs a view).
+            Color.clear
+        }
+    }
+
+    /// Right-edge bookmark indicator, shown on every row whose article is
+    /// currently saved. The orange fill matches the trailing swipe-action tint
+    /// so the saved state reads consistently across all affordances.
+    @ViewBuilder
+    private var savedIndicator: some View {
+        if article.isSaved {
+            Image(systemName: "bookmark.fill")
+                .foregroundStyle(.orange)
+                .accessibilityLabel("Saved")
+        } else {
+            // When the article is not saved, col 3 collapses to 0 width so the
+            // publish date can fill to the right edge.
+            Color.clear
+        }
+    }
+
+    /// Row 2 content — the "Updated [relative date]" informational suffix and
+    /// (optionally) the orange call-to-action capsule badge. Rendered only
+    /// when `shouldShowUpdatedSuffix || wasUpdated`.
+    ///
+    /// - `shouldShowUpdatedSuffix` is kept relative ("Updated 3 days ago") so
+    ///   freshness reads at a glance and is independent of the user's read
+    ///   state, so it remains visible even after reading the latest version.
+    /// - `wasUpdated` is the call-to-action: an orange capsule marking the
+    ///   article as having new content the user hasn't read yet. Clears on
+    ///   every read transition (`markArticleRead`, `markAllArticlesRead`).
+    ///   When the suffix is suppressed (e.g. a feed reports `updated <=
+    ///   published` per issue #299) but `wasUpdated` is still true, the badge
+    ///   stands alone so the call to action is never lost.
+    @ViewBuilder
+    private var updatedLine: some View {
+        HStack(spacing: 6) {
+            if article.shouldShowUpdatedSuffix, let updated = article.updatedDate {
+                Text("Updated \(updated, format: .relative(presentation: .named))")
+            }
+
+            if article.wasUpdated {
+                Text("Updated")
+                    .font(.caption2)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.orange)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.orange.opacity(0.15), in: Capsule())
+            }
+        }
     }
 
     /// Absolute short date for the publish line. Omits the year when
     /// `displayedPublishedDate` is in the current calendar year, includes it
     /// otherwise — keeps the common case compact ("Apr 7") while staying
     /// unambiguous across year boundaries ("Dec 28, 2024" vs this year's
-    /// "Dec 28").
+    /// "Dec 28"). Sourced from `displayedPublishedDate` (not `sortDate`) so
+    /// the future-date clamp and the `sortDate`-vs-`publishedDate` distinction
+    /// on `PersistentArticle` are preserved — see the RATIONALE on
+    /// `PersistentArticle.sortDate`.
     private var publishDateText: String {
         let sameYear = Calendar.current.isDate(
             article.displayedPublishedDate,

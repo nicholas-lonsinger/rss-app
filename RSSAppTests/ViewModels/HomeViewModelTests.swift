@@ -1045,6 +1045,80 @@ struct HomeViewModelTests {
         UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
     }
 
+    // MARK: - shouldRefreshOnEntry throttle
+
+    @Test("shouldRefreshOnEntry returns true when no refresh has ever completed")
+    @MainActor
+    func shouldRefreshOnEntryNeverRefreshed() {
+        UserDefaults.standard.removeObject(forKey: FeedRefreshService.lastRefreshCompletedKey)
+        let viewModel = HomeViewModel(persistence: MockFeedPersistenceService())
+        #expect(viewModel.shouldRefreshOnEntry == true)
+    }
+
+    @Test("shouldRefreshOnEntry returns false when refresh is within throttle window")
+    @MainActor
+    func shouldRefreshOnEntryWithinWindow() {
+        UserDefaults.standard.set(
+            Date().timeIntervalSince1970,
+            forKey: FeedRefreshService.lastRefreshCompletedKey
+        )
+        defer { UserDefaults.standard.removeObject(forKey: FeedRefreshService.lastRefreshCompletedKey) }
+
+        let viewModel = HomeViewModel(persistence: MockFeedPersistenceService())
+        #expect(viewModel.shouldRefreshOnEntry == false)
+    }
+
+    @Test("shouldRefreshOnEntry returns true when refresh is older than throttle window")
+    @MainActor
+    func shouldRefreshOnEntryOutsideWindow() {
+        let sixMinutesAgo = Date().addingTimeInterval(-(6 * 60))
+        UserDefaults.standard.set(
+            sixMinutesAgo.timeIntervalSince1970,
+            forKey: FeedRefreshService.lastRefreshCompletedKey
+        )
+        defer { UserDefaults.standard.removeObject(forKey: FeedRefreshService.lastRefreshCompletedKey) }
+
+        let viewModel = HomeViewModel(persistence: MockFeedPersistenceService())
+        #expect(viewModel.shouldRefreshOnEntry == true)
+    }
+
+    // MARK: - Scoped mark-all-as-read for saved articles
+
+    @Test("markAllSavedArticlesRead marks only saved articles and leaves others unread")
+    @MainActor
+    func markAllSavedArticlesReadScoped() {
+        let feed = TestFixtures.makePersistentFeed()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+
+        let savedUnread = TestFixtures.makePersistentArticle(
+            articleID: "s1",
+            isRead: false,
+            isSaved: true,
+            savedDate: Date()
+        )
+        savedUnread.feed = feed
+        let notSavedUnread = TestFixtures.makePersistentArticle(
+            articleID: "n1",
+            isRead: false,
+            isSaved: false
+        )
+        notSavedUnread.feed = feed
+        mockPersistence.articlesByFeedID[feed.id] = [savedUnread, notSavedUnread]
+
+        let viewModel = HomeViewModel(persistence: mockPersistence)
+        viewModel.loadUnreadCount()
+        #expect(viewModel.unreadCount == 2)
+
+        viewModel.markAllSavedArticlesRead()
+
+        #expect(savedUnread.isRead == true)
+        #expect(notSavedUnread.isRead == false)
+        // Unread count reflects the scoped mutation — one unread remains.
+        #expect(viewModel.unreadCount == 1)
+        #expect(viewModel.errorMessage == nil)
+    }
+
     // MARK: - Mark All as Read
 
     @Test("markAllAsRead marks all articles as read and updates unread count")

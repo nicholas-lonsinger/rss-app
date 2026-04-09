@@ -233,6 +233,18 @@ final class MockFeedPersistenceService: FeedPersisting {
         article.savedDate = newSaved ? Date() : nil
     }
 
+    func markAllSavedArticlesRead() throws {
+        if let error = errorToThrow { throw error }
+        let now = Date()
+        for article in articlesByFeedID.values.flatMap({ $0 }) where article.isSaved && !article.isRead {
+            article.isRead = true
+            if article.readDate == nil {
+                article.readDate = now
+            }
+            article.wasUpdated = false
+        }
+    }
+
     func allSavedArticles(offset: Int, limit: Int, ascending: Bool = false) throws -> [PersistentArticle] {
         if let error = errorToThrow { throw error }
         // Mirror production: sort by sortDate with the requested direction,

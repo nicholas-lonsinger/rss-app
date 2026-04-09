@@ -167,19 +167,23 @@ final class AllArticlesSource: ArticleListSource {
         // Cache-first: render whatever is already in SwiftData immediately
         // so the user sees content even if the network is slow or offline.
         homeViewModel.loadAllArticles()
-        // Background network refresh. Returns quickly with `.skipped` if
-        // another caller (pull-to-refresh on Home, a sibling cross-feed view,
-        // or the background task coordinator) already has a refresh in
-        // flight, thanks to the process-wide `FeedRefreshService.isRefreshing`
-        // guard. HTTP caching (ETag / Last-Modified) keeps the "nothing
-        // changed" path cheap.
-        await homeViewModel.refreshAllFeeds()
-        // Pick up any new rows the refresh persisted.
-        homeViewModel.loadAllArticles()
+        // Throttled network refresh. `HomeViewModel.shouldRefreshOnEntry`
+        // reads the process-wide `FeedRefreshService.lastRefreshCompletedAt`
+        // timestamp and returns `false` when the most recent refresh is
+        // within `entryRefreshInterval` — so rapid navigation across sibling
+        // cross-feed views (or a BG refresh that ran moments ago) doesn't
+        // stack redundant refreshes on every entry. Pull-to-refresh goes
+        // through `refresh()` below and bypasses the throttle entirely.
+        if homeViewModel.shouldRefreshOnEntry {
+            await homeViewModel.refreshAllFeeds()
+            // Pick up any new rows the refresh persisted.
+            homeViewModel.loadAllArticles()
+        }
         homeViewModel.loadUnreadCount()
     }
 
     func refresh() async {
+        // Pull-to-refresh is explicit user intent — always hit the network.
         await homeViewModel.refreshAllFeeds()
         homeViewModel.loadAllArticles()
         homeViewModel.loadUnreadCount()
@@ -264,8 +268,10 @@ final class UnreadArticlesSource: ArticleListSource {
 
     func initialLoad() async {
         homeViewModel.loadUnreadArticles()
-        await homeViewModel.refreshAllFeeds()
-        homeViewModel.loadUnreadArticles()
+        if homeViewModel.shouldRefreshOnEntry {
+            await homeViewModel.refreshAllFeeds()
+            homeViewModel.loadUnreadArticles()
+        }
         homeViewModel.loadUnreadCount()
     }
 
@@ -351,15 +357,19 @@ final class SavedArticlesSource: ArticleListSource {
         set { /* no-op */ }
     }
 
+    // Saved articles never benefit from a feed refresh — the items are
+    // already in SwiftData and only change via user action (saving/unsaving).
+    // Neither `initialLoad()` nor `refresh()` triggers a network refresh.
+    // Pull-to-refresh on this list just re-queries the local store, which is
+    // useful for seeing unsaved rows drop off after the user has unsaved them
+    // under the snapshot-stable rule.
+
     func initialLoad() async {
-        homeViewModel.loadSavedArticles()
-        await homeViewModel.refreshAllFeeds()
         homeViewModel.loadSavedArticles()
         homeViewModel.loadSavedCount()
     }
 
     func refresh() async {
-        await homeViewModel.refreshAllFeeds()
         homeViewModel.loadSavedArticles()
         homeViewModel.loadSavedCount()
     }
@@ -385,8 +395,13 @@ final class SavedArticlesSource: ArticleListSource {
         homeViewModel.toggleSaved(article)
     }
 
+    /// Scoped to saved articles only — calls the dedicated
+    /// `markAllSavedArticlesRead()` persistence path rather than the global
+    /// `markAllArticlesRead()`. Previously this would mark every article in
+    /// every feed as read when the user tapped "Mark All as Read" from the
+    /// Saved list, which was not what the affordance implies.
     func markAllAsRead() {
-        homeViewModel.markAllAsRead()
+        homeViewModel.markAllSavedArticlesRead()
     }
 
     func clearError() {

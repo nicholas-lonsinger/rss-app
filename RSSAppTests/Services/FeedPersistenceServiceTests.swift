@@ -1582,6 +1582,44 @@ struct FeedPersistenceServiceTests {
         #expect(feed2AllUnread)
     }
 
+    @Test("markAllSavedArticlesRead marks only saved articles and leaves non-saved unread")
+    @MainActor
+    func markAllSavedArticlesReadScoped() throws {
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+        try service.upsertArticles([
+            TestFixtures.makeArticle(id: "saved"),
+            TestFixtures.makeArticle(id: "unsaved"),
+        ], for: feed)
+        try service.save()
+
+        // Save one, leave the other untouched. Both are unread at this point.
+        let articles = try service.articles(for: feed)
+        let saved = try #require(articles.first { $0.articleID == "saved" })
+        try service.toggleArticleSaved(saved)
+        try service.save()
+
+        try service.markAllSavedArticlesRead()
+
+        let after = try service.articles(for: feed)
+        let savedAfter = try #require(after.first { $0.articleID == "saved" })
+        let unsavedAfter = try #require(after.first { $0.articleID == "unsaved" })
+
+        // Saved article is now read.
+        #expect(savedAfter.isRead == true)
+        #expect(savedAfter.readDate != nil)
+
+        // Non-saved article is untouched — the old global path marked it,
+        // which was the exact bug we are fixing.
+        #expect(unsavedAfter.isRead == false)
+        #expect(unsavedAfter.readDate == nil)
+
+        // Unread count reflects the scoped mutation.
+        #expect(try service.totalUnreadCount() == 1)
+    }
+
     @Test("markAllArticlesRead() marks all articles across all feeds as read")
     @MainActor
     func markAllArticlesReadGlobal() throws {

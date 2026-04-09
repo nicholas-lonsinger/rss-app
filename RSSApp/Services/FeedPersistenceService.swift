@@ -67,6 +67,10 @@ protocol FeedPersisting: Sendable {
 
     /// Toggles the saved state of an article. Sets `isSaved` and updates `savedDate`.
     func toggleArticleSaved(_ article: PersistentArticle) throws
+    /// Marks only articles with `isSaved == true` as read. Used by the Saved
+    /// Articles list's "Mark All as Read" action so it scopes to the list
+    /// the user is looking at rather than sweeping every article in the app.
+    func markAllSavedArticlesRead() throws
     /// Returns a page of saved articles across all feeds, sorted by
     /// `sortDate` with direction controlled by `ascending`. Uses the same
     /// global sort order as `allArticles(offset:limit:ascending:)` and
@@ -618,6 +622,34 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
         article.savedDate = newSaved ? Date() : nil
         try modelContext.save()
         Self.logger.notice("Toggled saved state for '\(article.title, privacy: .public)' to \(newSaved ? "saved" : "unsaved", privacy: .public)")
+    }
+
+    func markAllSavedArticlesRead() throws {
+        let now = Date()
+        // Fetch only saved articles that are currently unread so we don't
+        // touch rows that already satisfy both conditions (no-op churn) and
+        // don't scan the full article table (cheaper for large DBs).
+        let descriptor = FetchDescriptor<PersistentArticle>(
+            predicate: #Predicate { $0.isSaved && !$0.isRead }
+        )
+        let toMark = try modelContext.fetch(descriptor)
+        for article in toMark {
+            article.isRead = true
+            // Same belt-and-suspenders guard as the other bulk mark-read
+            // paths (see `markAllArticlesRead()` above): stamp `readDate` only
+            // when it is nil, so a future write path that breaks the "every
+            // path that clears isRead also clears readDate" invariant cannot
+            // silently clobber existing first-read timestamps (issue #282).
+            if article.readDate == nil {
+                article.readDate = now
+            }
+            // Matches the other bulk mark-read paths: clear `wasUpdated` on
+            // every read transition so the issue #74 call-to-action badge
+            // doesn't linger after the user has acknowledged the update.
+            article.wasUpdated = false
+        }
+        try modelContext.save()
+        Self.logger.notice("Marked \(toMark.count, privacy: .public) saved articles as read")
     }
 
     func allSavedArticles(offset: Int, limit: Int, ascending: Bool = false) throws -> [PersistentArticle] {

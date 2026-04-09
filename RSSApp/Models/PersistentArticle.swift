@@ -206,13 +206,12 @@ final class PersistentArticle {
     // MARK: - Display Helpers
 
     /// Stable display value for the article's original publication time, consumed by
-    /// `ArticleRowDateLine` (in `ArticleRowView.swift`, shared by both the per-feed
-    /// `ArticleRowView` and `CrossFeedArticleRowView`).
+    /// `ArticleRowView`'s metadata grid (see `RSSApp/Views/ArticleRowView.swift`).
     ///
     /// Distinct from `sortDate` because `FeedPersistenceService.upsertArticles`
     /// mutates `sortDate` to the current time when content-update detection fires on
     /// a re-fetch (issue #74; see the stability rule block on `sortDate` above for
-    /// the single sanctioned mutation path and its constraints). `ArticleRowDateLine`
+    /// the single sanctioned mutation path and its constraints). `ArticleRowView`
     /// uses this property to render the stable "original publication time" label
     /// alongside an "Updated [date]" suffix sourced from `updatedDate` — both labels
     /// stay accurate even after `sortDate` is bumped on update detection.

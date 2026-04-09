@@ -95,9 +95,13 @@ struct ArticleListSourceTests {
     /// refresh of all feeds — cache-first + refresh + reload. Prior to this
     /// refactor the cross-feed views only did a local SwiftData query on
     /// entry, leaving stale data until the user manually pulled to refresh.
-    @Test("AllArticlesSource.initialLoad triggers refresh closure")
+    @Test("AllArticlesSource.initialLoad triggers refresh closure on first entry")
     @MainActor
     func allArticlesSourceInitialLoadTriggersRefresh() async {
+        // Clear any ambient throttle timestamp from other tests so this
+        // asserts the "first entry" path unambiguously.
+        UserDefaults.standard.removeObject(forKey: FeedRefreshService.lastRefreshCompletedKey)
+
         let probe = RefreshProbe()
         let mockPersistence = MockFeedPersistenceService()
         let feed = TestFixtures.makePersistentFeed()
@@ -122,9 +126,11 @@ struct ArticleListSourceTests {
         #expect(source.articles.count == 1)
     }
 
-    @Test("UnreadArticlesSource.initialLoad triggers refresh closure")
+    @Test("UnreadArticlesSource.initialLoad triggers refresh closure on first entry")
     @MainActor
     func unreadArticlesSourceInitialLoadTriggersRefresh() async {
+        UserDefaults.standard.removeObject(forKey: FeedRefreshService.lastRefreshCompletedKey)
+
         let probe = RefreshProbe()
         let mockPersistence = MockFeedPersistenceService()
         let feed = TestFixtures.makePersistentFeed()
@@ -142,37 +148,6 @@ struct ArticleListSourceTests {
             }
         )
         let source = UnreadArticlesSource(homeViewModel: viewModel)
-
-        await source.initialLoad()
-
-        #expect(await probe.callCount == 1)
-        #expect(source.articles.count == 1)
-    }
-
-    @Test("SavedArticlesSource.initialLoad triggers refresh closure")
-    @MainActor
-    func savedArticlesSourceInitialLoadTriggersRefresh() async {
-        let probe = RefreshProbe()
-        let mockPersistence = MockFeedPersistenceService()
-        let feed = TestFixtures.makePersistentFeed()
-        mockPersistence.feeds = [feed]
-
-        let article = TestFixtures.makePersistentArticle(
-            articleID: "a1",
-            isSaved: true,
-            savedDate: Date()
-        )
-        article.feed = feed
-        mockPersistence.articlesByFeedID[feed.id] = [article]
-
-        let viewModel = HomeViewModel(
-            persistence: mockPersistence,
-            refreshFeeds: {
-                await probe.recordCall()
-                return nil
-            }
-        )
-        let source = SavedArticlesSource(homeViewModel: viewModel)
 
         await source.initialLoad()
 
@@ -261,6 +236,163 @@ struct ArticleListSourceTests {
 
         #expect(source.articles.count == 2)
         #expect(source.articles.allSatisfy { $0.isRead })
+    }
+
+    // MARK: - Refresh throttling on list entry
+
+    /// Follow-up to A3: rapid navigation across sibling cross-feed lists (or
+    /// re-entry within the throttle window) must NOT stack redundant network
+    /// refreshes. Seeds the shared `FeedRefreshService.lastRefreshCompletedKey`
+    /// UserDefaults entry to "just now" and then asserts `initialLoad()` does
+    /// not call the refresh closure.
+    @Test("AllArticlesSource.initialLoad skips refresh when within throttle window")
+    @MainActor
+    func allArticlesSourceInitialLoadThrottled() async {
+        UserDefaults.standard.set(
+            Date().timeIntervalSince1970,
+            forKey: FeedRefreshService.lastRefreshCompletedKey
+        )
+        defer { UserDefaults.standard.removeObject(forKey: FeedRefreshService.lastRefreshCompletedKey) }
+
+        let probe = RefreshProbe()
+        let mockPersistence = MockFeedPersistenceService()
+        let feed = TestFixtures.makePersistentFeed()
+        mockPersistence.feeds = [feed]
+        let article = TestFixtures.makePersistentArticle(articleID: "a1")
+        article.feed = feed
+        mockPersistence.articlesByFeedID[feed.id] = [article]
+
+        let viewModel = HomeViewModel(
+            persistence: mockPersistence,
+            refreshFeeds: {
+                await probe.recordCall()
+                return nil
+            }
+        )
+        let source = AllArticlesSource(homeViewModel: viewModel)
+
+        await source.initialLoad()
+
+        #expect(await probe.callCount == 0)
+        // Local snapshot is still populated even though the refresh was
+        // skipped — the user should see cached data immediately.
+        #expect(source.articles.count == 1)
+    }
+
+    /// When the throttle key is stale (older than the interval), the refresh
+    /// should fire. Verifies the "fresh on entry" behavior is preserved when
+    /// enough time has passed since the last refresh.
+    @Test("AllArticlesSource.initialLoad refreshes when throttle window has elapsed")
+    @MainActor
+    func allArticlesSourceInitialLoadRefreshesWhenStale() async {
+        let tenMinutesAgo = Date().addingTimeInterval(-600).timeIntervalSince1970
+        UserDefaults.standard.set(tenMinutesAgo, forKey: FeedRefreshService.lastRefreshCompletedKey)
+        defer { UserDefaults.standard.removeObject(forKey: FeedRefreshService.lastRefreshCompletedKey) }
+
+        let probe = RefreshProbe()
+        let mockPersistence = MockFeedPersistenceService()
+        let feed = TestFixtures.makePersistentFeed()
+        mockPersistence.feeds = [feed]
+
+        let viewModel = HomeViewModel(
+            persistence: mockPersistence,
+            refreshFeeds: {
+                await probe.recordCall()
+                return nil
+            }
+        )
+        let source = AllArticlesSource(homeViewModel: viewModel)
+
+        await source.initialLoad()
+
+        #expect(await probe.callCount == 1)
+    }
+
+    // MARK: - SavedArticlesSource does not refresh on entry
+
+    /// Saved articles never benefit from a network refresh. `initialLoad`
+    /// must not call `refreshAllFeeds()` regardless of throttle state, and
+    /// pull-to-refresh (`refresh()`) is also a local-only re-query.
+    @Test("SavedArticlesSource.initialLoad never triggers network refresh")
+    @MainActor
+    func savedArticlesSourceInitialLoadNeverRefreshes() async {
+        // Clear any ambient throttle state so this is the unambiguous case.
+        UserDefaults.standard.removeObject(forKey: FeedRefreshService.lastRefreshCompletedKey)
+
+        let probe = RefreshProbe()
+        let mockPersistence = MockFeedPersistenceService()
+        let feed = TestFixtures.makePersistentFeed()
+        mockPersistence.feeds = [feed]
+
+        let saved = TestFixtures.makePersistentArticle(articleID: "s1", isSaved: true, savedDate: Date())
+        saved.feed = feed
+        mockPersistence.articlesByFeedID[feed.id] = [saved]
+
+        let viewModel = HomeViewModel(
+            persistence: mockPersistence,
+            refreshFeeds: {
+                await probe.recordCall()
+                return nil
+            }
+        )
+        let source = SavedArticlesSource(homeViewModel: viewModel)
+
+        await source.initialLoad()
+        #expect(await probe.callCount == 0)
+        #expect(source.articles.count == 1)
+
+        await source.refresh()
+        #expect(await probe.callCount == 0)
+    }
+
+    // MARK: - Scoped mark-all-as-read
+
+    /// `SavedArticlesSource.markAllAsRead` must only touch saved articles
+    /// — previously it called the global `markAllArticlesRead()` path,
+    /// which marked every article in every feed as read when the user
+    /// tapped the affordance from the Saved list.
+    @Test("SavedArticlesSource.markAllAsRead only marks saved articles as read")
+    @MainActor
+    func savedArticlesSourceMarkAllAsReadScoped() {
+        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
+        defer { UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey) }
+
+        let feed = TestFixtures.makePersistentFeed()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+
+        let saved = TestFixtures.makePersistentArticle(
+            articleID: "saved",
+            publishedDate: Date(timeIntervalSince1970: 2_000_000),
+            isRead: false,
+            isSaved: true,
+            savedDate: Date(timeIntervalSince1970: 2_000_000)
+        )
+        saved.feed = feed
+        let unsavedUnread = TestFixtures.makePersistentArticle(
+            articleID: "unsavedUnread",
+            publishedDate: Date(timeIntervalSince1970: 1_000_000),
+            isRead: false,
+            isSaved: false
+        )
+        unsavedUnread.feed = feed
+        mockPersistence.articlesByFeedID[feed.id] = [saved, unsavedUnread]
+
+        let viewModel = HomeViewModel(persistence: mockPersistence)
+        let source = SavedArticlesSource(homeViewModel: viewModel)
+
+        viewModel.loadSavedArticles()
+        #expect(source.articles.count == 1)
+
+        source.markAllAsRead()
+
+        // Saved article is marked read. Non-saved, unread article is
+        // untouched — the prior global behavior would have marked it too.
+        #expect(saved.isRead == true)
+        #expect(unsavedUnread.isRead == false)
+
+        // Snapshot-stable: the row remains in the Saved list snapshot.
+        #expect(source.articles.count == 1)
     }
 
     // MARK: - initialLoad sets hasAppeared ordering (covered at view level)
