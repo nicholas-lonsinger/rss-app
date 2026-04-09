@@ -389,9 +389,6 @@ final class SavedArticlesSource: ArticleListSource {
         homeViewModel.markAllSavedArticlesRead()
     }
 
-    func onDisappear() {
-    }
-
     func clearError() {
         homeViewModel.clearError()
     }

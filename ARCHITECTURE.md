@@ -180,7 +180,7 @@ RSSAppTests/
 │   ├── FeedViewModelTests.swift            # Load success/failure, state transitions, sort order, read filter, mark-as-read Bool return, mark-all-as-read snapshot-stable invariant under showUnreadOnly
 │   ├── HomeViewModelBadgeTests.swift        # Badge integration: loadUnreadCount triggers badge update, error path skips badge, mark-read/toggle/mark-all-as-read cascade badge updates
 │   ├── HomeViewModelBadgeToggleTests.swift  # Badge toggle permission flow: denied reverts, authorized proceeds, notDetermined-then-denied reverts, notDetermined-then-granted proceeds
-│   ├── HomeViewModelTests.swift            # Unread count, saved count, cross-feed article queries, read/unread status, saved status, sort order, mark-all-as-read snapshot-stable invariants (unread list preserved, allArticlesList items mutated in place)
+│   ├── HomeViewModelTests.swift            # Unread count, cross-feed article queries, read/unread status, saved status, sort order, mark-all-as-read snapshot-stable invariants (unread list preserved, allArticlesList items mutated in place)
 │   ├── HomeViewModelGroupTests.swift       # Group CRUD, group unread counts, scoped mark-all-as-read
 │   ├── GroupArticleSourceTests.swift       # Reload, pagination, mutations, scoped mark-all-as-read, error preservation, sort toggle
 │   └── EditGroupViewModelTests.swift       # Feed loading, membership toggle round-trips, name save

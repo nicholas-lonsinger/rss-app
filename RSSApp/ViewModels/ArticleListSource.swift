@@ -138,7 +138,7 @@ protocol ArticleListSource: AnyObject, Observable {
     // MARK: - Disappear
 
     /// Called when the list view disappears. Cross-feed sources use this to
-    /// refresh Home badge counts (unread / saved) so the Home screen
+    /// refresh Home badge counts (unread) so the Home screen
     /// reflects any mutations made during the session. Default is a no-op.
     func onDisappear()
 
