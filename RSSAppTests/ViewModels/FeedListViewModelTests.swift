@@ -723,11 +723,11 @@ struct FeedListViewModelTests {
         #expect(viewModel.opmlImportResult?.skippedCount == 1)
     }
 
-    @Test("importOPML aborts early on persistence failure mid-import")
+    @Test("importOPML continues past persistence failures and reports partial progress")
     @MainActor
     func importOPMLPersistenceFailureMidImport() {
         let mockPersistence = MockFeedPersistenceService()
-        // First addFeed succeeds, second fails
+        // First addFeed succeeds, second and third fail
         mockPersistence.addFeedFailureAfterCount = 1
         let mockOPML = MockOPMLService()
         mockOPML.entriesToReturn = [
@@ -739,10 +739,11 @@ struct FeedListViewModelTests {
         let viewModel = Self.makeViewModel(persistence: mockPersistence, opmlService: mockOPML)
         viewModel.importOPML(from: Data())
 
-        // Only the first feed should have been added — import aborts on second
+        // First feed added successfully, remaining two failed — import continues
         #expect(viewModel.feeds.count == 1)
-        #expect(viewModel.opmlImportResult == nil)
-        #expect(viewModel.importExportErrorMessage != nil)
+        #expect(viewModel.opmlImportResult?.addedCount == 1)
+        #expect(viewModel.opmlImportResult?.failedCount == 2)
+        #expect(viewModel.importExportErrorMessage == "Added 1 of 3 new feed(s). 2 could not be saved.")
         #expect(viewModel.errorMessage == nil)
     }
 
@@ -1001,6 +1002,102 @@ struct FeedListViewModelTests {
         #expect(mockPersistence.memberships.count == 2)
         let groupNames = Set(mockPersistence.memberships.compactMap { $0.group?.name })
         #expect(groupNames == ["Tech", "Favorites"])
+    }
+
+    @Test("importOPML continues past group creation failure and still adds feed")
+    @MainActor
+    func importOPMLGroupCreationFailure() {
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.addGroupError = NSError(domain: "MockPersistence", code: 1)
+        let mockOPML = MockOPMLService()
+        mockOPML.entriesToReturn = [
+            OPMLFeedEntry(title: "Feed A", feedURL: URL(string: "https://a.com/feed")!, siteURL: nil, description: "", groupName: "Tech"),
+        ]
+
+        let viewModel = Self.makeViewModel(persistence: mockPersistence, opmlService: mockOPML)
+        viewModel.importOPML(from: Data())
+
+        // Feed should be added even though group creation failed.
+        #expect(viewModel.opmlImportResult?.addedCount == 1)
+        #expect(viewModel.opmlImportResult?.failedCount == 0)
+        #expect(mockPersistence.groups.isEmpty)
+        #expect(mockPersistence.memberships.isEmpty)
+    }
+
+    @Test("importOPML continues past group membership failure")
+    @MainActor
+    func importOPMLGroupMembershipFailure() {
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.addFeedToGroupError = NSError(domain: "MockPersistence", code: 1)
+        let mockOPML = MockOPMLService()
+        mockOPML.entriesToReturn = [
+            OPMLFeedEntry(title: "Feed A", feedURL: URL(string: "https://a.com/feed")!, siteURL: nil, description: "", groupName: "Tech"),
+        ]
+
+        let viewModel = Self.makeViewModel(persistence: mockPersistence, opmlService: mockOPML)
+        viewModel.importOPML(from: Data())
+
+        // Feed and group should be created, but membership fails silently.
+        #expect(viewModel.opmlImportResult?.addedCount == 1)
+        #expect(viewModel.opmlImportResult?.failedCount == 0)
+        #expect(mockPersistence.groups.count == 1)
+        #expect(mockPersistence.memberships.isEmpty)
+    }
+
+    @Test("importOPML reports distinct error for allGroups pre-loop failure")
+    @MainActor
+    func importOPMLAllGroupsPreLoopFailure() {
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.groupError = NSError(domain: "MockPersistence", code: 1)
+        let mockOPML = MockOPMLService()
+        mockOPML.entriesToReturn = [
+            TestFixtures.makeOPMLFeedEntry(title: "Feed A", feedURL: URL(string: "https://a.com/feed")!),
+        ]
+
+        let viewModel = Self.makeViewModel(persistence: mockPersistence, opmlService: mockOPML)
+        viewModel.importOPML(from: Data())
+
+        #expect(viewModel.importExportErrorMessage == "Unable to load existing groups. Import aborted.")
+        #expect(viewModel.opmlImportResult == nil)
+    }
+
+    @Test("importOPML reports distinct error for allFeeds pre-loop failure")
+    @MainActor
+    func importOPMLAllFeedsPreLoopFailure() {
+        let mockPersistence = MockFeedPersistenceService()
+        // Make only the first allFeeds() call fail (the pre-loop cache lookup),
+        // while the subsequent loadFeeds() call succeeds.
+        mockPersistence.allFeedsFailureCount = 1
+        let mockOPML = MockOPMLService()
+        mockOPML.entriesToReturn = [
+            TestFixtures.makeOPMLFeedEntry(title: "Feed A", feedURL: URL(string: "https://a.com/feed")!),
+        ]
+
+        let viewModel = Self.makeViewModel(persistence: mockPersistence, opmlService: mockOPML)
+        viewModel.importOPML(from: Data())
+
+        #expect(viewModel.importExportErrorMessage == "Unable to load existing feeds. Import aborted.")
+        #expect(viewModel.opmlImportResult == nil)
+    }
+
+    @Test("importOPML with all feeds failing reports zero added")
+    @MainActor
+    func importOPMLAllFeedsFail() {
+        let mockPersistence = MockFeedPersistenceService()
+        // All addFeed calls fail (after 0 successful)
+        mockPersistence.addFeedFailureAfterCount = 0
+        let mockOPML = MockOPMLService()
+        mockOPML.entriesToReturn = [
+            TestFixtures.makeOPMLFeedEntry(title: "Feed A", feedURL: URL(string: "https://a.com/feed")!),
+            TestFixtures.makeOPMLFeedEntry(title: "Feed B", feedURL: URL(string: "https://b.com/feed")!),
+        ]
+
+        let viewModel = Self.makeViewModel(persistence: mockPersistence, opmlService: mockOPML)
+        viewModel.importOPML(from: Data())
+
+        #expect(viewModel.opmlImportResult?.addedCount == 0)
+        #expect(viewModel.opmlImportResult?.failedCount == 2)
+        #expect(viewModel.importExportErrorMessage == "Added 0 of 2 new feed(s). 2 could not be saved.")
     }
 
     // MARK: - OPML Export with Groups

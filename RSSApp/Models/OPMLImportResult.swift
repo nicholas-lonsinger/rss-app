@@ -3,18 +3,21 @@ import Foundation
 struct OPMLImportResult: Sendable, Equatable {
     let addedCount: Int
     let skippedCount: Int
+    let failedCount: Int
     let groupsCreatedCount: Int
     let groupsReusedCount: Int
-    var totalInFile: Int { addedCount + skippedCount }
+    var totalInFile: Int { addedCount + skippedCount + failedCount }
 
     init(
         addedCount: Int,
         skippedCount: Int,
+        failedCount: Int = 0,
         groupsCreatedCount: Int = 0,
         groupsReusedCount: Int = 0
     ) {
         self.addedCount = addedCount
         self.skippedCount = skippedCount
+        self.failedCount = failedCount
         self.groupsCreatedCount = groupsCreatedCount
         self.groupsReusedCount = groupsReusedCount
     }

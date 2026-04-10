@@ -280,13 +280,23 @@ struct ImportExportView: View {
     // MARK: - Helpers
 
     private func importResultMessage(_ result: OPMLImportResult) -> String {
-        if result.addedCount == 0 && result.skippedCount > 0 {
+        var parts: [String] = []
+
+        if result.addedCount == 0 && result.skippedCount > 0 && result.failedCount == 0 {
             return "All \(result.skippedCount) feeds were already in your list."
-        } else if result.skippedCount == 0 {
-            return "Added \(result.addedCount) feed(s)."
-        } else {
-            return "Added \(result.addedCount) feed(s). \(result.skippedCount) duplicate(s) skipped."
         }
+
+        if result.addedCount > 0 {
+            parts.append("Added \(result.addedCount) feed(s).")
+        }
+        if result.skippedCount > 0 {
+            parts.append("\(result.skippedCount) duplicate(s) skipped.")
+        }
+        if result.failedCount > 0 {
+            parts.append("\(result.failedCount) feed(s) could not be saved.")
+        }
+
+        return parts.joined(separator: " ")
     }
 
     private func handleFileImport(_ result: Result<URL, any Error>) {

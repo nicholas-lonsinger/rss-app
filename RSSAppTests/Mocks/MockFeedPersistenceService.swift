@@ -17,6 +17,8 @@ final class MockFeedPersistenceService: FeedPersisting {
     var upsertArticlesError: (any Error)?
     var updateFeedCacheHeadersError: (any Error)?
     var addFeedFailureAfterCount: Int?
+    var addGroupError: (any Error)?
+    var addFeedToGroupError: (any Error)?
 
     /// When non-zero, `allFeeds()` throws on the first N calls and then
     /// begins returning `feeds` normally. Counter decrements per call.
@@ -342,7 +344,7 @@ final class MockFeedPersistenceService: FeedPersisting {
     }
 
     func addGroup(_ group: PersistentFeedGroup) throws {
-        if let error = groupError ?? errorToThrow { throw error }
+        if let error = addGroupError ?? groupError ?? errorToThrow { throw error }
         groups.append(group)
     }
 
@@ -358,7 +360,7 @@ final class MockFeedPersistenceService: FeedPersisting {
     }
 
     func addFeed(_ feed: PersistentFeed, to group: PersistentFeedGroup) throws {
-        if let error = groupError ?? errorToThrow { throw error }
+        if let error = addFeedToGroupError ?? groupError ?? errorToThrow { throw error }
         let alreadyExists = memberships.contains {
             $0.feed?.id == feed.id && $0.group?.id == group.id
         }
