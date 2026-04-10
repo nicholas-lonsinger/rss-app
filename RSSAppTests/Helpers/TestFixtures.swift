@@ -786,6 +786,7 @@ enum TestFixtures {
         feedURL: URL = URL(string: "https://example.com/feed")!,
         feedDescription: String = "A test feed",
         addedDate: Date = Date(timeIntervalSince1970: 1_711_800_000),
+        sortOrder: Int = 0,
         iconURL: URL? = nil,
         lastFetchError: String? = nil,
         lastFetchErrorDate: Date? = nil
@@ -796,6 +797,7 @@ enum TestFixtures {
             feedURL: feedURL,
             feedDescription: feedDescription,
             addedDate: addedDate,
+            sortOrder: sortOrder,
             iconURL: iconURL,
             lastFetchError: lastFetchError,
             lastFetchErrorDate: lastFetchErrorDate

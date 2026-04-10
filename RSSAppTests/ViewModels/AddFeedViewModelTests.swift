@@ -577,4 +577,52 @@ struct AddFeedViewModelTests {
         // Regression guard (see switchToAtomAlternateFallsBackOnFetchFailure).
         #expect(viewModel.urlInput == rssURL.absoluteString)
     }
+
+    // MARK: - sortOrder assignment
+
+    @Test("addFeed assigns nextSortOrder when existing feeds are present")
+    @MainActor
+    func addFeedAssignsNextSortOrder() async {
+        let mockFetching = MockFeedFetchingService()
+        mockFetching.feedToReturn = TestFixtures.makeFeed(title: "New Feed")
+        let mockPersistence = MockFeedPersistenceService()
+        // Pre-populate with two feeds at sortOrder 0 and 1.
+        mockPersistence.feeds = [
+            TestFixtures.makePersistentFeed(
+                title: "Existing A",
+                feedURL: URL(string: "https://a.com/feed")!,
+                sortOrder: 0
+            ),
+            TestFixtures.makePersistentFeed(
+                title: "Existing B",
+                feedURL: URL(string: "https://b.com/feed")!,
+                sortOrder: 1
+            )
+        ]
+
+        let viewModel = AddFeedViewModel(feedFetching: mockFetching, persistence: mockPersistence)
+        viewModel.urlInput = "https://example.com/feed"
+        await viewModel.addFeed()
+
+        #expect(viewModel.didAddFeed == true)
+        #expect(mockPersistence.feeds.count == 3)
+        let newFeed = mockPersistence.feeds.first { $0.title == "New Feed" }
+        #expect(newFeed?.sortOrder == 2)
+    }
+
+    @Test("addFeed assigns sortOrder 0 when no existing feeds")
+    @MainActor
+    func addFeedAssignsSortOrderZeroWhenEmpty() async {
+        let mockFetching = MockFeedFetchingService()
+        mockFetching.feedToReturn = TestFixtures.makeFeed(title: "First Feed")
+        let mockPersistence = MockFeedPersistenceService()
+
+        let viewModel = AddFeedViewModel(feedFetching: mockFetching, persistence: mockPersistence)
+        viewModel.urlInput = "https://example.com/feed"
+        await viewModel.addFeed()
+
+        #expect(viewModel.didAddFeed == true)
+        #expect(mockPersistence.feeds.count == 1)
+        #expect(mockPersistence.feeds[0].sortOrder == 0)
+    }
 }

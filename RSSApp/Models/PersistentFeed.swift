@@ -15,6 +15,12 @@ final class PersistentFeed {
     var feedDescription: String
     var addedDate: Date
 
+    /// Position within the feeds list. Defaults to `0` — existing feeds that
+    /// predate this field are assigned a deterministic order based on
+    /// `addedDate` at query time (secondary sort descriptor). Users can
+    /// customize the order via drag-to-reorder in the All Feeds list.
+    var sortOrder: Int
+
     // MARK: - Caching
 
     var lastRefreshDate: Date?
@@ -44,6 +50,7 @@ final class PersistentFeed {
         feedURL: URL,
         feedDescription: String = "",
         addedDate: Date = Date(),
+        sortOrder: Int = 0,
         lastRefreshDate: Date? = nil,
         etag: String? = nil,
         lastModifiedHeader: String? = nil,
@@ -56,6 +63,7 @@ final class PersistentFeed {
         self.feedURL = feedURL
         self.feedDescription = feedDescription
         self.addedDate = addedDate
+        self.sortOrder = sortOrder
         self.lastRefreshDate = lastRefreshDate
         self.etag = etag
         self.lastModifiedHeader = lastModifiedHeader

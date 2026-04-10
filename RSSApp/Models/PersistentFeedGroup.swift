@@ -13,9 +13,9 @@ final class PersistentFeedGroup {
 
     var createdDate: Date
 
-    /// Position within the groups list. Callers are expected to assign
-    /// incrementing values at creation time (see `HomeViewModel.addGroup`);
-    /// reserved for future drag-to-reorder support.
+    /// Position within the groups list. Callers assign incrementing values
+    /// at creation time (see `HomeViewModel.addGroup`); users can customize
+    /// the order via drag-to-reorder on the Home screen (issue #333).
     var sortOrder: Int
 
     // MARK: - Relationships

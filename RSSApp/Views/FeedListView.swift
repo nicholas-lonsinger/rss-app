@@ -154,6 +154,9 @@ struct FeedListView: View {
                 .onDelete { offsets in
                     viewModel.removeFeed(at: offsets)
                 }
+                .onMove { source, destination in
+                    viewModel.moveFeed(from: source, to: destination)
+                }
             }
             .listStyle(.plain)
             .refreshable {

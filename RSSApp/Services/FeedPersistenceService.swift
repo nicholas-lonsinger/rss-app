@@ -139,6 +139,12 @@ protocol FeedPersisting: Sendable {
     /// - Parameter articleIDs: The set of article IDs to delete.
     func deleteArticles(withIDs articleIDs: Set<String>) throws
 
+    // MARK: Feed reordering
+
+    /// Persists the display order of feeds by writing each feed's array index
+    /// into its `sortOrder` field and saving.
+    func updateFeedOrder(_ feeds: [PersistentFeed]) throws
+
     // MARK: Group operations
 
     /// Returns all feed groups, sorted by `sortOrder` then `createdDate`.
@@ -146,6 +152,9 @@ protocol FeedPersisting: Sendable {
     func addGroup(_ group: PersistentFeedGroup) throws
     func deleteGroup(_ group: PersistentFeedGroup) throws
     func renameGroup(_ group: PersistentFeedGroup, to name: String) throws
+    /// Persists the display order of groups by writing each group's array index
+    /// into its `sortOrder` field and saving.
+    func updateGroupOrder(_ groups: [PersistentFeedGroup]) throws
 
     /// Adds a feed to a group. No-op if the membership already exists.
     func addFeed(_ feed: PersistentFeed, to group: PersistentFeedGroup) throws
@@ -165,6 +174,7 @@ protocol FeedPersisting: Sendable {
     ///   - limit: Maximum number of articles to return.
     ///   - ascending: When `true`, sorts oldest first; when `false`, sorts newest first.
     func articles(in group: PersistentFeedGroup, cursor: ArticlePaginationCursor?, limit: Int, ascending: Bool) throws -> [PersistentArticle]
+
     /// Returns the total number of unread articles across all feeds in the group.
     func unreadCount(in group: PersistentFeedGroup) throws -> Int
     /// Marks all articles in all feeds belonging to the group as read.
@@ -192,7 +202,7 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
 
     func allFeeds() throws -> [PersistentFeed] {
         let descriptor = FetchDescriptor<PersistentFeed>(
-            sortBy: [SortDescriptor(\.addedDate)]
+            sortBy: [SortDescriptor(\.sortOrder), SortDescriptor(\.addedDate)]
         )
         let feeds = try modelContext.fetch(descriptor)
         Self.logger.debug("Fetched \(feeds.count, privacy: .public) feeds")
@@ -855,6 +865,16 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
         }
     }
 
+    // MARK: - Feed Reordering
+
+    func updateFeedOrder(_ feeds: [PersistentFeed]) throws {
+        for (index, feed) in feeds.enumerated() {
+            feed.sortOrder = index
+        }
+        try modelContext.save()
+        Self.logger.notice("Updated feed order for \(feeds.count, privacy: .public) feeds")
+    }
+
     // MARK: - Group Operations
 
     func allGroups() throws -> [PersistentFeedGroup] {
@@ -892,6 +912,14 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
         group.name = name
         try modelContext.save()
         Self.logger.notice("Renamed group '\(previousName, privacy: .public)' to '\(name, privacy: .public)'")
+    }
+
+    func updateGroupOrder(_ groups: [PersistentFeedGroup]) throws {
+        for (index, group) in groups.enumerated() {
+            group.sortOrder = index
+        }
+        try modelContext.save()
+        Self.logger.notice("Updated group order for \(groups.count, privacy: .public) groups")
     }
 
     func addFeed(_ feed: PersistentFeed, to group: PersistentFeedGroup) throws {

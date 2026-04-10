@@ -66,6 +66,25 @@ final class FeedListViewModel {
         }
     }
 
+    /// Reorders feeds by moving the items at `source` to `destination`.
+    /// Called by SwiftUI's `onMove` modifier on the feed list.
+    func moveFeed(from source: IndexSet, to destination: Int) {
+        feeds.move(fromOffsets: source, toOffset: destination)
+        do {
+            try persistence.updateFeedOrder(feeds)
+            Self.logger.notice("Reordered feeds (moved to index \(destination, privacy: .public))")
+        } catch {
+            // Reload to restore the persisted order on failure.
+            loadFeeds()
+            // Only set the reorder error if loadFeeds() didn't already surface
+            // a more severe error (e.g. "Unable to load your feeds.").
+            if errorMessage == nil {
+                errorMessage = "Unable to reorder feeds."
+            }
+            Self.logger.error("Failed to persist feed reorder: \(error, privacy: .public)")
+        }
+    }
+
     func removeFeed(_ feed: PersistentFeed) {
         let previousFeeds = feeds
         let feedID = feed.id
@@ -174,6 +193,11 @@ final class FeedListViewModel {
             return
         }
 
+        // Track the next sortOrder for newly-added feeds so they appear after
+        // any user-customized order rather than defaulting to 0 and displacing
+        // existing feeds.
+        var nextFeedSortOrder = (feedsByURL.values.map(\.sortOrder).max() ?? -1) + 1
+
         // Track which group names were created vs. reused during this import
         // to avoid double-counting when multiple entries reference the same group.
         var createdGroupNames: Set<String> = []
@@ -191,13 +215,15 @@ final class FeedListViewModel {
                 let newFeed = PersistentFeed(
                     title: entry.title,
                     feedURL: entry.feedURL,
-                    feedDescription: entry.description
+                    feedDescription: entry.description,
+                    sortOrder: nextFeedSortOrder
                 )
                 do {
                     try persistence.addFeed(newFeed)
                     feedsByURL[entry.feedURL] = newFeed
                     feed = newFeed
                     addedCount += 1
+                    nextFeedSortOrder += 1
                 } catch {
                     failedCount += 1
                     Self.logger.error("Failed to add feed '\(entry.title, privacy: .public)': \(error, privacy: .public)")
