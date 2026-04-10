@@ -49,6 +49,27 @@ struct HomeViewModelGroupReorderTests {
         #expect(viewModel.errorMessage != nil)
     }
 
+    @Test("moveGroup does not clobber loadGroups error with reorder error")
+    @MainActor
+    func moveGroupDoesNotClobberLoadError() {
+        let mockPersistence = MockFeedPersistenceService()
+        let groupA = PersistentFeedGroup(name: "Alpha", sortOrder: 0)
+        mockPersistence.groups = [groupA]
+
+        let viewModel = HomeViewModel(persistence: mockPersistence)
+        viewModel.loadGroups()
+
+        // Inject error for updateGroupOrder AND allGroups (so loadGroups() also fails).
+        mockPersistence.updateGroupOrderError = NSError(domain: "test", code: 1)
+        mockPersistence.groupError = NSError(domain: "test", code: 2)
+
+        viewModel.moveGroup(from: IndexSet(integer: 0), to: 0)
+
+        // loadGroups() failure ("Unable to load groups.") should NOT be
+        // overwritten by the less severe "Unable to reorder groups."
+        #expect(viewModel.errorMessage == "Unable to load groups.")
+    }
+
     @Test("moveGroup moves last group to middle position")
     @MainActor
     func moveGroupToMiddle() {

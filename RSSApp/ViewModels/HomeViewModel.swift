@@ -450,7 +450,11 @@ final class HomeViewModel {
         } catch {
             // Reload to restore the persisted order on failure.
             loadGroups()
-            errorMessage = "Unable to reorder groups."
+            // Only set the reorder error if loadGroups() didn't already surface
+            // a more severe error (e.g. "Unable to load groups.").
+            if errorMessage == nil {
+                errorMessage = "Unable to reorder groups."
+            }
             Self.logger.error("Failed to persist group reorder: \(error, privacy: .public)")
         }
     }

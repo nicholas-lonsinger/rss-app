@@ -86,6 +86,38 @@ struct FeedListViewModelReorderTests {
         #expect(viewModel.errorMessage != nil)
     }
 
+    @Test("moveFeed does not clobber loadFeeds error with reorder error")
+    @MainActor
+    func moveFeedDoesNotClobberLoadError() {
+        let mockPersistence = MockFeedPersistenceService()
+        let feedA = TestFixtures.makePersistentFeed(
+            title: "Alpha",
+            feedURL: URL(string: "https://alpha.com/feed")!,
+            addedDate: Date(timeIntervalSince1970: 1_000_000),
+            sortOrder: 0
+        )
+        mockPersistence.feeds = [feedA]
+
+        let mockIconService = MockFeedIconService()
+        let refreshService = FeedRefreshService(persistence: mockPersistence, feedIconService: mockIconService)
+        let viewModel = FeedListViewModel(
+            persistence: mockPersistence,
+            refreshService: refreshService,
+            feedIconService: mockIconService
+        )
+        viewModel.loadFeeds()
+
+        // Inject error for updateFeedOrder AND allFeeds (so loadFeeds() also fails).
+        mockPersistence.updateFeedOrderError = NSError(domain: "test", code: 1)
+        mockPersistence.allFeedsFailureCount = 1
+
+        viewModel.moveFeed(from: IndexSet(integer: 0), to: 0)
+
+        // loadFeeds() failure ("Unable to load your feeds.") should NOT be
+        // overwritten by the less severe "Unable to reorder feeds."
+        #expect(viewModel.errorMessage == "Unable to load your feeds.")
+    }
+
     @Test("moveFeed moves first feed to end")
     @MainActor
     func moveFeedToEnd() {

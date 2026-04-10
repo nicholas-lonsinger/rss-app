@@ -139,8 +139,6 @@ protocol FeedPersisting: Sendable {
     /// - Parameter articleIDs: The set of article IDs to delete.
     func deleteArticles(withIDs articleIDs: Set<String>) throws
 
-    // MARK: Group operations
-
     // MARK: Feed reordering
 
     /// Persists the display order of feeds by writing each feed's array index
@@ -154,6 +152,9 @@ protocol FeedPersisting: Sendable {
     func addGroup(_ group: PersistentFeedGroup) throws
     func deleteGroup(_ group: PersistentFeedGroup) throws
     func renameGroup(_ group: PersistentFeedGroup, to name: String) throws
+    /// Persists the display order of groups by writing each group's array index
+    /// into its `sortOrder` field and saving.
+    func updateGroupOrder(_ groups: [PersistentFeedGroup]) throws
 
     /// Adds a feed to a group. No-op if the membership already exists.
     func addFeed(_ feed: PersistentFeed, to group: PersistentFeedGroup) throws
@@ -173,9 +174,6 @@ protocol FeedPersisting: Sendable {
     ///   - limit: Maximum number of articles to return.
     ///   - ascending: When `true`, sorts oldest first; when `false`, sorts newest first.
     func articles(in group: PersistentFeedGroup, cursor: ArticlePaginationCursor?, limit: Int, ascending: Bool) throws -> [PersistentArticle]
-    /// Persists the display order of groups by writing each group's array index
-    /// into its `sortOrder` field and saving.
-    func updateGroupOrder(_ groups: [PersistentFeedGroup]) throws
 
     /// Returns the total number of unread articles across all feeds in the group.
     func unreadCount(in group: PersistentFeedGroup) throws -> Int

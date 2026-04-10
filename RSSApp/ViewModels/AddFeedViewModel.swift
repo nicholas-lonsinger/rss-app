@@ -225,10 +225,25 @@ final class AddFeedViewModel {
     /// path needs to defer dismissal until the user acknowledges the notice,
     /// which is why the signal is separated from the persistence step.
     private func persistFetchedFeed(_ rssFeed: RSSFeed, url: URL) -> Bool {
+        // Compute nextSortOrder so the new feed appears at the end of any
+        // user-customized order, not at position 0 where it would displace
+        // existing feeds.
+        let nextSortOrder: Int
+        do {
+            let existingFeeds = try persistence.allFeeds()
+            nextSortOrder = (existingFeeds.map(\.sortOrder).max() ?? -1) + 1
+        } catch {
+            // If we can't read existing feeds, default to 0. The feed will
+            // still be added; ordering is best-effort.
+            nextSortOrder = 0
+            Self.logger.warning("Could not compute nextSortOrder, defaulting to 0: \(error, privacy: .public)")
+        }
+
         let newFeed = PersistentFeed(
             title: rssFeed.title,
             feedURL: url,
-            feedDescription: rssFeed.feedDescription
+            feedDescription: rssFeed.feedDescription,
+            sortOrder: nextSortOrder
         )
         do {
             try persistence.addFeed(newFeed)

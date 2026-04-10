@@ -1322,4 +1322,34 @@ struct FeedListViewModelTests {
         #expect(viewModel.errorMessage == nil)
     }
 
+    // MARK: - OPML Import sortOrder
+
+    @Test("importOPML assigns incrementing sortOrder starting after existing feeds")
+    @MainActor
+    func importOPMLAssignsNextSortOrder() {
+        let mockPersistence = MockFeedPersistenceService()
+        // Pre-populate with an existing feed at sortOrder 5
+        mockPersistence.feeds = [
+            TestFixtures.makePersistentFeed(
+                title: "Existing",
+                feedURL: URL(string: "https://existing.com/feed")!,
+                sortOrder: 5
+            )
+        ]
+        let mockOPML = MockOPMLService()
+        mockOPML.entriesToReturn = [
+            TestFixtures.makeOPMLFeedEntry(title: "Import A", feedURL: URL(string: "https://a.com/feed")!),
+            TestFixtures.makeOPMLFeedEntry(title: "Import B", feedURL: URL(string: "https://b.com/feed")!),
+        ]
+
+        let viewModel = Self.makeViewModel(persistence: mockPersistence, opmlService: mockOPML)
+        viewModel.importOPML(from: Data())
+
+        #expect(viewModel.opmlImportResult?.addedCount == 2)
+        let importA = mockPersistence.feeds.first { $0.title == "Import A" }
+        let importB = mockPersistence.feeds.first { $0.title == "Import B" }
+        #expect(importA?.sortOrder == 6)
+        #expect(importB?.sortOrder == 7)
+    }
+
 }
