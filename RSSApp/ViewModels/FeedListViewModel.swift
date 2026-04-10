@@ -142,6 +142,7 @@ final class FeedListViewModel {
         var failedCount = 0
         var groupsCreatedCount = 0
         var groupsReusedCount = 0
+        var groupsFailedCount = 0
 
         // Build a cache of existing groups by name so we can reuse them.
         var groupsByName: [String: PersistentFeedGroup]
@@ -225,6 +226,7 @@ final class FeedListViewModel {
                         createdGroupNames.insert(groupName)
                         reusedGroupNames.remove(groupName)
                     } catch {
+                        groupsFailedCount += 1
                         Self.logger.error("Failed to create group '\(groupName, privacy: .public)': \(error, privacy: .public)")
                         continue
                     }
@@ -232,6 +234,7 @@ final class FeedListViewModel {
                 do {
                     try persistence.addFeed(feed, to: group)
                 } catch {
+                    groupsFailedCount += 1
                     Self.logger.error("Failed to assign feed '\(entry.title, privacy: .public)' to group '\(groupName, privacy: .public)': \(error, privacy: .public)")
                 }
             }
@@ -246,14 +249,11 @@ final class FeedListViewModel {
             skippedCount: skippedCount,
             failedCount: failedCount,
             groupsCreatedCount: groupsCreatedCount,
-            groupsReusedCount: groupsReusedCount
+            groupsReusedCount: groupsReusedCount,
+            groupsFailedCount: groupsFailedCount
         )
-        if failedCount > 0 {
-            importExportErrorMessage = "Added \(addedCount) of \(addedCount + failedCount) new feed(s). \(failedCount) could not be saved."
-        } else {
-            importExportErrorMessage = nil
-        }
-        Self.logger.notice("OPML import: added \(addedCount, privacy: .public), skipped \(skippedCount, privacy: .public), failed \(failedCount, privacy: .public), groups created \(groupsCreatedCount, privacy: .public), groups reused \(groupsReusedCount, privacy: .public)")
+        importExportErrorMessage = nil
+        Self.logger.notice("OPML import: added \(addedCount, privacy: .public), skipped \(skippedCount, privacy: .public), failed \(failedCount, privacy: .public), groups created \(groupsCreatedCount, privacy: .public), groups reused \(groupsReusedCount, privacy: .public), groups failed \(groupsFailedCount, privacy: .public)")
     }
 
     func exportOPML() {

@@ -743,7 +743,7 @@ struct FeedListViewModelTests {
         #expect(viewModel.feeds.count == 1)
         #expect(viewModel.opmlImportResult?.addedCount == 1)
         #expect(viewModel.opmlImportResult?.failedCount == 2)
-        #expect(viewModel.importExportErrorMessage == "Added 1 of 3 new feed(s). 2 could not be saved.")
+        #expect(viewModel.importExportErrorMessage == nil)
         #expect(viewModel.errorMessage == nil)
     }
 
@@ -1020,6 +1020,7 @@ struct FeedListViewModelTests {
         // Feed should be added even though group creation failed.
         #expect(viewModel.opmlImportResult?.addedCount == 1)
         #expect(viewModel.opmlImportResult?.failedCount == 0)
+        #expect(viewModel.opmlImportResult?.groupsFailedCount == 1)
         #expect(mockPersistence.groups.isEmpty)
         #expect(mockPersistence.memberships.isEmpty)
     }
@@ -1037,9 +1038,10 @@ struct FeedListViewModelTests {
         let viewModel = Self.makeViewModel(persistence: mockPersistence, opmlService: mockOPML)
         viewModel.importOPML(from: Data())
 
-        // Feed and group should be created, but membership fails silently.
+        // Feed and group should be created, but membership assignment fails.
         #expect(viewModel.opmlImportResult?.addedCount == 1)
         #expect(viewModel.opmlImportResult?.failedCount == 0)
+        #expect(viewModel.opmlImportResult?.groupsFailedCount == 1)
         #expect(mockPersistence.groups.count == 1)
         #expect(mockPersistence.memberships.isEmpty)
     }
@@ -1097,7 +1099,7 @@ struct FeedListViewModelTests {
 
         #expect(viewModel.opmlImportResult?.addedCount == 0)
         #expect(viewModel.opmlImportResult?.failedCount == 2)
-        #expect(viewModel.importExportErrorMessage == "Added 0 of 2 new feed(s). 2 could not be saved.")
+        #expect(viewModel.importExportErrorMessage == nil)
     }
 
     // MARK: - OPML Export with Groups

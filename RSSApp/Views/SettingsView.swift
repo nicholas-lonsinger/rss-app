@@ -282,7 +282,7 @@ struct ImportExportView: View {
     private func importResultMessage(_ result: OPMLImportResult) -> String {
         var parts: [String] = []
 
-        if result.addedCount == 0 && result.skippedCount > 0 && result.failedCount == 0 {
+        if result.addedCount == 0 && result.skippedCount > 0 && result.failedCount == 0 && result.groupsFailedCount == 0 {
             return "All \(result.skippedCount) feeds were already in your list."
         }
 
@@ -294,6 +294,13 @@ struct ImportExportView: View {
         }
         if result.failedCount > 0 {
             parts.append("\(result.failedCount) feed(s) could not be saved.")
+        }
+        if result.groupsFailedCount > 0 {
+            parts.append("\(result.groupsFailedCount) group assignment(s) failed.")
+        }
+
+        if parts.isEmpty {
+            return "No feeds were found in the file."
         }
 
         return parts.joined(separator: " ")
