@@ -139,8 +139,10 @@ final class FeedListViewModel {
 
         var addedCount = 0
         var skippedCount = 0
+        var failedCount = 0
         var groupsCreatedCount = 0
         var groupsReusedCount = 0
+        var groupsFailedCount = 0
 
         // Build a cache of existing groups by name so we can reuse them.
         var groupsByName: [String: PersistentFeedGroup]
@@ -151,7 +153,7 @@ final class FeedListViewModel {
                 uniquingKeysWith: { first, _ in first }
             )
         } catch {
-            importExportErrorMessage = "Unable to save imported feeds."
+            importExportErrorMessage = "Unable to load existing groups. Import aborted."
             Self.logger.error("Failed to load existing groups: \(error, privacy: .public)")
             loadFeeds()
             return
@@ -166,7 +168,7 @@ final class FeedListViewModel {
                 uniquingKeysWith: { first, _ in first }
             )
         } catch {
-            importExportErrorMessage = "Unable to save imported feeds."
+            importExportErrorMessage = "Unable to load existing feeds. Import aborted."
             Self.logger.error("Failed to load existing feeds: \(error, privacy: .public)")
             loadFeeds()
             return
@@ -178,52 +180,63 @@ final class FeedListViewModel {
         var reusedGroupNames: Set<String> = []
 
         for entry in entries {
-            do {
-                let feed: PersistentFeed
+            // --- Add or look up the feed ---
+            let feed: PersistentFeed
 
-                if let existingFeed = feedsByURL[entry.feedURL] {
-                    feed = existingFeed
-                    skippedCount += 1
-                    Self.logger.debug("Skipped duplicate: \(entry.feedURL.absoluteString, privacy: .public)")
-                } else {
-                    let newFeed = PersistentFeed(
-                        title: entry.title,
-                        feedURL: entry.feedURL,
-                        feedDescription: entry.description
-                    )
+            if let existingFeed = feedsByURL[entry.feedURL] {
+                feed = existingFeed
+                skippedCount += 1
+                Self.logger.debug("Skipped duplicate: \(entry.feedURL.absoluteString, privacy: .public)")
+            } else {
+                let newFeed = PersistentFeed(
+                    title: entry.title,
+                    feedURL: entry.feedURL,
+                    feedDescription: entry.description
+                )
+                do {
                     try persistence.addFeed(newFeed)
                     feedsByURL[entry.feedURL] = newFeed
                     feed = newFeed
                     addedCount += 1
+                } catch {
+                    failedCount += 1
+                    Self.logger.error("Failed to add feed '\(entry.title, privacy: .public)': \(error, privacy: .public)")
+                    continue
                 }
+            }
 
-                // Assign the feed to its OPML category group if present.
-                if let groupName = entry.groupName {
-                    let group: PersistentFeedGroup
-                    if let existingGroup = groupsByName[groupName] {
-                        group = existingGroup
-                        if !createdGroupNames.contains(groupName) {
-                            reusedGroupNames.insert(groupName)
-                        }
-                    } else {
-                        let maxSortOrder = groupsByName.values.map(\.sortOrder).max() ?? -1
-                        let newGroup = PersistentFeedGroup(
-                            name: groupName,
-                            sortOrder: maxSortOrder + 1
-                        )
+            // --- Assign the feed to its OPML category group if present ---
+            if let groupName = entry.groupName {
+                let group: PersistentFeedGroup
+                if let existingGroup = groupsByName[groupName] {
+                    group = existingGroup
+                    if !createdGroupNames.contains(groupName) {
+                        reusedGroupNames.insert(groupName)
+                    }
+                } else {
+                    let maxSortOrder = groupsByName.values.map(\.sortOrder).max() ?? -1
+                    let newGroup = PersistentFeedGroup(
+                        name: groupName,
+                        sortOrder: maxSortOrder + 1
+                    )
+                    do {
                         try persistence.addGroup(newGroup)
                         groupsByName[groupName] = newGroup
                         group = newGroup
                         createdGroupNames.insert(groupName)
                         reusedGroupNames.remove(groupName)
+                    } catch {
+                        groupsFailedCount += 1
+                        Self.logger.error("Failed to create group '\(groupName, privacy: .public)': \(error, privacy: .public)")
+                        continue
                     }
-                    try persistence.addFeed(feed, to: group)
                 }
-            } catch {
-                importExportErrorMessage = "Unable to save imported feeds."
-                Self.logger.error("Failed to persist OPML import: \(error, privacy: .public)")
-                loadFeeds()
-                return
+                do {
+                    try persistence.addFeed(feed, to: group)
+                } catch {
+                    groupsFailedCount += 1
+                    Self.logger.error("Failed to assign feed '\(entry.title, privacy: .public)' to group '\(groupName, privacy: .public)': \(error, privacy: .public)")
+                }
             }
         }
 
@@ -234,11 +247,13 @@ final class FeedListViewModel {
         opmlImportResult = OPMLImportResult(
             addedCount: addedCount,
             skippedCount: skippedCount,
+            failedCount: failedCount,
             groupsCreatedCount: groupsCreatedCount,
-            groupsReusedCount: groupsReusedCount
+            groupsReusedCount: groupsReusedCount,
+            groupsFailedCount: groupsFailedCount
         )
         importExportErrorMessage = nil
-        Self.logger.notice("OPML import: added \(addedCount, privacy: .public), skipped \(skippedCount, privacy: .public), groups created \(groupsCreatedCount, privacy: .public), groups reused \(groupsReusedCount, privacy: .public)")
+        Self.logger.notice("OPML import: added \(addedCount, privacy: .public), skipped \(skippedCount, privacy: .public), failed \(failedCount, privacy: .public), groups created \(groupsCreatedCount, privacy: .public), groups reused \(groupsReusedCount, privacy: .public), groups failed \(groupsFailedCount, privacy: .public)")
     }
 
     func exportOPML() {
