@@ -139,9 +139,15 @@ final class GroupArticleSource: ArticleListSource {
 
     // MARK: - Private
 
+    /// Cursor tracking the last article in the current snapshot for efficient
+    /// cursor-based pagination. Reset to `nil` on full reload (sort change,
+    /// refresh) so the first page re-fetches from the start.
+    private var paginationCursor: ArticlePaginationCursor?
+
     private func loadArticles() {
         let previous = articles
         articles = []
+        paginationCursor = nil
         hasMore = true
         loadMore()
         if articles.isEmpty && errorMessage != nil {
@@ -156,7 +162,7 @@ final class GroupArticleSource: ArticleListSource {
         do {
             let page = try persistence.articles(
                 in: group,
-                offset: articles.count,
+                cursor: paginationCursor,
                 limit: HomeViewModel.pageSize,
                 ascending: ascending
             )
@@ -164,6 +170,15 @@ final class GroupArticleSource: ArticleListSource {
             let newItems = page.filter { !existingIDs.contains($0.articleID) }
             articles.append(contentsOf: newItems)
             hasMore = page.count == HomeViewModel.pageSize
+
+            // Advance the cursor to the last article in the page for the next fetch.
+            if let last = page.last {
+                paginationCursor = ArticlePaginationCursor(
+                    sortDate: last.sortDate,
+                    articleID: last.articleID
+                )
+            }
+
             Self.logger.debug("Loaded \(page.count, privacy: .public) articles for group '\(self.group.name, privacy: .public)' (\(newItems.count, privacy: .public) new, total: \(self.articles.count, privacy: .public))")
             return newItems.isEmpty ? .exhausted : .loaded
         } catch {

@@ -150,12 +150,12 @@ struct FeedPersistenceGroupTests {
         mock.articlesByFeedID[feedIn.id] = [a1]
         mock.articlesByFeedID[feedOut.id] = [a2]
 
-        let articles = try mock.articles(in: group, offset: 0, limit: 50, ascending: false)
+        let articles = try mock.articles(in: group, cursor: nil, limit: 50, ascending: false)
         #expect(articles.count == 1)
         #expect(articles.first?.articleID == "in1")
     }
 
-    @Test("articles(in:) respects offset and limit")
+    @Test("articles(in:) respects cursor and limit")
     @MainActor
     func articlesInGroupPagination() throws {
         let mock = MockFeedPersistenceService()
@@ -177,10 +177,15 @@ struct FeedPersistenceGroupTests {
         }
         mock.articlesByFeedID[feed.id] = articles
 
-        let page1 = try mock.articles(in: group, offset: 0, limit: 3, ascending: false)
+        let page1 = try mock.articles(in: group, cursor: nil, limit: 3, ascending: false)
         #expect(page1.count == 3)
 
-        let page2 = try mock.articles(in: group, offset: 3, limit: 3, ascending: false)
+        // Use the last article from page1 as the cursor for page2
+        let cursor = ArticlePaginationCursor(
+            sortDate: page1.last!.sortDate,
+            articleID: page1.last!.articleID
+        )
+        let page2 = try mock.articles(in: group, cursor: cursor, limit: 3, ascending: false)
         #expect(page2.count == 3)
 
         // No overlap
