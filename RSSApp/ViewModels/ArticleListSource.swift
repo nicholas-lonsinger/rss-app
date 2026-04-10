@@ -146,6 +146,32 @@ protocol ArticleListSource: AnyObject, Observable {
     // MARK: - Error dismissal
 
     func clearError()
+
+    // MARK: - Group editing (optional capability)
+
+    /// Whether this source supports in-screen group editing (Edit Group /
+    /// Delete Group). Only `GroupArticleSource` returns `true`.
+    var supportsGroupEdit: Bool { get }
+
+    /// The underlying `PersistentFeedGroup` for sources that support group
+    /// editing. `nil` for all non-group sources.
+    var editableGroup: PersistentFeedGroup? { get }
+
+    /// Deletes the group backing this source. Called after the user confirms
+    /// the delete alert. After this call, `wasGroupDeleted` must become `true`
+    /// so `ArticleListScreen` can dismiss and pop the navigation stack.
+    func deleteGroup()
+
+    /// Becomes `true` after a successful `deleteGroup()` call. Observed by
+    /// `ArticleListScreen` to trigger auto-dismiss (pop back to Home).
+    var wasGroupDeleted: Bool { get }
+
+    /// Error message set when `deleteGroup()` fails. Distinct from `errorMessage`
+    /// so the delete-error alert fires regardless of whether the article list is
+    /// empty — the `errorAlertBinding` gates on `!source.articles.isEmpty` to
+    /// avoid conflicts with the empty-state error row, but delete errors must
+    /// always surface to the user.
+    var deleteErrorMessage: String? { get }
 }
 
 /// A shared logger used by the `ArticleListSource` protocol extension defaults
@@ -155,19 +181,11 @@ private let articleListSourceLogger = Logger(category: "ArticleListSource")
 extension ArticleListSource {
     func onDisappear() {}
 
-    // MARK: - Group editing (optional capability)
+    // MARK: - Group editing defaults
 
-    /// Whether this source supports in-screen group editing (Edit Group /
-    /// Delete Group). Only `GroupArticleSource` returns `true`.
     var supportsGroupEdit: Bool { false }
-
-    /// The underlying `PersistentFeedGroup` for sources that support group
-    /// editing. `nil` for all non-group sources.
     var editableGroup: PersistentFeedGroup? { nil }
 
-    /// Deletes the group backing this source. Called after the user confirms
-    /// the delete alert. After this call, `wasGroupDeleted` must become `true`
-    /// so `ArticleListScreen` can dismiss and pop the navigation stack.
     func deleteGroup() {
         // RATIONALE: Defensive fault log + assertionFailure per project guidelines.
         // This default fires only if a non-group source accidentally receives a
@@ -176,14 +194,6 @@ extension ArticleListSource {
         assertionFailure("deleteGroup() called on a source that does not support group editing")
     }
 
-    /// Becomes `true` after a successful `deleteGroup()` call. Observed by
-    /// `ArticleListScreen` to trigger auto-dismiss (pop back to Home).
     var wasGroupDeleted: Bool { false }
-
-    /// Error message set when `deleteGroup()` fails. Distinct from `errorMessage`
-    /// so the delete-error alert fires regardless of whether the article list is
-    /// empty — the `errorAlertBinding` gates on `!source.articles.isEmpty` to
-    /// avoid conflicts with the empty-state error row, but delete errors must
-    /// always surface to the user.
     var deleteErrorMessage: String? { nil }
 }
