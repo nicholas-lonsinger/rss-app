@@ -88,7 +88,11 @@ struct OPMLService: OPMLServing {
 
         // Emit category outlines in alphabetical order for deterministic output.
         for categoryName in categoryFeeds.keys.sorted() {
-            let feeds = categoryFeeds[categoryName]!
+            guard let feeds = categoryFeeds[categoryName] else {
+                Self.logger.fault("Category '\(categoryName, privacy: .public)' missing from categoryFeeds despite iterating its keys")
+                assertionFailure("Category '\(categoryName)' missing from categoryFeeds despite iterating its keys")
+                continue
+            }
             xml += "    <outline text=\"\(xmlEscape(categoryName))\">\n"
             for feed in feeds {
                 xml += "      <outline text=\"\(xmlEscape(feed.title))\" type=\"rss\""
@@ -180,20 +184,18 @@ private final class OPMLParserDelegate: NSObject, XMLParserDelegate, @unchecked 
         case "outline":
             guard foundBody else { return }
 
-            let xmlUrlString = attributeDict["xmlUrl"]?.trimmingCharacters(in: .whitespacesAndNewlines)
-            let hasXmlUrl = xmlUrlString != nil && !xmlUrlString!.isEmpty
-
-            if hasXmlUrl {
+            if let xmlUrlString = attributeDict["xmlUrl"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !xmlUrlString.isEmpty {
                 // This is a feed outline.
-                guard let feedURL = URL(string: xmlUrlString!) else {
-                    Self.logger.warning("Skipped outline with unparseable xmlUrl: '\(xmlUrlString!, privacy: .public)'")
+                guard let feedURL = URL(string: xmlUrlString) else {
+                    Self.logger.warning("Skipped outline with unparseable xmlUrl: '\(xmlUrlString, privacy: .public)'")
                     outlinePushedCategory.append(false)
                     return
                 }
 
                 let title = attributeDict["text"]
                     ?? attributeDict["title"]
-                    ?? xmlUrlString!
+                    ?? xmlUrlString
 
                 let siteURL: URL?
                 if let htmlUrlString = attributeDict["htmlUrl"] {
@@ -225,6 +227,7 @@ private final class OPMLParserDelegate: NSObject, XMLParserDelegate, @unchecked 
                     categoryStack.append(categoryName)
                     outlinePushedCategory.append(true)
                 } else {
+                    Self.logger.warning("Skipped category outline with empty name at line \(parser.lineNumber, privacy: .public) — nested feeds will be ungrouped")
                     outlinePushedCategory.append(false)
                 }
             }
@@ -241,7 +244,10 @@ private final class OPMLParserDelegate: NSObject, XMLParserDelegate, @unchecked 
         qualifiedName: String?
     ) {
         guard elementName == "outline", foundBody else { return }
-        guard let pushedCategory = outlinePushedCategory.popLast() else { return }
+        guard let pushedCategory = outlinePushedCategory.popLast() else {
+            Self.logger.warning("Outline stack underflow in didEndElement — remaining group assignments may be incorrect")
+            return
+        }
         if pushedCategory {
             categoryStack.removeLast()
         }

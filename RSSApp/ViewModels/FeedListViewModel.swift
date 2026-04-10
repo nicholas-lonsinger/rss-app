@@ -157,6 +157,21 @@ final class FeedListViewModel {
             return
         }
 
+        // Build a cache of existing feeds by URL so duplicate lookups are O(1).
+        var feedsByURL: [URL: PersistentFeed]
+        do {
+            let existingFeeds = try persistence.allFeeds()
+            feedsByURL = Dictionary(
+                existingFeeds.map { ($0.feedURL, $0) },
+                uniquingKeysWith: { first, _ in first }
+            )
+        } catch {
+            importExportErrorMessage = "Unable to save imported feeds."
+            Self.logger.error("Failed to load existing feeds: \(error, privacy: .public)")
+            loadFeeds()
+            return
+        }
+
         // Track which group names were created vs. reused during this import
         // to avoid double-counting when multiple entries reference the same group.
         var createdGroupNames: Set<String> = []
@@ -164,16 +179,9 @@ final class FeedListViewModel {
 
         for entry in entries {
             do {
-                let feedAlreadyExists = try persistence.feedExists(url: entry.feedURL)
                 let feed: PersistentFeed
 
-                if feedAlreadyExists {
-                    // Find the existing feed so we can still assign it to groups.
-                    let allFeeds = try persistence.allFeeds()
-                    guard let existingFeed = allFeeds.first(where: { $0.feedURL == entry.feedURL }) else {
-                        skippedCount += 1
-                        continue
-                    }
+                if let existingFeed = feedsByURL[entry.feedURL] {
                     feed = existingFeed
                     skippedCount += 1
                     Self.logger.debug("Skipped duplicate: \(entry.feedURL.absoluteString, privacy: .public)")
@@ -184,6 +192,7 @@ final class FeedListViewModel {
                         feedDescription: entry.description
                     )
                     try persistence.addFeed(newFeed)
+                    feedsByURL[entry.feedURL] = newFeed
                     feed = newFeed
                     addedCount += 1
                 }
