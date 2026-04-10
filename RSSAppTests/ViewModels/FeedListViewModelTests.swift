@@ -874,6 +874,170 @@ struct FeedListViewModelTests {
         #expect(viewModel.opmlExportURL != nil)
     }
 
+    // MARK: - OPML Import with Groups
+
+    @Test("importOPML creates groups from OPML categories")
+    @MainActor
+    func importOPMLCreatesGroups() {
+        let mockPersistence = MockFeedPersistenceService()
+        let mockOPML = MockOPMLService()
+        mockOPML.entriesToReturn = [
+            OPMLFeedEntry(title: "Tech Feed", feedURL: URL(string: "https://tech.com/feed")!, siteURL: nil, description: "", groupName: "Tech"),
+            OPMLFeedEntry(title: "News Feed", feedURL: URL(string: "https://news.com/feed")!, siteURL: nil, description: "", groupName: "News"),
+        ]
+
+        let viewModel = Self.makeViewModel(persistence: mockPersistence, opmlService: mockOPML)
+        viewModel.importOPML(from: Data())
+
+        #expect(viewModel.opmlImportResult?.addedCount == 2)
+        #expect(viewModel.opmlImportResult?.groupsCreatedCount == 2)
+        #expect(viewModel.opmlImportResult?.groupsReusedCount == 0)
+
+        // Verify groups were created in persistence.
+        #expect(mockPersistence.groups.count == 2)
+        let groupNames = Set(mockPersistence.groups.map(\.name))
+        #expect(groupNames == ["Tech", "News"])
+
+        // Verify feeds were assigned to their groups.
+        let techGroup = mockPersistence.groups.first { $0.name == "Tech" }!
+        let techFeeds = mockPersistence.memberships.filter { $0.group?.id == techGroup.id }.compactMap(\.feed)
+        #expect(techFeeds.count == 1)
+        #expect(techFeeds[0].feedURL == URL(string: "https://tech.com/feed"))
+    }
+
+    @Test("importOPML reuses existing groups with matching names")
+    @MainActor
+    func importOPMLReusesExistingGroups() {
+        let mockPersistence = MockFeedPersistenceService()
+        let existingGroup = PersistentFeedGroup(name: "Tech", sortOrder: 0)
+        mockPersistence.groups = [existingGroup]
+
+        let mockOPML = MockOPMLService()
+        mockOPML.entriesToReturn = [
+            OPMLFeedEntry(title: "Tech Feed", feedURL: URL(string: "https://tech.com/feed")!, siteURL: nil, description: "", groupName: "Tech"),
+        ]
+
+        let viewModel = Self.makeViewModel(persistence: mockPersistence, opmlService: mockOPML)
+        viewModel.importOPML(from: Data())
+
+        #expect(viewModel.opmlImportResult?.addedCount == 1)
+        #expect(viewModel.opmlImportResult?.groupsCreatedCount == 0)
+        #expect(viewModel.opmlImportResult?.groupsReusedCount == 1)
+
+        // No new group should have been created.
+        #expect(mockPersistence.groups.count == 1)
+        #expect(mockPersistence.groups[0].id == existingGroup.id)
+    }
+
+    @Test("importOPML assigns duplicate feed to group from OPML category")
+    @MainActor
+    func importOPMLAssignsDuplicateFeedToGroup() {
+        let existingFeed = TestFixtures.makePersistentFeed(
+            title: "Existing Feed",
+            feedURL: URL(string: "https://existing.com/feed")!
+        )
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [existingFeed]
+
+        let mockOPML = MockOPMLService()
+        mockOPML.entriesToReturn = [
+            OPMLFeedEntry(title: "Existing Feed", feedURL: URL(string: "https://existing.com/feed")!, siteURL: nil, description: "", groupName: "My Group"),
+        ]
+
+        let viewModel = Self.makeViewModel(persistence: mockPersistence, opmlService: mockOPML)
+        viewModel.importOPML(from: Data())
+
+        // Feed was skipped (already exists) but group was created and feed assigned.
+        #expect(viewModel.opmlImportResult?.addedCount == 0)
+        #expect(viewModel.opmlImportResult?.skippedCount == 1)
+        #expect(viewModel.opmlImportResult?.groupsCreatedCount == 1)
+
+        // Verify the existing feed was assigned to the new group.
+        #expect(mockPersistence.groups.count == 1)
+        #expect(mockPersistence.memberships.count == 1)
+        #expect(mockPersistence.memberships[0].feed?.id == existingFeed.id)
+    }
+
+    @Test("importOPML handles entries without groups correctly")
+    @MainActor
+    func importOPMLHandlesUngroupedEntries() {
+        let mockPersistence = MockFeedPersistenceService()
+        let mockOPML = MockOPMLService()
+        mockOPML.entriesToReturn = [
+            OPMLFeedEntry(title: "Grouped", feedURL: URL(string: "https://grouped.com/feed")!, siteURL: nil, description: "", groupName: "Tech"),
+            OPMLFeedEntry(title: "Ungrouped", feedURL: URL(string: "https://ungrouped.com/feed")!, siteURL: nil, description: "", groupName: nil),
+        ]
+
+        let viewModel = Self.makeViewModel(persistence: mockPersistence, opmlService: mockOPML)
+        viewModel.importOPML(from: Data())
+
+        #expect(viewModel.opmlImportResult?.addedCount == 2)
+        #expect(viewModel.opmlImportResult?.groupsCreatedCount == 1)
+
+        // Only the grouped feed should have a membership.
+        #expect(mockPersistence.memberships.count == 1)
+        #expect(mockPersistence.memberships[0].feed?.feedURL == URL(string: "https://grouped.com/feed"))
+    }
+
+    @Test("importOPML assigns feed to multiple groups when duplicated in OPML")
+    @MainActor
+    func importOPMLMultiGroupAssignment() {
+        let mockPersistence = MockFeedPersistenceService()
+        let mockOPML = MockOPMLService()
+        mockOPML.entriesToReturn = [
+            OPMLFeedEntry(title: "Multi Feed", feedURL: URL(string: "https://multi.com/feed")!, siteURL: nil, description: "", groupName: "Tech"),
+            OPMLFeedEntry(title: "Multi Feed", feedURL: URL(string: "https://multi.com/feed")!, siteURL: nil, description: "", groupName: "Favorites"),
+        ]
+
+        let viewModel = Self.makeViewModel(persistence: mockPersistence, opmlService: mockOPML)
+        viewModel.importOPML(from: Data())
+
+        // Feed added once, skipped on second appearance.
+        #expect(viewModel.opmlImportResult?.addedCount == 1)
+        #expect(viewModel.opmlImportResult?.skippedCount == 1)
+        #expect(viewModel.opmlImportResult?.groupsCreatedCount == 2)
+
+        // Feed should be in both groups.
+        #expect(mockPersistence.memberships.count == 2)
+        let groupNames = Set(mockPersistence.memberships.compactMap { $0.group?.name })
+        #expect(groupNames == ["Tech", "Favorites"])
+    }
+
+    // MARK: - OPML Export with Groups
+
+    @Test("exportOPML uses grouped generation with group names from persistence")
+    @MainActor
+    func exportOPMLIncludesGroups() {
+        let feed1 = TestFixtures.makePersistentFeed(title: "Feed A", feedURL: URL(string: "https://a.com/feed")!)
+        let feed2 = TestFixtures.makePersistentFeed(title: "Feed B", feedURL: URL(string: "https://b.com/feed")!)
+        let group = PersistentFeedGroup(name: "Tech", sortOrder: 0)
+
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed1, feed2]
+        mockPersistence.groups = [group]
+        // Only feed1 is in the group.
+        mockPersistence.memberships = [PersistentFeedGroupMembership(feed: feed1, group: group)]
+
+        let mockOPML = MockOPMLService()
+        mockOPML.dataToReturn = Data("opml-content".utf8)
+
+        let viewModel = Self.makeViewModel(persistence: mockPersistence, opmlService: mockOPML)
+        viewModel.loadFeeds()
+        viewModel.exportOPML()
+
+        #expect(viewModel.opmlExportURL != nil)
+
+        // Verify the mock received grouped feeds with correct group names.
+        let groupedFeeds = mockOPML.lastGeneratedGroupedFeeds
+        #expect(groupedFeeds != nil)
+        #expect(groupedFeeds?.count == 2)
+
+        let feedAGrouped = groupedFeeds?.first { $0.feed.url == URL(string: "https://a.com/feed") }
+        let feedBGrouped = groupedFeeds?.first { $0.feed.url == URL(string: "https://b.com/feed") }
+        #expect(feedAGrouped?.groupNames == ["Tech"])
+        #expect(feedBGrouped?.groupNames == [])
+    }
+
     // MARK: - Refresh Delegation — outcome → errorMessage translation
     //
     // These tests defend the `refreshAllFeeds()` switch that maps a

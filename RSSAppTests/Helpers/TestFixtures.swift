@@ -696,6 +696,23 @@ enum TestFixtures {
         </opml>
         """
 
+    static let groupedOPML = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <opml version="2.0">
+          <head><title>Grouped Subscriptions</title></head>
+          <body>
+            <outline text="Tech">
+              <outline text="Ars Technica" type="rss" xmlUrl="https://arstechnica.com/feed"/>
+              <outline text="The Verge" type="rss" xmlUrl="https://theverge.com/feed"/>
+            </outline>
+            <outline text="News">
+              <outline text="Reuters" type="rss" xmlUrl="https://reuters.com/feed"/>
+            </outline>
+            <outline text="Top Level Feed" type="rss" xmlUrl="https://top.com/feed"/>
+          </body>
+        </opml>
+        """
+
     // MARK: - Factory Methods
 
     static func makeArticle(
