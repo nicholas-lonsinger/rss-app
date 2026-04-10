@@ -2,6 +2,32 @@ import Foundation
 import SwiftData
 import os
 
+// MARK: - Article Pagination Cursor
+
+/// Cursor for group-scoped article pagination. Encapsulates the `sortDate`
+/// and `articleID` of the last article in the previous page, enabling
+/// predicate-based pagination that fetches only `limit` articles per feed
+/// regardless of scroll depth — O(feeds * limit) instead of the
+/// O(feeds * (offset + limit)) cost of offset-based pagination.
+///
+/// The `articleID` component breaks ties when multiple articles share
+/// the same `sortDate`, ensuring deterministic page boundaries.
+struct ArticlePaginationCursor: Sendable, Equatable {
+    let sortDate: Date
+    let articleID: String
+
+    /// Convenience initializer that captures the cursor position from an article.
+    init(after article: PersistentArticle) {
+        self.sortDate = article.sortDate
+        self.articleID = article.articleID
+    }
+
+    init(sortDate: Date, articleID: String) {
+        self.sortDate = sortDate
+        self.articleID = articleID
+    }
+}
+
 // MARK: - Protocol
 
 @MainActor
@@ -127,8 +153,18 @@ protocol FeedPersisting: Sendable {
     func feeds(in group: PersistentFeedGroup) throws -> [PersistentFeed]
     func groups(for feed: PersistentFeed) throws -> [PersistentFeedGroup]
 
-    /// Returns a page of articles from all feeds in the group, sorted by `sortDate`.
-    func articles(in group: PersistentFeedGroup, offset: Int, limit: Int, ascending: Bool) throws -> [PersistentArticle]
+    /// Returns a page of articles from all feeds in the group, sorted by `sortDate`,
+    /// using cursor-based pagination. Fetches only `limit` articles per feed regardless
+    /// of scroll depth — O(feeds * limit) — by filtering with a predicate on `sortDate`
+    /// rather than skipping `offset` rows per feed.
+    ///
+    /// - Parameters:
+    ///   - group: The feed group whose member feeds' articles are queried.
+    ///   - cursor: The last article's `sortDate` and `articleID` from the previous page.
+    ///     Pass `nil` for the first page.
+    ///   - limit: Maximum number of articles to return.
+    ///   - ascending: When `true`, sorts oldest first; when `false`, sorts newest first.
+    func articles(in group: PersistentFeedGroup, cursor: ArticlePaginationCursor?, limit: Int, ascending: Bool) throws -> [PersistentArticle]
     /// Returns the total number of unread articles across all feeds in the group.
     func unreadCount(in group: PersistentFeedGroup) throws -> Int
     /// Marks all articles in all feeds belonging to the group as read.
@@ -913,27 +949,57 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
     // RATIONALE: SwiftData's #Predicate does not support `array.contains(keypath)` on
     // captured PersistentIdentifier arrays. Instead we fetch a bounded window per feed
     // and merge in-memory. For typical group sizes (2–20 feeds) this is efficient and
-    // correct. The per-feed cap of `offset + limit` ensures we fetch at most enough
-    // rows to fill the requested page after merge-sorting.
-    func articles(in group: PersistentFeedGroup, offset: Int, limit: Int, ascending: Bool = false) throws -> [PersistentArticle] {
+    // correct. Cursor-based pagination ensures each per-feed fetch is bounded by
+    // `limit` regardless of scroll depth — O(feeds * limit) total rows fetched —
+    // by filtering with a predicate on `sortDate` rather than skipping `offset` rows.
+    func articles(in group: PersistentFeedGroup, cursor: ArticlePaginationCursor?, limit: Int, ascending: Bool = false) throws -> [PersistentArticle] {
         let feeds = feedsFromMemberships(group.memberships, context: "group '\(group.name)'")
         guard !feeds.isEmpty else { return [] }
 
         let sortOrder: SortOrder = ascending ? .forward : .reverse
-        let perFeedCap = offset + limit
         var merged: [PersistentArticle] = []
-        merged.reserveCapacity(perFeedCap * feeds.count)
+        merged.reserveCapacity(limit * feeds.count)
 
         for feed in feeds {
             let feedID = feed.persistentModelID
+            let predicate: Predicate<PersistentArticle>
+
+            if let cursor {
+                let cursorDate = cursor.sortDate
+                let cursorArticleID = cursor.articleID
+                if ascending {
+                    // Ascending: fetch articles strictly after the cursor.
+                    // Same sortDate: only articles with articleID > cursorArticleID.
+                    // Later sortDate: all articles.
+                    predicate = #Predicate {
+                        $0.feed?.persistentModelID == feedID && (
+                            $0.sortDate > cursorDate ||
+                            ($0.sortDate == cursorDate && $0.articleID > cursorArticleID)
+                        )
+                    }
+                } else {
+                    // Descending: fetch the next page in sort order (earlier dates,
+                    // or same date with later articleID per the always-ascending
+                    // articleID tie-breaker).
+                    predicate = #Predicate {
+                        $0.feed?.persistentModelID == feedID && (
+                            $0.sortDate < cursorDate ||
+                            ($0.sortDate == cursorDate && $0.articleID > cursorArticleID)
+                        )
+                    }
+                }
+            } else {
+                predicate = #Predicate { $0.feed?.persistentModelID == feedID }
+            }
+
             var descriptor = FetchDescriptor<PersistentArticle>(
-                predicate: #Predicate { $0.feed?.persistentModelID == feedID },
+                predicate: predicate,
                 sortBy: [
                     SortDescriptor(\.sortDate, order: sortOrder),
                     SortDescriptor(\.articleID, order: .forward)
                 ]
             )
-            descriptor.fetchLimit = perFeedCap
+            descriptor.fetchLimit = limit
             let feedArticles = try modelContext.fetch(descriptor)
             merged.append(contentsOf: feedArticles)
         }
@@ -948,10 +1014,10 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
             return $0.articleID < $1.articleID
         }
 
-        let start = min(offset, merged.count)
-        let end = min(start + limit, merged.count)
-        let page = Array(merged[start..<end])
-        Self.logger.debug("Fetched \(page.count, privacy: .public) articles in group '\(group.name, privacy: .public)' (offset: \(offset, privacy: .public), limit: \(limit, privacy: .public), ascending: \(ascending, privacy: .public))")
+        // Take only `limit` from the merged set — we fetched up to `limit` per feed,
+        // so the merged array may contain up to `feeds.count * limit` articles.
+        let page = Array(merged.prefix(limit))
+        Self.logger.debug("Fetched \(page.count, privacy: .public) articles in group '\(group.name, privacy: .public)' (cursor: \(cursor?.articleID ?? "nil", privacy: .public), limit: \(limit, privacy: .public), ascending: \(ascending, privacy: .public))")
         return page
     }
 

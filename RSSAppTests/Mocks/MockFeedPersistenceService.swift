@@ -388,14 +388,31 @@ final class MockFeedPersistenceService: FeedPersisting {
             .sorted { $0.sortOrder < $1.sortOrder }
     }
 
-    func articles(in group: PersistentFeedGroup, offset: Int, limit: Int, ascending: Bool = false) throws -> [PersistentArticle] {
+    func articles(in group: PersistentFeedGroup, cursor: ArticlePaginationCursor?, limit: Int, ascending: Bool = false) throws -> [PersistentArticle] {
         if let error = groupError ?? errorToThrow { throw error }
         let feedIDs = Set(memberships.filter { $0.group?.id == group.id }.compactMap { $0.feed?.id })
-        let all = articlesByFeedID
+        var all = articlesByFeedID
             .filter { feedIDs.contains($0.key) }
             .values.flatMap { $0 }
             .sorted(by: ascending ? Self.sortAscending : Self.sortDescending)
-        return Array(all.dropFirst(offset).prefix(limit))
+
+        // Apply cursor filtering to match the production implementation.
+        if let cursor {
+            all = all.filter { article in
+                if ascending {
+                    return article.sortDate > cursor.sortDate ||
+                        (article.sortDate == cursor.sortDate && article.articleID > cursor.articleID)
+                } else {
+                    // The articleID tie-breaker uses `>` (not `<`) because the
+                    // production SortDescriptor sorts articleID in .forward order
+                    // regardless of the primary sortDate direction.
+                    return article.sortDate < cursor.sortDate ||
+                        (article.sortDate == cursor.sortDate && article.articleID > cursor.articleID)
+                }
+            }
+        }
+
+        return Array(all.prefix(limit))
     }
 
     func unreadCount(in group: PersistentFeedGroup) throws -> Int {
