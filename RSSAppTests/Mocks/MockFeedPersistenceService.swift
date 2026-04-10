@@ -39,7 +39,10 @@ final class MockFeedPersistenceService: FeedPersisting {
             throw NSError(domain: "MockPersistence", code: 1, userInfo: [NSLocalizedDescriptionKey: "Simulated allFeeds failure"])
         }
         if let error = errorToThrow { throw error }
-        return feeds
+        return feeds.sorted {
+            if $0.sortOrder != $1.sortOrder { return $0.sortOrder < $1.sortOrder }
+            return $0.addedDate < $1.addedDate
+        }
     }
 
     func addFeed(_ feed: PersistentFeed) throws {
@@ -332,6 +335,18 @@ final class MockFeedPersistenceService: FeedPersisting {
         }
     }
 
+    // MARK: - Feed Reordering
+
+    var updateFeedOrderError: (any Error)?
+
+    func updateFeedOrder(_ feeds: [PersistentFeed]) throws {
+        if let error = updateFeedOrderError ?? errorToThrow { throw error }
+        for (index, feed) in feeds.enumerated() {
+            feed.sortOrder = index
+        }
+        self.feeds = feeds
+    }
+
     // MARK: - Group Operations
 
     var groups: [PersistentFeedGroup] = []
@@ -357,6 +372,16 @@ final class MockFeedPersistenceService: FeedPersisting {
     func renameGroup(_ group: PersistentFeedGroup, to name: String) throws {
         if let error = groupError ?? errorToThrow { throw error }
         group.name = name
+    }
+
+    var updateGroupOrderError: (any Error)?
+
+    func updateGroupOrder(_ groups: [PersistentFeedGroup]) throws {
+        if let error = updateGroupOrderError ?? groupError ?? errorToThrow { throw error }
+        for (index, group) in groups.enumerated() {
+            group.sortOrder = index
+        }
+        self.groups = groups
     }
 
     func addFeed(_ feed: PersistentFeed, to group: PersistentFeedGroup) throws {

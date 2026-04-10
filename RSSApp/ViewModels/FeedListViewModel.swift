@@ -66,6 +66,21 @@ final class FeedListViewModel {
         }
     }
 
+    /// Reorders feeds by moving the items at `source` to `destination`.
+    /// Called by SwiftUI's `onMove` modifier on the feed list.
+    func moveFeed(from source: IndexSet, to destination: Int) {
+        feeds.move(fromOffsets: source, toOffset: destination)
+        do {
+            try persistence.updateFeedOrder(feeds)
+            Self.logger.notice("Reordered feeds (moved to index \(destination, privacy: .public))")
+        } catch {
+            // Reload to restore the persisted order on failure.
+            loadFeeds()
+            errorMessage = "Unable to reorder feeds."
+            Self.logger.error("Failed to persist feed reorder: \(error, privacy: .public)")
+        }
+    }
+
     func removeFeed(_ feed: PersistentFeed) {
         let previousFeeds = feeds
         let feedID = feed.id

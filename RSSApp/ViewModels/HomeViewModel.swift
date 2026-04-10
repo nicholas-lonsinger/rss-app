@@ -440,6 +440,21 @@ final class HomeViewModel {
         }
     }
 
+    /// Reorders groups by moving the items at `source` to `destination`.
+    /// Called by SwiftUI's `onMove` modifier on the groups section.
+    func moveGroup(from source: IndexSet, to destination: Int) {
+        groups.move(fromOffsets: source, toOffset: destination)
+        do {
+            try persistence.updateGroupOrder(groups)
+            Self.logger.notice("Reordered groups (moved to index \(destination, privacy: .public))")
+        } catch {
+            // Reload to restore the persisted order on failure.
+            loadGroups()
+            errorMessage = "Unable to reorder groups."
+            Self.logger.error("Failed to persist group reorder: \(error, privacy: .public)")
+        }
+    }
+
     func deleteGroup(_ group: PersistentFeedGroup) {
         let name = group.name
         do {

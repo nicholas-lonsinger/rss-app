@@ -89,6 +89,9 @@ struct HomeView: View {
                                 }
                             }
                         }
+                        .onMove { source, destination in
+                            viewModel.moveGroup(from: source, to: destination)
+                        }
                     } header: {
                         Text("Groups")
                     }
