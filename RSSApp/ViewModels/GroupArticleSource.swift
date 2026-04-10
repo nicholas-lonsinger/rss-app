@@ -146,12 +146,14 @@ final class GroupArticleSource: ArticleListSource {
 
     private func loadArticles() {
         let previous = articles
+        let previousCursor = paginationCursor
         articles = []
         paginationCursor = nil
         hasMore = true
         loadMore()
         if articles.isEmpty && errorMessage != nil {
             articles = previous
+            paginationCursor = previousCursor
         }
     }
 
@@ -173,10 +175,7 @@ final class GroupArticleSource: ArticleListSource {
 
             // Advance the cursor to the last article in the page for the next fetch.
             if let last = page.last {
-                paginationCursor = ArticlePaginationCursor(
-                    sortDate: last.sortDate,
-                    articleID: last.articleID
-                )
+                paginationCursor = ArticlePaginationCursor(after: last)
             }
 
             Self.logger.debug("Loaded \(page.count, privacy: .public) articles for group '\(self.group.name, privacy: .public)' (\(newItems.count, privacy: .public) new, total: \(self.articles.count, privacy: .public))")

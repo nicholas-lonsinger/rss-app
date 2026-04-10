@@ -178,13 +178,11 @@ struct FeedPersistenceGroupTests {
         mock.articlesByFeedID[feed.id] = articles
 
         let page1 = try mock.articles(in: group, cursor: nil, limit: 3, ascending: false)
-        #expect(page1.count == 3)
+        try #require(page1.count == 3)
 
         // Use the last article from page1 as the cursor for page2
-        let cursor = ArticlePaginationCursor(
-            sortDate: page1.last!.sortDate,
-            articleID: page1.last!.articleID
-        )
+        let lastArticle = try #require(page1.last)
+        let cursor = ArticlePaginationCursor(after: lastArticle)
         let page2 = try mock.articles(in: group, cursor: cursor, limit: 3, ascending: false)
         #expect(page2.count == 3)
 

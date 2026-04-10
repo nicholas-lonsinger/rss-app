@@ -12,9 +12,20 @@ import os
 ///
 /// The `articleID` component breaks ties when multiple articles share
 /// the same `sortDate`, ensuring deterministic page boundaries.
-struct ArticlePaginationCursor: Sendable {
+struct ArticlePaginationCursor: Sendable, Equatable {
     let sortDate: Date
     let articleID: String
+
+    /// Convenience initializer that captures the cursor position from an article.
+    init(after article: PersistentArticle) {
+        self.sortDate = article.sortDate
+        self.articleID = article.articleID
+    }
+
+    init(sortDate: Date, articleID: String) {
+        self.sortDate = sortDate
+        self.articleID = articleID
+    }
 }
 
 // MARK: - Protocol
@@ -148,6 +159,7 @@ protocol FeedPersisting: Sendable {
     /// rather than skipping `offset` rows per feed.
     ///
     /// - Parameters:
+    ///   - group: The feed group whose member feeds' articles are queried.
     ///   - cursor: The last article's `sortDate` and `articleID` from the previous page.
     ///     Pass `nil` for the first page.
     ///   - limit: Maximum number of articles to return.
@@ -966,9 +978,9 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
                         )
                     }
                 } else {
-                    // Descending: fetch articles strictly before the cursor.
-                    // Same sortDate: only articles with articleID > cursorArticleID
-                    // (articleID tie-breaker is always ascending).
+                    // Descending: fetch the next page in sort order (earlier dates,
+                    // or same date with later articleID per the always-ascending
+                    // articleID tie-breaker).
                     predicate = #Predicate {
                         $0.feed?.persistentModelID == feedID && (
                             $0.sortDate < cursorDate ||

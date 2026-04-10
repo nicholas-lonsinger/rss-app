@@ -88,6 +88,31 @@ struct GroupArticleSourceTests {
         #expect(source.articles.isEmpty)
     }
 
+    // MARK: - Multi-page cursor progression
+
+    @Test("loadMoreAndReport advances cursor across pages with no duplicates")
+    @MainActor
+    func multiPageCursorProgression() {
+        // 60 articles across 2 feeds (30 each) exceeds pageSize (50), spanning 2 pages.
+        let (source, _, _) = Self.makeFixture(articleCount: 30, feedCount: 2)
+        source.reload()
+
+        let firstPageCount = source.articles.count
+        #expect(firstPageCount == 50)
+        #expect(source.hasMore == true)
+
+        let result = source.loadMoreAndReport()
+        #expect(result == .loaded)
+
+        let totalCount = source.articles.count
+        #expect(totalCount == 60)
+        #expect(source.hasMore == false)
+
+        // Verify no duplicates
+        let ids = source.articles.map(\.articleID)
+        #expect(Set(ids).count == ids.count)
+    }
+
     // MARK: - Mutations
 
     @Test("markAsRead delegates to homeViewModel and returns true")
@@ -173,6 +198,26 @@ struct GroupArticleSourceTests {
 
         #expect(source.articles.count == 2)
         #expect(source.errorMessage != nil)
+    }
+
+    @Test("reload preserves cursor on error so loadMore can resume")
+    @MainActor
+    func reloadPreservesCursorOnError() {
+        // Load enough articles to leave hasMore true (page size is 50, load 60).
+        let (source, mock, _) = Self.makeFixture(articleCount: 30, feedCount: 2)
+        source.reload()
+        #expect(source.articles.count == 50)
+
+        // Simulate error on reload — cursor and articles should be preserved.
+        mock.groupError = NSError(domain: "test", code: 1)
+        source.reload()
+        #expect(source.articles.count == 50)
+
+        // Clear error and load more — should pick up from where we left off.
+        mock.groupError = nil
+        let result = source.loadMoreAndReport()
+        #expect(result == .loaded)
+        #expect(source.articles.count == 60)
     }
 
     @Test("clearError clears errorMessage")

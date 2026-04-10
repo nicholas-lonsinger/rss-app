@@ -403,6 +403,9 @@ final class MockFeedPersistenceService: FeedPersisting {
                     return article.sortDate > cursor.sortDate ||
                         (article.sortDate == cursor.sortDate && article.articleID > cursor.articleID)
                 } else {
+                    // The articleID tie-breaker uses `>` (not `<`) because the
+                    // production SortDescriptor sorts articleID in .forward order
+                    // regardless of the primary sortDate direction.
                     return article.sortDate < cursor.sortDate ||
                         (article.sortDate == cursor.sortDate && article.articleID > cursor.articleID)
                 }
