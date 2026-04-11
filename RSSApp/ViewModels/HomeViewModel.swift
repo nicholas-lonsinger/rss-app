@@ -41,6 +41,14 @@ final class HomeViewModel {
     private(set) var isRefreshing = false
     private(set) var errorMessage: String?
 
+    /// `true` when at least one feed has a failure streak that exceeds the
+    /// `FeedRefreshService.bubbleUpThreshold` (24 hours). Used by `HomeView`
+    /// to show the error indicator on the "All Feeds" row so the user sees
+    /// it without drilling into the feed list. Refreshed whenever
+    /// `loadUnreadCount()` is called (which happens on every view entry and
+    /// after every refresh) so it stays in sync with the feed state.
+    private(set) var hasFeedsWithLongRunningFailure: Bool = false
+
     // MARK: - Group state
 
     private(set) var groups: [PersistentFeedGroup] = []
@@ -140,6 +148,27 @@ final class HomeViewModel {
         } catch {
             errorMessage = "Unable to load unread count."
             Self.logger.error("Failed to load total unread count: \(error, privacy: .public)")
+        }
+        loadFeedFailureIndicator()
+    }
+
+    /// Updates `hasFeedsWithLongRunningFailure` by scanning all feeds for
+    /// failure streaks that exceed `FeedRefreshService.bubbleUpThreshold`.
+    /// Called as part of `loadUnreadCount()` so both indicators stay in sync.
+    private func loadFeedFailureIndicator() {
+        let threshold = FeedRefreshService.bubbleUpThreshold
+        let now = Date()
+        do {
+            let feeds = try persistence.allFeeds()
+            hasFeedsWithLongRunningFailure = feeds.contains { feed in
+                guard let streakStart = feed.firstFetchErrorDate else { return false }
+                return now.timeIntervalSince(streakStart) >= threshold
+            }
+            Self.logger.debug("hasFeedsWithLongRunningFailure: \(self.hasFeedsWithLongRunningFailure, privacy: .public)")
+        } catch {
+            // Non-critical — leave the previous value rather than flashing the
+            // indicator for a transient fetch error.
+            Self.logger.warning("Failed to load feed failure indicator: \(error, privacy: .public)")
         }
     }
 

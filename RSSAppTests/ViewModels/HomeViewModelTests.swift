@@ -2041,4 +2041,55 @@ struct HomeViewModelTests {
         let prefixAfter = Array(viewModel.savedArticlesList.prefix(HomeViewModel.pageSize)).map(\.articleID)
         #expect(prefixAfter == prefixBefore, "loadMoreSavedArticlesAndReport must preserve articleID identity for the previously loaded prefix")
     }
+
+    // MARK: - Feed failure indicator
+
+    @Test("hasFeedsWithLongRunningFailure is false when no feeds have errors")
+    @MainActor
+    func feedFailureIndicatorFalseWhenNoErrors() {
+        let feed = TestFixtures.makePersistentFeed()
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+
+        let viewModel = HomeViewModel(persistence: mockPersistence)
+        viewModel.loadUnreadCount()
+
+        #expect(viewModel.hasFeedsWithLongRunningFailure == false)
+    }
+
+    @Test("hasFeedsWithLongRunningFailure is false when failure streak is below threshold")
+    @MainActor
+    func feedFailureIndicatorFalseWhenStreakBelowThreshold() {
+        // 12 hours into a streak — below the 24-hour bubble-up threshold
+        let feed = TestFixtures.makePersistentFeed(
+            lastFetchError: "HTTP 503",
+            firstFetchErrorDate: Date(timeIntervalSinceNow: -(12 * 3600))
+        )
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+
+        let viewModel = HomeViewModel(persistence: mockPersistence)
+        viewModel.loadUnreadCount()
+
+        #expect(viewModel.hasFeedsWithLongRunningFailure == false)
+    }
+
+    @Test("hasFeedsWithLongRunningFailure is true when any feed exceeds the 24-hour threshold")
+    @MainActor
+    func feedFailureIndicatorTrueWhenStreakExceedsThreshold() {
+        let healthyFeed = TestFixtures.makePersistentFeed(title: "Healthy", feedURL: URL(string: "https://healthy.com/feed")!)
+        let brokenFeed = TestFixtures.makePersistentFeed(
+            title: "Broken",
+            feedURL: URL(string: "https://broken.com/feed")!,
+            lastFetchError: "HTTP 404",
+            firstFetchErrorDate: Date(timeIntervalSinceNow: -(FeedRefreshService.bubbleUpThreshold + 3600))
+        )
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [healthyFeed, brokenFeed]
+
+        let viewModel = HomeViewModel(persistence: mockPersistence)
+        viewModel.loadUnreadCount()
+
+        #expect(viewModel.hasFeedsWithLongRunningFailure == true)
+    }
 }

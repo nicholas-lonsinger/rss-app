@@ -126,14 +126,19 @@ final class BackgroundRefreshCoordinator: Sendable {
     /// articles and has no visible error path.
     ///
     /// - `.skipped` is reported as success: there was genuinely no work to do
-    ///   (no feeds, or another caller held the refresh), which is not a failure
-    ///   condition for the schedule.
+    ///   (no feeds, or another caller held the refresh, or all feeds were
+    ///   auto-skipped), which is not a failure condition for the schedule.
     /// - `.setupFailed` → failure: we could not read the feed list.
     /// - `.cancelled` → failure: the BG window was not fully used.
     /// - `.completed(Summary)` → success only when the save persisted cleanly
     ///   and no feed fetches failed. Partial success (some feeds refreshed,
     ///   some failed) is reported as failure so iOS backs off — the next
     ///   refresh will retry and, if the issue is transient, rapidly recover.
+    ///   `summary.skippedCount` (auto-skipped feeds with a ≥7-day failure
+    ///   streak) is intentionally excluded from this calculation: a
+    ///   permanently-broken feed that was already skipped is not a transient
+    ///   failure that warrants backing off the schedule — the user must
+    ///   intervene via EditFeedView to re-enable it.
     ///   `summary.retentionCleanupFailed` is intentionally excluded from this
     ///   calculation: retention cleanup is cosmetic (old articles remain visible
     ///   but are still correct) and self-heals on the next successful refresh,

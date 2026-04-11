@@ -57,7 +57,8 @@ struct HomeView: View {
                             HomeRowView(
                                 title: group.title,
                                 systemImage: group.systemImage,
-                                badgeCount: badgeCount(for: group)
+                                badgeCount: badgeCount(for: group),
+                                showErrorIndicator: showErrorIndicator(for: group)
                             )
                         }
                     }
@@ -264,6 +265,19 @@ struct HomeView: View {
         }
     }
 
+    /// Returns `true` when the All Feeds row should show the
+    /// `exclamationmark.triangle.fill` indicator — i.e., at least one feed has
+    /// had a failure streak exceeding `FeedRefreshService.bubbleUpThreshold`
+    /// (24 hours). Other rows never show this indicator.
+    private func showErrorIndicator(for group: HomeGroup) -> Bool {
+        switch group {
+        case .allFeeds:
+            return viewModel.hasFeedsWithLongRunningFailure
+        case .allArticles, .unreadArticles, .savedArticles:
+            return false
+        }
+    }
+
     private func groupBadgeCount(for group: PersistentFeedGroup) -> Int? {
         let count = viewModel.groupUnreadCounts[group.id] ?? 0
         return count > 0 ? count : nil
@@ -277,6 +291,7 @@ private struct HomeRowView: View {
     let title: String
     let systemImage: String
     let badgeCount: Int?
+    var showErrorIndicator: Bool = false
 
     var body: some View {
         HStack {
@@ -284,6 +299,12 @@ private struct HomeRowView: View {
                 .font(.headline)
 
             Spacer()
+
+            if showErrorIndicator {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.red)
+                    .font(.caption)
+            }
 
             if let count = badgeCount, count > 0 {
                 Text("\(count)")

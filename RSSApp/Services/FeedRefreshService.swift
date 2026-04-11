@@ -157,11 +157,16 @@ final class FeedRefreshService {
 
         /// The post-completion summary of a successful refresh cycle.
         /// `Summary`'s init enforces `totalFeeds > 0` and
-        /// `0 ≤ failureCount ≤ totalFeeds`, so pattern-matching callers do
-        /// not need to defend against degenerate combinations.
+        /// `0 ≤ failureCount + skippedCount ≤ totalFeeds`, so pattern-matching
+        /// callers do not need to defend against degenerate combinations.
         struct Summary: Sendable, Equatable {
             let totalFeeds: Int
             let failureCount: Int
+            /// Number of feeds that were skipped because they have been failing
+            /// for longer than `FeedRefreshService.autoSkipThreshold`. Skipped
+            /// feeds are not included in `failureCount` so a permanently-broken
+            /// feed does not poison the BG scheduler's backoff signal.
+            let skippedCount: Int
             let saveDidFail: Bool
             let retentionCleanupFailed: Bool
 
@@ -180,6 +185,7 @@ final class FeedRefreshService {
             init(
                 totalFeeds: Int,
                 failureCount: Int,
+                skippedCount: Int = 0,
                 saveDidFail: Bool,
                 retentionCleanupFailed: Bool
             ) {
@@ -188,16 +194,31 @@ final class FeedRefreshService {
                     "FeedRefreshService.Outcome.Summary requires totalFeeds > 0; use .skipped or .setupFailed for zero-feed paths"
                 )
                 precondition(
-                    (0...totalFeeds).contains(failureCount),
-                    "FeedRefreshService.Outcome.Summary requires 0 ≤ failureCount (\(failureCount)) ≤ totalFeeds (\(totalFeeds))"
+                    (0...totalFeeds).contains(failureCount + skippedCount),
+                    "FeedRefreshService.Outcome.Summary requires 0 ≤ failureCount (\(failureCount)) + skippedCount (\(skippedCount)) ≤ totalFeeds (\(totalFeeds))"
                 )
                 self.totalFeeds = totalFeeds
                 self.failureCount = failureCount
+                self.skippedCount = skippedCount
                 self.saveDidFail = saveDidFail
                 self.retentionCleanupFailed = retentionCleanupFailed
             }
         }
     }
+
+    // MARK: - Feed-health thresholds
+
+    /// Duration of a failure streak after which the error indicator bubbles
+    /// up to `HomeView`'s All Feeds row so the user sees it without drilling
+    /// into the feed list. Named constant so it is easy to tune.
+    static let bubbleUpThreshold: TimeInterval = 24 * 60 * 60   // 24 hours
+
+    /// Duration of a failure streak after which the feed is auto-skipped in
+    /// both foreground and background refresh paths. Named constant so it is
+    /// easy to tune. Auto-skipped feeds do not contribute to `failureCount`
+    /// in the BG refresh outcome so a permanently-broken feed stops poisoning
+    /// the iOS scheduler's backoff signal.
+    static let autoSkipThreshold: TimeInterval = 7 * 24 * 60 * 60  // 7 days
 
     // MARK: - Public API
 
@@ -345,6 +366,34 @@ final class FeedRefreshService {
         for task in pendingIconTasks { task.cancel() }
         pendingIconTasks.removeAll()
 
+        // Partition feeds into active (eligible for refresh) and auto-skipped
+        // (failure streak ≥ autoSkipThreshold). Skipped feeds are excluded from
+        // both the fetch loop and failureCount so a permanently-broken feed
+        // does not poison the BG scheduler's backoff signal.
+        let now = Date()
+        var skippedFeeds: [PersistentFeed] = []
+        var activeFeeds: [PersistentFeed] = []
+        for feed in feeds {
+            if let streakStart = feed.firstFetchErrorDate,
+               now.timeIntervalSince(streakStart) >= Self.autoSkipThreshold {
+                skippedFeeds.append(feed)
+            } else {
+                activeFeeds.append(feed)
+            }
+        }
+        if !skippedFeeds.isEmpty {
+            let titles = skippedFeeds.map(\.title).joined(separator: ", ")
+            Self.logger.notice("Auto-skipping \(skippedFeeds.count, privacy: .public) feed(s) with failure streak ≥ 7 days: \(titles, privacy: .public)")
+        }
+
+        // When ALL feeds are auto-skipped (e.g., a user with only dead feeds),
+        // return early so we don't report an empty-feed .completed with
+        // totalFeeds == 0 (which violates Summary's precondition).
+        if activeFeeds.isEmpty {
+            Self.logger.notice("All \(feeds.count, privacy: .public) feeds auto-skipped — reporting .skipped")
+            return .skipped
+        }
+
         let feedFetching = self.feedFetching
         let logger = Self.logger
         let maxConcurrency = 6
@@ -357,7 +406,7 @@ final class FeedRefreshService {
                 returning: [(UUID, Result<FeedFetchResult?, any Error>)].self
             ) { group in
                 var collected: [(UUID, Result<FeedFetchResult?, any Error>)] = []
-                var iterator = feeds.makeIterator()
+                var iterator = activeFeeds.makeIterator()
 
                 func enqueueNext(_ group: inout ThrowingTaskGroup<(UUID, Result<FeedFetchResult?, any Error>), any Error>, _ iterator: inout IndexingIterator<[PersistentFeed]>) -> Bool {
                     guard let feed = iterator.next() else { return false }
@@ -415,7 +464,7 @@ final class FeedRefreshService {
             return .cancelled(totalFeeds: feeds.count)
         }
 
-        let idToFeed = Dictionary(uniqueKeysWithValues: feeds.map { ($0.id, $0) })
+        let idToFeed = Dictionary(uniqueKeysWithValues: activeFeeds.map { ($0.id, $0) })
         var failureCount = 0
         for (id, result) in results {
             if Task.isCancelled {
@@ -559,7 +608,8 @@ final class FeedRefreshService {
             Self.logger.error("Article retention cleanup failed: \(error, privacy: .public)")
         }
 
-        Self.logger.notice("Refresh complete: \(feeds.count - failureCount, privacy: .public) updated, \(failureCount, privacy: .public) failed")
+        let successCount = activeFeeds.count - failureCount
+        Self.logger.notice("Refresh complete: \(successCount, privacy: .public) updated, \(failureCount, privacy: .public) failed, \(skippedFeeds.count, privacy: .public) auto-skipped")
 
         // Cancel any in-flight prefetch from a previous refresh cycle before
         // starting a new one. Safe because the `isRefreshing` guard coalesces
@@ -578,6 +628,7 @@ final class FeedRefreshService {
             Outcome.Summary(
                 totalFeeds: feeds.count,
                 failureCount: failureCount,
+                skippedCount: skippedFeeds.count,
                 saveDidFail: saveDidFail,
                 retentionCleanupFailed: retentionCleanupFailed
             )
