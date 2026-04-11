@@ -719,6 +719,209 @@ struct FeedRefreshServiceTests {
 
         #expect(slowPrefetcher.wasCancelled)
     }
+
+    // MARK: - Feed-health: streak tracking
+
+    @Test("updateFeedError sets firstFetchErrorDate on first failure")
+    @MainActor
+    func firstFailureSetsStreakStart() async {
+        let url = URL(string: "https://fail.com/feed")!
+        let feed = TestFixtures.makePersistentFeed(feedURL: url)
+
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+        let mockFetching = MockFeedFetchingService()
+        mockFetching.errorsByURL = [url: FeedFetchingError.invalidResponse(statusCode: 503)]
+
+        let service = Self.makeService(persistence: mockPersistence, feedFetching: mockFetching)
+        await service.refreshAllFeeds()
+
+        let refreshed = try? mockPersistence.allFeeds()
+        #expect(refreshed?[0].lastFetchError != nil)
+        #expect(refreshed?[0].firstFetchErrorDate != nil)
+    }
+
+    @Test("updateFeedError does not overwrite firstFetchErrorDate on subsequent failures")
+    @MainActor
+    func subsequentFailuresPreserveStreakStart() async {
+        let url = URL(string: "https://fail.com/feed")!
+        let originalStreakStart = Date(timeIntervalSinceNow: -3600) // 1 hour ago
+        let feed = TestFixtures.makePersistentFeed(
+            feedURL: url,
+            lastFetchError: "HTTP 503",
+            lastFetchErrorDate: Date(),
+            firstFetchErrorDate: originalStreakStart
+        )
+
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+        let mockFetching = MockFeedFetchingService()
+        mockFetching.errorsByURL = [url: FeedFetchingError.invalidResponse(statusCode: 503)]
+
+        let service = Self.makeService(persistence: mockPersistence, feedFetching: mockFetching)
+        await service.refreshAllFeeds()
+
+        let refreshed = try? mockPersistence.allFeeds()
+        // firstFetchErrorDate must equal the original streak start, not a new date.
+        #expect(refreshed?[0].firstFetchErrorDate == originalStreakStart)
+    }
+
+    @Test("updateFeedError clears firstFetchErrorDate on success")
+    @MainActor
+    func successClearsStreakStart() async {
+        let url = URL(string: "https://recovered.com/feed")!
+        let feed = TestFixtures.makePersistentFeed(
+            feedURL: url,
+            lastFetchError: "HTTP 503",
+            lastFetchErrorDate: Date(timeIntervalSinceNow: -7200),
+            firstFetchErrorDate: Date(timeIntervalSinceNow: -7200)
+        )
+
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+        let mockFetching = MockFeedFetchingService()
+        mockFetching.feedsByURL = [url: TestFixtures.makeFeed(title: "Fixed")]
+
+        let service = Self.makeService(persistence: mockPersistence, feedFetching: mockFetching)
+        await service.refreshAllFeeds()
+
+        let refreshed = try? mockPersistence.allFeeds()
+        #expect(refreshed?[0].lastFetchError == nil)
+        #expect(refreshed?[0].firstFetchErrorDate == nil)
+    }
+
+    // MARK: - Feed-health: auto-skip
+
+    @Test("refreshAllFeeds skips feeds with failure streak ≥ 7 days")
+    @MainActor
+    func autoSkipsFeedWithLongStreak() async {
+        let url = URL(string: "https://dead.com/feed")!
+        let streakStart = Date(timeIntervalSinceNow: -(FeedRefreshService.autoSkipThreshold + 3600))
+        let feed = TestFixtures.makePersistentFeed(
+            title: "Dead Feed",
+            feedURL: url,
+            lastFetchError: "HTTP 404",
+            lastFetchErrorDate: Date(),
+            firstFetchErrorDate: streakStart
+        )
+
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+        // No fetch result registered — if the feed is fetched, the mock would
+        // return an error and that would be caught in the outcome.
+        let mockFetching = MockFeedFetchingService()
+
+        let service = Self.makeService(persistence: mockPersistence, feedFetching: mockFetching)
+        // A second healthy feed ensures totalFeeds > 0 and prevents the
+        // "all feeds skipped → .skipped" early-return path.
+        let url2 = URL(string: "https://healthy.com/feed")!
+        let healthyFeed = TestFixtures.makePersistentFeed(title: "Healthy", feedURL: url2)
+        mockPersistence.feeds = [feed, healthyFeed]
+        mockFetching.feedsByURL = [url2: TestFixtures.makeFeed(title: "Healthy")]
+
+        let outcome = await service.refreshAllFeeds()
+
+        // skippedCount should be 1 (the dead feed) and failureCount should be 0
+        // — the dead feed must NOT appear in failureCount.
+        if case .completed(let summary) = outcome {
+            #expect(summary.skippedCount == 1)
+            #expect(summary.failureCount == 0)
+            #expect(summary.totalFeeds == 2)
+        } else {
+            Issue.record("Expected .completed outcome, got \(outcome)")
+        }
+    }
+
+    @Test("refreshAllFeeds does not skip feeds with failure streak < 7 days")
+    @MainActor
+    func doesNotAutoSkipFeedWithShortStreak() async {
+        let url = URL(string: "https://newlyfailing.com/feed")!
+        // 3 days into a streak — not yet auto-skip eligible
+        let streakStart = Date(timeIntervalSinceNow: -(3 * 24 * 3600))
+        let feed = TestFixtures.makePersistentFeed(
+            feedURL: url,
+            lastFetchError: "HTTP 503",
+            lastFetchErrorDate: Date(),
+            firstFetchErrorDate: streakStart
+        )
+
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+        let mockFetching = MockFeedFetchingService()
+        mockFetching.errorsByURL = [url: FeedFetchingError.invalidResponse(statusCode: 503)]
+
+        let service = Self.makeService(persistence: mockPersistence, feedFetching: mockFetching)
+        let outcome = await service.refreshAllFeeds()
+
+        // Feed should be attempted and contribute to failureCount, not skippedCount.
+        if case .completed(let summary) = outcome {
+            #expect(summary.failureCount == 1)
+            #expect(summary.skippedCount == 0)
+        } else {
+            Issue.record("Expected .completed outcome, got \(outcome)")
+        }
+    }
+
+    @Test("refreshAllFeeds returns .completed(skippedCount: N) when all feeds exceed the auto-skip threshold")
+    @MainActor
+    func allFeedsAutoSkippedReturnsCompleted() async {
+        // When every feed is auto-skipped, the outcome must be .completed (not
+        // .skipped) so refreshAllFeeds() updates lastRefreshCompletedAt and
+        // throttles subsequent on-entry refresh attempts. Without this,
+        // a user whose only feeds are permanently dead would trigger a redundant
+        // refresh cycle on every view entry.
+        let streakStart = Date(timeIntervalSinceNow: -(FeedRefreshService.autoSkipThreshold + 3600))
+        let feed1 = TestFixtures.makePersistentFeed(
+            feedURL: URL(string: "https://dead1.com/feed")!,
+            lastFetchError: "HTTP 404",
+            firstFetchErrorDate: streakStart
+        )
+        let feed2 = TestFixtures.makePersistentFeed(
+            feedURL: URL(string: "https://dead2.com/feed")!,
+            lastFetchError: "Network error",
+            firstFetchErrorDate: streakStart
+        )
+
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed1, feed2]
+        let mockFetching = MockFeedFetchingService()
+
+        let service = Self.makeService(persistence: mockPersistence, feedFetching: mockFetching)
+        let outcome = await service.refreshAllFeeds()
+
+        if case .completed(let summary) = outcome {
+            #expect(summary.skippedCount == 2)
+            #expect(summary.failureCount == 0)
+            #expect(summary.totalFeeds == 2)
+        } else {
+            Issue.record("Expected .completed outcome, got \(outcome)")
+        }
+    }
+
+    @Test("auto-skipped feed does not contribute to BG scheduler failureCount")
+    @MainActor
+    func autoSkippedFeedDoesNotPoisonBGScheduler() async {
+        let streakStart = Date(timeIntervalSinceNow: -(FeedRefreshService.autoSkipThreshold + 3600))
+        let deadFeed = TestFixtures.makePersistentFeed(
+            feedURL: URL(string: "https://dead.com/feed")!,
+            lastFetchError: "HTTP 404",
+            firstFetchErrorDate: streakStart
+        )
+        let healthyURL = URL(string: "https://healthy.com/feed")!
+        let healthyFeed = TestFixtures.makePersistentFeed(feedURL: healthyURL)
+
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [deadFeed, healthyFeed]
+        let mockFetching = MockFeedFetchingService()
+        mockFetching.feedsByURL = [healthyURL: TestFixtures.makeFeed()]
+
+        let service = Self.makeService(persistence: mockPersistence, feedFetching: mockFetching)
+        let outcome = await service.refreshAllFeeds()
+
+        // isSuccess must be true — the dead feed (skipped) must not cause a
+        // false-failure signal to the BG scheduler.
+        #expect(BackgroundRefreshCoordinator.isSuccess(outcome: outcome))
+    }
 }
 
 // MARK: - SlowCancellationPrefetchService

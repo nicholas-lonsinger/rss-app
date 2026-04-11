@@ -67,12 +67,22 @@ final class MockFeedPersistenceService: FeedPersisting {
         feed.lastRefreshDate = Date()
         feed.lastFetchError = nil
         feed.lastFetchErrorDate = nil
+        feed.firstFetchErrorDate = nil
     }
 
     func updateFeedError(_ feed: PersistentFeed, error: String?) throws {
         if let error = updateFeedErrorError ?? errorToThrow { throw error }
-        feed.lastFetchError = error
-        feed.lastFetchErrorDate = error != nil ? Date() : nil
+        if error == nil {
+            feed.lastFetchError = nil
+            feed.lastFetchErrorDate = nil
+            feed.firstFetchErrorDate = nil
+        } else {
+            if feed.firstFetchErrorDate == nil {
+                feed.firstFetchErrorDate = Date()
+            }
+            feed.lastFetchError = error
+            feed.lastFetchErrorDate = Date()
+        }
     }
 
     func updateFeedURL(_ feed: PersistentFeed, newURL: URL) throws {
@@ -80,6 +90,7 @@ final class MockFeedPersistenceService: FeedPersisting {
         feed.feedURL = newURL
         feed.lastFetchError = nil
         feed.lastFetchErrorDate = nil
+        feed.firstFetchErrorDate = nil
     }
 
     func updateFeedCacheHeaders(_ feed: PersistentFeed, etag: String?, lastModified: String?) throws {

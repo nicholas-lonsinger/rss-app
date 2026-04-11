@@ -789,7 +789,8 @@ enum TestFixtures {
         sortOrder: Int = 0,
         iconURL: URL? = nil,
         lastFetchError: String? = nil,
-        lastFetchErrorDate: Date? = nil
+        lastFetchErrorDate: Date? = nil,
+        firstFetchErrorDate: Date? = nil
     ) -> PersistentFeed {
         PersistentFeed(
             id: id,
@@ -800,7 +801,8 @@ enum TestFixtures {
             sortOrder: sortOrder,
             iconURL: iconURL,
             lastFetchError: lastFetchError,
-            lastFetchErrorDate: lastFetchErrorDate
+            lastFetchErrorDate: lastFetchErrorDate,
+            firstFetchErrorDate: firstFetchErrorDate
         )
     }
 

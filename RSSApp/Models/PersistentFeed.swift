@@ -36,6 +36,13 @@ final class PersistentFeed {
     var lastFetchError: String?
     var lastFetchErrorDate: Date?
 
+    /// The date when the current fetch-failure streak began (i.e., the first
+    /// failure after the most recent success). Set on the nil → error
+    /// transition; cleared on a successful fetch. Unlike `lastFetchErrorDate`,
+    /// this field is NOT overwritten on every failure — it preserves the
+    /// streak-start so callers can compute how long the feed has been broken.
+    var firstFetchErrorDate: Date?
+
     // MARK: - Relationships
 
     @Relationship(deleteRule: .cascade, inverse: \PersistentArticle.feed)
@@ -56,7 +63,8 @@ final class PersistentFeed {
         lastModifiedHeader: String? = nil,
         iconURL: URL? = nil,
         lastFetchError: String? = nil,
-        lastFetchErrorDate: Date? = nil
+        lastFetchErrorDate: Date? = nil,
+        firstFetchErrorDate: Date? = nil
     ) {
         self.id = id
         self.title = title
@@ -70,6 +78,7 @@ final class PersistentFeed {
         self.iconURL = iconURL
         self.lastFetchError = lastFetchError
         self.lastFetchErrorDate = lastFetchErrorDate
+        self.firstFetchErrorDate = firstFetchErrorDate
         self.articles = []
         self.groupMemberships = []
     }

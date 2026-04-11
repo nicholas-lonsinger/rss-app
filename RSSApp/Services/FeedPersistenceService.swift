@@ -228,12 +228,28 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
         feed.lastRefreshDate = Date()
         feed.lastFetchError = nil
         feed.lastFetchErrorDate = nil
+        feed.firstFetchErrorDate = nil
         Self.logger.debug("Updated metadata for '\(title, privacy: .public)'")
     }
 
     func updateFeedError(_ feed: PersistentFeed, error: String?) throws {
-        feed.lastFetchError = error
-        feed.lastFetchErrorDate = error != nil ? Date() : nil
+        if error == nil {
+            // Clearing error state on success — reset both error fields and
+            // the streak-start so the next failure restarts the streak clock.
+            feed.lastFetchError = nil
+            feed.lastFetchErrorDate = nil
+            feed.firstFetchErrorDate = nil
+        } else {
+            // Record the streak-start only on the nil → error transition.
+            // If firstFetchErrorDate is already set, the feed is still in an
+            // ongoing streak — preserve the original start date so callers
+            // can compute how long the feed has been broken.
+            if feed.firstFetchErrorDate == nil {
+                feed.firstFetchErrorDate = Date()
+            }
+            feed.lastFetchError = error
+            feed.lastFetchErrorDate = Date()
+        }
         Self.logger.debug("Updated error state for '\(feed.title, privacy: .public)'")
     }
 
@@ -241,6 +257,7 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
         feed.feedURL = newURL
         feed.lastFetchError = nil
         feed.lastFetchErrorDate = nil
+        feed.firstFetchErrorDate = nil
         try modelContext.save()
         Self.logger.debug("Updated URL for '\(feed.title, privacy: .public)'")
     }

@@ -364,7 +364,8 @@ final class FeedListViewModel {
             if summary.saveDidFail {
                 errorMessage = "Unable to save updated feeds."
             } else if summary.failureCount > 0 {
-                errorMessage = "\(summary.failureCount) of \(summary.totalFeeds) feed(s) could not be updated."
+                let attempted = summary.totalFeeds - summary.skippedCount
+                errorMessage = "\(summary.failureCount) of \(attempted) feed(s) could not be updated."
             } else if summary.retentionCleanupFailed {
                 errorMessage = "Article cleanup could not complete."
             }
