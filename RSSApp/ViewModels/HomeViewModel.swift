@@ -168,7 +168,9 @@ final class HomeViewModel {
         } catch {
             // Non-critical — leave the previous value rather than flashing the
             // indicator for a transient fetch error.
-            Self.logger.warning("Failed to load feed failure indicator: \(error, privacy: .public)")
+            Self.logger.warning(
+                "Failed to load feed failure indicator (hasFeedsWithLongRunningFailure stays \(self.hasFeedsWithLongRunningFailure, privacy: .public)): \(error, privacy: .public)"
+            )
         }
     }
 

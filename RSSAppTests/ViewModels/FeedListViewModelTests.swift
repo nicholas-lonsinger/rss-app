@@ -1292,6 +1292,47 @@ struct FeedListViewModelTests {
         #expect(viewModel.errorMessage == "Unable to load your feeds.")
     }
 
+    @Test("refreshAllFeeds error message denominator excludes auto-skipped feeds")
+    @MainActor
+    func refreshFetchFailureMessageExcludesSkippedFeeds() async {
+        // When 1 feed fails and 1 feed is auto-skipped, the error message must
+        // report "1 of 1 feed(s) could not be updated." (attempted only),
+        // not "1 of 2 feed(s) could not be updated." (total including skipped).
+        // Documents the `attempted = totalFeeds - skippedCount` denominator fix
+        // so a future refactor back to `totalFeeds` fails this test.
+        let failingURL = URL(string: "https://failing.com/feed")!
+        let failingFeed = TestFixtures.makePersistentFeed(title: "Failing", feedURL: failingURL)
+
+        let streakStart = Date(timeIntervalSinceNow: -(FeedRefreshService.autoSkipThreshold + 3600))
+        let skippedFeed = TestFixtures.makePersistentFeed(
+            title: "Skipped",
+            feedURL: URL(string: "https://dead.com/feed")!,
+            lastFetchError: "HTTP 404",
+            firstFetchErrorDate: streakStart
+        )
+
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [failingFeed, skippedFeed]
+        let mockFetching = MockFeedFetchingService()
+        mockFetching.errorsByURL = [failingURL: FeedFetchingError.invalidResponse(statusCode: 503)]
+
+        let mockIconService = MockFeedIconService()
+        let refreshService = Self.makeRefreshService(
+            persistence: mockPersistence,
+            feedFetching: mockFetching,
+            feedIconService: mockIconService
+        )
+        let viewModel = FeedListViewModel(
+            persistence: mockPersistence,
+            refreshService: refreshService,
+            feedIconService: mockIconService
+        )
+        await viewModel.refreshAllFeeds()
+
+        // Only 1 feed was attempted (the skipped feed was never fetched).
+        #expect(viewModel.errorMessage == "1 of 1 feed(s) could not be updated.")
+    }
+
     @Test("refreshAllFeeds leaves errorMessage nil on cancellation")
     @MainActor
     func refreshCancelledDoesNotSurfaceError() async {

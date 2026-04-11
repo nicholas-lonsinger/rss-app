@@ -387,11 +387,21 @@ final class FeedRefreshService {
         }
 
         // When ALL feeds are auto-skipped (e.g., a user with only dead feeds),
-        // return early so we don't report an empty-feed .completed with
-        // totalFeeds == 0 (which violates Summary's precondition).
+        // return .completed so refreshAllFeeds() updates lastRefreshCompletedAt
+        // and throttles subsequent on-entry refresh attempts. Without this, every
+        // view entry would trigger a redundant refresh cycle for a user whose only
+        // feeds are permanently dead.
         if activeFeeds.isEmpty {
-            Self.logger.notice("All \(feeds.count, privacy: .public) feeds auto-skipped — reporting .skipped")
-            return .skipped
+            Self.logger.notice("All \(feeds.count, privacy: .public) feeds auto-skipped — reporting .completed with skippedCount=\(feeds.count, privacy: .public)")
+            return .completed(
+                Outcome.Summary(
+                    totalFeeds: feeds.count,
+                    failureCount: 0,
+                    skippedCount: feeds.count,
+                    saveDidFail: false,
+                    retentionCleanupFailed: false
+                )
+            )
         }
 
         let feedFetching = self.feedFetching
@@ -442,7 +452,7 @@ final class FeedRefreshService {
             }
         } catch is CancellationError {
             Self.logger.warning("performRefresh() cancelled — reporting .cancelled outcome")
-            return .cancelled(totalFeeds: feeds.count)
+            return .cancelled(totalFeeds: activeFeeds.count)
         } catch {
             // RATIONALE: The enqueue closures explicitly convert non-CancellationError
             // fetch errors to `.failure` results, so the task group should only ever
@@ -451,7 +461,7 @@ final class FeedRefreshService {
             // `.cancelled` to avoid a misleading .completed outcome.
             Self.logger.fault("performRefresh() task group threw unexpected non-cancellation error: \(error, privacy: .public)")
             assertionFailure("performRefresh() task group threw unexpected error: \(error)")
-            return .cancelled(totalFeeds: feeds.count)
+            return .cancelled(totalFeeds: activeFeeds.count)
         }
 
         // The expirationHandler-triggered cancel path may flip Task.isCancelled
@@ -461,7 +471,7 @@ final class FeedRefreshService {
         // silently reported as completion.
         if Task.isCancelled {
             Self.logger.warning("performRefresh() cancelled before result processing")
-            return .cancelled(totalFeeds: feeds.count)
+            return .cancelled(totalFeeds: activeFeeds.count)
         }
 
         let idToFeed = Dictionary(uniqueKeysWithValues: activeFeeds.map { ($0.id, $0) })
@@ -469,7 +479,7 @@ final class FeedRefreshService {
         for (id, result) in results {
             if Task.isCancelled {
                 Self.logger.warning("performRefresh() cancelled mid-results at feed \(id, privacy: .public)")
-                return .cancelled(totalFeeds: feeds.count)
+                return .cancelled(totalFeeds: activeFeeds.count)
             }
             guard let feed = idToFeed[id] else {
                 Self.logger.warning("Skipping refresh result for feed ID \(id, privacy: .public) — feed no longer in list")
@@ -579,7 +589,7 @@ final class FeedRefreshService {
 
         if Task.isCancelled {
             Self.logger.warning("performRefresh() cancelled before save")
-            return .cancelled(totalFeeds: feeds.count)
+            return .cancelled(totalFeeds: activeFeeds.count)
         }
 
         var saveDidFail = false
@@ -592,7 +602,7 @@ final class FeedRefreshService {
 
         if Task.isCancelled {
             Self.logger.warning("performRefresh() cancelled before retention cleanup")
-            return .cancelled(totalFeeds: feeds.count)
+            return .cancelled(totalFeeds: activeFeeds.count)
         }
 
         // Enforce article retention limit after save so the count reflects the

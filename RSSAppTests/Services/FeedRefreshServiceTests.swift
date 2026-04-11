@@ -862,9 +862,14 @@ struct FeedRefreshServiceTests {
         }
     }
 
-    @Test("refreshAllFeeds returns .skipped when all feeds exceed the auto-skip threshold")
+    @Test("refreshAllFeeds returns .completed(skippedCount: N) when all feeds exceed the auto-skip threshold")
     @MainActor
-    func allFeedsAutoSkippedReturnsSkipped() async {
+    func allFeedsAutoSkippedReturnsCompleted() async {
+        // When every feed is auto-skipped, the outcome must be .completed (not
+        // .skipped) so refreshAllFeeds() updates lastRefreshCompletedAt and
+        // throttles subsequent on-entry refresh attempts. Without this,
+        // a user whose only feeds are permanently dead would trigger a redundant
+        // refresh cycle on every view entry.
         let streakStart = Date(timeIntervalSinceNow: -(FeedRefreshService.autoSkipThreshold + 3600))
         let feed1 = TestFixtures.makePersistentFeed(
             feedURL: URL(string: "https://dead1.com/feed")!,
@@ -884,7 +889,13 @@ struct FeedRefreshServiceTests {
         let service = Self.makeService(persistence: mockPersistence, feedFetching: mockFetching)
         let outcome = await service.refreshAllFeeds()
 
-        #expect(outcome == .skipped)
+        if case .completed(let summary) = outcome {
+            #expect(summary.skippedCount == 2)
+            #expect(summary.failureCount == 0)
+            #expect(summary.totalFeeds == 2)
+        } else {
+            Issue.record("Expected .completed outcome, got \(outcome)")
+        }
     }
 
     @Test("auto-skipped feed does not contribute to BG scheduler failureCount")
