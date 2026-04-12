@@ -5,6 +5,7 @@ struct SubscribedFeed: Identifiable, Hashable, Codable, Sendable {
     let title: String
     let url: URL
     let feedDescription: String
+    let siteURL: URL?
     let addedDate: Date
     let lastFetchError: String?
     let lastFetchErrorDate: Date?
@@ -14,6 +15,7 @@ struct SubscribedFeed: Identifiable, Hashable, Codable, Sendable {
         title: String,
         url: URL,
         feedDescription: String,
+        siteURL: URL? = nil,
         addedDate: Date,
         lastFetchError: String? = nil,
         lastFetchErrorDate: Date? = nil
@@ -22,6 +24,7 @@ struct SubscribedFeed: Identifiable, Hashable, Codable, Sendable {
         self.title = title
         self.url = url
         self.feedDescription = feedDescription
+        self.siteURL = siteURL
         self.addedDate = addedDate
         self.lastFetchError = lastFetchError
         self.lastFetchErrorDate = lastFetchErrorDate

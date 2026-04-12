@@ -827,6 +827,71 @@ struct FeedListViewModelTests {
         #expect(viewModel.opmlImportResult?.addedCount == 1)
     }
 
+    @Test("importOPML populates siteURL on new feed from OPML entry htmlUrl")
+    @MainActor
+    func importOPMLPopulatesSiteURL() {
+        let mockPersistence = MockFeedPersistenceService()
+        let mockOPML = MockOPMLService()
+        let siteURL = URL(string: "https://example.com")!
+        mockOPML.entriesToReturn = [
+            OPMLFeedEntry(
+                title: "Example Feed",
+                feedURL: URL(string: "https://example.com/feed")!,
+                siteURL: siteURL,
+                description: ""
+            ),
+        ]
+
+        let viewModel = Self.makeViewModel(persistence: mockPersistence, opmlService: mockOPML)
+        viewModel.importOPML(from: Data())
+
+        #expect(viewModel.feeds.count == 1)
+        #expect(viewModel.feeds[0].siteURL == siteURL)
+    }
+
+    @Test("importOPML leaves siteURL nil when OPML entry has no htmlUrl")
+    @MainActor
+    func importOPMLLeavesSiteURLNilWhenAbsent() {
+        let mockPersistence = MockFeedPersistenceService()
+        let mockOPML = MockOPMLService()
+        mockOPML.entriesToReturn = [
+            OPMLFeedEntry(
+                title: "No Site Feed",
+                feedURL: URL(string: "https://example.com/feed")!,
+                siteURL: nil,
+                description: ""
+            ),
+        ]
+
+        let viewModel = Self.makeViewModel(persistence: mockPersistence, opmlService: mockOPML)
+        viewModel.importOPML(from: Data())
+
+        #expect(viewModel.feeds.count == 1)
+        #expect(viewModel.feeds[0].siteURL == nil)
+    }
+
+    @Test("exportOPML passes siteURL through toSubscribedFeed conversion")
+    @MainActor
+    func exportOPMLPassesSiteURL() {
+        let siteURL = URL(string: "https://example.com")!
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [
+            TestFixtures.makePersistentFeed(
+                feedURL: URL(string: "https://example.com/feed")!,
+                siteURL: siteURL
+            ),
+        ]
+        let mockOPML = MockOPMLService()
+        mockOPML.dataToReturn = Data("opml-output".utf8)
+
+        let viewModel = Self.makeViewModel(persistence: mockPersistence, opmlService: mockOPML)
+        viewModel.loadFeeds()
+        viewModel.exportOPML()
+
+        let generatedFeed = mockOPML.lastGeneratedGroupedFeeds?.first?.feed
+        #expect(generatedFeed?.siteURL == siteURL)
+    }
+
     @Test("importOPML from URL sets importExportErrorMessage on file read failure")
     @MainActor
     func importOPMLFromURLSetsImportExportErrorOnReadFailure() {

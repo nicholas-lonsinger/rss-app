@@ -216,6 +216,7 @@ final class FeedListViewModel {
                     title: entry.title,
                     feedURL: entry.feedURL,
                     feedDescription: entry.description,
+                    siteURL: entry.siteURL,
                     sortOrder: nextFeedSortOrder
                 )
                 do {

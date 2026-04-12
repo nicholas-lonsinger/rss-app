@@ -97,6 +97,9 @@ struct OPMLService: OPMLServing {
             for feed in feeds {
                 xml += "      <outline text=\"\(xmlEscape(feed.title))\" type=\"rss\""
                 xml += " xmlUrl=\"\(xmlEscape(feed.url.absoluteString))\""
+                if let siteURL = feed.siteURL {
+                    xml += " htmlUrl=\"\(xmlEscape(siteURL.absoluteString))\""
+                }
                 if !feed.feedDescription.isEmpty {
                     xml += " description=\"\(xmlEscape(feed.feedDescription))\""
                 }
@@ -109,6 +112,9 @@ struct OPMLService: OPMLServing {
         for feed in ungroupedFeeds {
             xml += "    <outline text=\"\(xmlEscape(feed.title))\" type=\"rss\""
             xml += " xmlUrl=\"\(xmlEscape(feed.url.absoluteString))\""
+            if let siteURL = feed.siteURL {
+                xml += " htmlUrl=\"\(xmlEscape(siteURL.absoluteString))\""
+            }
             if !feed.feedDescription.isEmpty {
                 xml += " description=\"\(xmlEscape(feed.feedDescription))\""
             }

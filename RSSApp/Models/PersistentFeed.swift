@@ -31,6 +31,15 @@ final class PersistentFeed {
     var etag: String?
     var lastModifiedHeader: String?
 
+    // MARK: - Site URL
+
+    /// The feed's user-facing website URL, sourced from the `htmlUrl` attribute in
+    /// OPML files. Distinct from `feedURL` (the XML endpoint). `nil` for feeds added
+    /// before this field was introduced — SwiftData's implicit schema migration
+    /// initializes the new optional column to `nil` for existing rows on the first
+    /// launch after the schema bump.
+    var siteURL: URL?
+
     // MARK: - Icon
 
     var iconURL: URL?
@@ -80,6 +89,7 @@ final class PersistentFeed {
         title: String,
         feedURL: URL,
         feedDescription: String = "",
+        siteURL: URL? = nil,
         addedDate: Date = Date(),
         sortOrder: Int = 0,
         lastRefreshDate: Date? = nil,
@@ -95,6 +105,7 @@ final class PersistentFeed {
         self.title = title
         self.feedURL = feedURL
         self.feedDescription = feedDescription
+        self.siteURL = siteURL
         self.addedDate = addedDate
         self.sortOrder = sortOrder
         self.lastRefreshDate = lastRefreshDate

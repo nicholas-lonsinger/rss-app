@@ -25,7 +25,7 @@ RSSApp/
 │   ├── OPMLImportResult.swift           # OPML import outcome counts (added, skipped, groupsCreated, groupsReused, total)
 │   ├── PersistentArticle.swift         # @Model — persisted article with read/unread status, saved/bookmarked status, `updatedDate` + `wasUpdated` flag for content-update detection (issue #74), `displayedPublishedDate` computed helper, relationship to feed and content
 │   ├── PersistentArticleContent.swift  # @Model — cached extracted HTML/text content, relationship to article
-│   ├── PersistentFeed.swift            # @Model — persisted feed subscription with caching headers, icon URL, `iconBackgroundStyleRaw` (String) storage + typed `iconBackgroundStyle: FeedIconBackgroundStyle?` computed accessor for per-feed luminance-based tile classification (issue #342), `sortOrder` for user-customizable feed list ordering (issue #333), `firstFetchErrorDate` for streak-start tracking used by auto-skip (issue #326), cascade to articles and group memberships
+│   ├── PersistentFeed.swift            # @Model — persisted feed subscription with caching headers, icon URL, `iconBackgroundStyleRaw` (String) storage + typed `iconBackgroundStyle: FeedIconBackgroundStyle?` computed accessor for per-feed luminance-based tile classification (issue #342), `sortOrder` for user-customizable feed list ordering (issue #333), `firstFetchErrorDate` for streak-start tracking used by auto-skip (issue #326), `siteURL` for the user-facing website URL sourced from OPML `htmlUrl` (issue #355), cascade to articles and group memberships
 │   ├── PersistentFeedGroup.swift       # @Model — user-created feed group with name, sortOrder, cascade to memberships
 │   ├── PersistentFeedGroupMembership.swift # @Model — join model for many-to-many feed↔group relationship; unique (feed, group) enforced at application layer
 │   ├── AtomAlternatePrompt.swift       # Shared value struct — discovered Atom URL + the already-fetched RSS feed for the "Keep RSS" path; failing init enforces "RSS format + distinct URLs" invariants that `AtomDiscoveryService` and the view-model call sites already establish
@@ -159,7 +159,7 @@ RSSAppTests/
 │   ├── HTMLUtilitiesTests.swift        # Tag stripping, entity decoding, image extraction, og:image extraction
 │   ├── UserDefaultsMigrationTests.swift # Migration from UserDefaults to SwiftData, idempotency, ID preservation
 │   ├── KeychainServiceTests.swift      # Save/load/delete/overwrite roundtrips
-│   ├── OPMLServiceTests.swift          # Parse flat/nested/empty OPML, generate + round-trip, XML escaping
+│   ├── OPMLServiceTests.swift          # Parse flat/nested/empty OPML, generate + round-trip, XML escaping, htmlUrl/siteURL round-trip (issue #355)
 │   ├── BackgroundImageDownloadSettingsTests.swift # WiFi-only default, set/get roundtrip, UserDefaults persistence
 │   ├── BackgroundRefreshSettingsTests.swift # Defaults match issue #76 spec (On, 1 hour, Wi-Fi Only, Charging Only), setter round-trips for each of the four preferences, corrupt-value fallback for unknown interval/network/power raw values. Serialized suite to avoid racing on `UserDefaults.standard`
 │   ├── BackgroundRefreshSchedulerTests.swift # Matrix tests pinning `decideTaskType(interval:network:power:)`: unconstrained short (15 min / 1 hr with any network + any power) → appRefresh; any Wi-Fi Only or Charging Only constraint → processing; long intervals (2/8 hr) → processing even without constraints
@@ -296,6 +296,7 @@ RSSAppApp (@main)
 | `OPMLFeedEntry` intermediate type | Decouples OPML parser from persistence model; OPML data lacks `id`/`addedDate` fields |
 | Manual XML generation for OPML export | `XMLDocument` is macOS-only; string building with XML escaping is sufficient for the simple OPML structure |
 | OPML import accepts outlines without `type="rss"` | Real-world OPML files often omit the type attribute; any outline with a valid `xmlUrl` is treated as a feed |
+| `siteURL` sourced from OPML only; not backfilled from RSS/Atom `<link>` | `FeedRefreshService` already uses `fetchResult.feed.link` (RSS/Atom `<link>` channel field) and `feed.feedURL.siteRoot` as heuristics for icon resolution, but does not persist them as `siteURL`. These are ephemeral heuristics computed per-refresh. `siteURL` on `PersistentFeed` exclusively holds the explicit user-facing website URL from OPML `htmlUrl` — an authoritative publisher-supplied value that should only be written during import (issue #355). Mixing derived heuristics into the canonical field would silently overwrite the OPML value on every refresh |
 | Feed title fetched at add-time | Validates the URL is a real feed; better UX than requiring manual title entry |
 | `FeedViewModel` with cache-first loading | Shows cached articles immediately from SwiftData, then fetches from network and upserts; enables offline browsing |
 | Home screen as app root | Provides meta-groups (All Articles, Unread Articles, Saved Articles, All Feeds) above the feed list; pushes `FeedListView` via NavigationStack rather than replacing it |
