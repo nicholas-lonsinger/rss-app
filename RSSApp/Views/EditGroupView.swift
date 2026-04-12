@@ -46,10 +46,11 @@ struct EditGroupView: View {
                                     Spacer()
                                     if viewModel.memberFeedIDs.contains(feed.id) {
                                         Image(systemName: "checkmark")
-                                            .foregroundStyle(.blue)
+                                            .foregroundStyle(.tint)
                                     }
                                 }
                             }
+                            .buttonStyle(.plain)
                         }
                     }
                 } header: {
