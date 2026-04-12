@@ -33,7 +33,11 @@ final class AddFeedViewModel {
     init(
         feedFetching: FeedFetching = FeedFetchingService(),
         persistence: FeedPersisting,
-        feedIconService: FeedIconResolving = FeedIconService(),
+        // RATIONALE: Uses an isolated FeedIconMissTracker rather than .shared so that
+        // add-time icon resolution failures don't contaminate the shared refresh-cycle
+        // miss counter. A single transient failure at add time should not trigger the
+        // chronic-failure warning that is intended for repeated background-refresh misses.
+        feedIconService: FeedIconResolving = FeedIconService(missTracker: FeedIconMissTracker()),
         atomDiscovery: any AtomDiscovering = AtomDiscoveryService()
     ) {
         self.feedFetching = feedFetching
