@@ -91,6 +91,42 @@ protocol FeedIconResolving: Sendable {
     func deleteCachedIcon(for feedID: UUID)
 }
 
+// MARK: - Miss Tracker
+
+/// Tracks consecutive icon-resolution misses per feed so `FeedIconService` can
+/// escalate log level to `.warning` (persisted to disk) after a feed
+/// chronically fails to resolve an icon. The counter resets to zero whenever a
+/// feed successfully caches an icon, so transient failures (network blip,
+/// temporary CDN 403) don't accumulate toward the threshold.
+///
+/// State is in-memory only — it resets on app launch, which is acceptable
+/// because the failure conditions are typically transient across sessions and
+/// the persisted `.warning` logs are sufficient for post-mortem diagnosis.
+actor FeedIconMissTracker {
+
+    /// Number of consecutive resolution misses after which a `.warning` log is
+    /// emitted instead of `.debug`. Three misses covers roughly one day of
+    /// background refreshes (every ~6–8 hours) before logging persistently.
+    static let missThreshold = 3
+
+    /// Shared instance used by all production `FeedIconService` instances.
+    static let shared = FeedIconMissTracker()
+
+    private var missCounters: [UUID: Int] = [:]
+
+    /// Increments the miss counter for `feedID` and returns the new count.
+    func recordMiss(for feedID: UUID) -> Int {
+        let count = (missCounters[feedID] ?? 0) + 1
+        missCounters[feedID] = count
+        return count
+    }
+
+    /// Resets the miss counter for `feedID` after a successful icon cache.
+    func recordSuccess(for feedID: UUID) {
+        missCounters.removeValue(forKey: feedID)
+    }
+}
+
 // MARK: - Implementation
 
 struct FeedIconService: FeedIconResolving {
@@ -116,8 +152,14 @@ struct FeedIconService: FeedIconResolving {
     /// on crash. See `FeedIconServiceTests` for the test-side helper.
     private let cacheDirectoryOverride: URL?
 
-    init(cacheDirectoryOverride: URL? = nil) {
+    /// Tracks consecutive resolution misses per feed to decide when to escalate
+    /// from `.debug` to `.warning` logging. Defaults to the shared app-wide
+    /// instance; tests inject a dedicated instance for isolation.
+    private let missTracker: FeedIconMissTracker
+
+    init(cacheDirectoryOverride: URL? = nil, missTracker: FeedIconMissTracker = .shared) {
         self.cacheDirectoryOverride = cacheDirectoryOverride
+        self.missTracker = missTracker
     }
 
     // MARK: - FeedIconResolving
@@ -204,6 +246,7 @@ struct FeedIconService: FeedIconResolving {
            Self.passesFastPathThreshold(image: image) {
             Self.logger.info("Fast-path: feed XML icon passed quality threshold for feed \(feedID.uuidString, privacy: .public) — using \(feedXMLCandidate.url.absoluteString, privacy: .public)")
             if let backgroundStyle = await writeNormalizedIcon(image: image, stats: stats, from: feedXMLCandidate.url, feedID: feedID) {
+                await missTracker.recordSuccess(for: feedID)
                 return (feedXMLCandidate.url, backgroundStyle)
             }
             Self.logger.warning("Fast-path write failed for feed \(feedID.uuidString, privacy: .public) — falling through to full scoring pass")
@@ -235,7 +278,16 @@ struct FeedIconService: FeedIconResolving {
         }
 
         guard !downloadedCandidates.isEmpty else {
-            Self.logger.warning("No icon candidates downloaded for feed \(feedID.uuidString, privacy: .public) (\(candidatesToScore.count, privacy: .public) tried)")
+            let missCount = await missTracker.recordMiss(for: feedID)
+            if missCount == FeedIconMissTracker.missThreshold {
+                Self.logger.warning(
+                    "Icon resolution chronically failing for feed \(feedID.uuidString, privacy: .public) (\(feedSiteURL?.absoluteString ?? "no site URL", privacy: .public)) after \(missCount, privacy: .public) consecutive misses"
+                )
+            } else {
+                Self.logger.debug(
+                    "No icon candidates downloaded for feed \(feedID.uuidString, privacy: .public) (\(candidatesToScore.count, privacy: .public) tried, miss #\(missCount, privacy: .public))"
+                )
+            }
             return nil
         }
 
@@ -255,6 +307,7 @@ struct FeedIconService: FeedIconResolving {
         Self.logger.info("Best icon candidate for feed \(feedID.uuidString, privacy: .public): \(best.candidate.url.absoluteString, privacy: .public) (score=\(best.score, privacy: .public))")
 
         if let backgroundStyle = await writeNormalizedIcon(image: best.image, stats: best.stats, from: best.candidate.url, feedID: feedID) {
+            await missTracker.recordSuccess(for: feedID)
             return (best.candidate.url, backgroundStyle)
         }
 
@@ -265,11 +318,21 @@ struct FeedIconService: FeedIconResolving {
         for fallback in fallbacks {
             if let backgroundStyle = await writeNormalizedIcon(image: fallback.image, stats: fallback.stats, from: fallback.candidate.url, feedID: feedID) {
                 Self.logger.notice("Fell back to candidate \(fallback.candidate.url.absoluteString, privacy: .public) for feed \(feedID.uuidString, privacy: .public)")
+                await missTracker.recordSuccess(for: feedID)
                 return (fallback.candidate.url, backgroundStyle)
             }
         }
 
-        Self.logger.warning("No icon cached for feed \(feedID.uuidString, privacy: .public) after scoring \(downloadedCandidates.count, privacy: .public) candidates")
+        let missCount = await missTracker.recordMiss(for: feedID)
+        if missCount == FeedIconMissTracker.missThreshold {
+            Self.logger.warning(
+                "Icon resolution chronically failing for feed \(feedID.uuidString, privacy: .public) (\(feedSiteURL?.absoluteString ?? "no site URL", privacy: .public)) after \(missCount, privacy: .public) consecutive misses"
+            )
+        } else {
+            Self.logger.debug(
+                "No icon cached for feed \(feedID.uuidString, privacy: .public) after scoring \(downloadedCandidates.count, privacy: .public) candidates, miss #\(missCount, privacy: .public)"
+            )
+        }
         return nil
     }
 

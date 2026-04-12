@@ -919,3 +919,79 @@ struct HTMLUtilitiesIconExtractionTests {
         #expect(urls.count == 2)
     }
 }
+
+// MARK: - FeedIconMissTracker Tests
+
+@Suite("FeedIconMissTracker Tests")
+struct FeedIconMissTrackerTests {
+
+    @Test("Miss count starts at zero for unknown feed")
+    func initialMissCountIsZero() async {
+        let tracker = FeedIconMissTracker()
+        let feedID = UUID()
+
+        #expect(await tracker.missCount(for: feedID) == 0)
+    }
+
+    @Test("recordMiss increments counter and returns new count")
+    func recordMissIncrementsCounter() async {
+        let tracker = FeedIconMissTracker()
+        let feedID = UUID()
+
+        let first = await tracker.recordMiss(for: feedID)
+        let second = await tracker.recordMiss(for: feedID)
+
+        #expect(first == 1)
+        #expect(second == 2)
+        #expect(await tracker.missCount(for: feedID) == 2)
+    }
+
+    @Test("recordSuccess resets counter to zero")
+    func recordSuccessResetsCounter() async {
+        let tracker = FeedIconMissTracker()
+        let feedID = UUID()
+
+        _ = await tracker.recordMiss(for: feedID)
+        _ = await tracker.recordMiss(for: feedID)
+        await tracker.recordSuccess(for: feedID)
+
+        #expect(await tracker.missCount(for: feedID) == 0)
+    }
+
+    @Test("Counters are isolated per feed ID")
+    func countersIsolatedPerFeed() async {
+        let tracker = FeedIconMissTracker()
+        let feedA = UUID()
+        let feedB = UUID()
+
+        _ = await tracker.recordMiss(for: feedA)
+        _ = await tracker.recordMiss(for: feedA)
+        _ = await tracker.recordMiss(for: feedB)
+
+        #expect(await tracker.missCount(for: feedA) == 2)
+        #expect(await tracker.missCount(for: feedB) == 1)
+    }
+
+    @Test("recordSuccess on feed with no misses is a no-op")
+    func recordSuccessNoMissesIsNoOp() async {
+        let tracker = FeedIconMissTracker()
+        let feedID = UUID()
+
+        await tracker.recordSuccess(for: feedID)
+
+        #expect(await tracker.missCount(for: feedID) == 0)
+    }
+
+    @Test("Miss count after success followed by a new miss is one")
+    func missCountRestartsAfterSuccess() async {
+        let tracker = FeedIconMissTracker()
+        let feedID = UUID()
+
+        _ = await tracker.recordMiss(for: feedID)
+        _ = await tracker.recordMiss(for: feedID)
+        await tracker.recordSuccess(for: feedID)
+        let afterReset = await tracker.recordMiss(for: feedID)
+
+        #expect(afterReset == 1)
+    }
+}
