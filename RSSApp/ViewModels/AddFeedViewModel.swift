@@ -16,10 +16,19 @@ final class AddFeedViewModel {
     /// Set when `switchToAtomAlternate(from:)` fell back to persisting the
     /// original RSS feed because the Atom fetch failed. Drives a follow-up
     /// alert that explains the fallback to the user. The RSS feed is already
-    /// persisted at this point — the view model waits for the user to
-    /// acknowledge the notice (via `acknowledgeAtomFallbackNotice()`) before
-    /// setting `didAddFeed = true` and allowing the sheet to dismiss.
-    var atomFallbackNotice: URL?
+    /// persisted at this point — clearing this to `nil` (e.g. when the user
+    /// taps OK) triggers `didAddFeed = true` via `didSet` and allows the
+    /// sheet to dismiss.
+    var atomFallbackNotice: URL? {
+        didSet {
+            // Guard against double-fire: only transition to didAddFeed when
+            // the property moves from a non-nil value to nil. Re-assigning
+            // nil (e.g. a second binding-setter call during alert dismissal)
+            // is a no-op so the observation tracker stays clean.
+            guard oldValue != nil, atomFallbackNotice == nil else { return }
+            didAddFeed = true
+        }
+    }
 
     var canSubmit: Bool {
         !urlInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isValidating
@@ -202,25 +211,6 @@ final class AddFeedViewModel {
         if persistFetchedFeed(atomFeed, url: atomURL) {
             didAddFeed = true
         }
-    }
-
-    /// Called by the view after the user acknowledges the Atom-fallback
-    /// notice alert. Clears the notice state and signals the sheet to
-    /// dismiss now that the user has seen the message.
-    ///
-    /// The guard is defensive — SwiftUI's alert-binding setter can fire
-    /// more than once during dismissal transitions on some iOS versions.
-    /// Without the guard, the second call would re-set `didAddFeed = true`
-    /// on an already-dismissing sheet, which is harmless but pollutes the
-    /// observation tracker. Log + early-return makes unexpected re-entries
-    /// visible instead of silently no-op'ing.
-    func acknowledgeAtomFallbackNotice() {
-        guard atomFallbackNotice != nil else {
-            Self.logger.debug("acknowledgeAtomFallbackNotice called with no pending notice; ignoring")
-            return
-        }
-        atomFallbackNotice = nil
-        didAddFeed = true
     }
 
     /// Persists a fetched feed. Returns true on success, false if persistence

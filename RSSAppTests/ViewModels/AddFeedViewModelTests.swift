@@ -510,8 +510,9 @@ struct AddFeedViewModelTests {
         // The user's original URL stays in the field while the notice is up.
         #expect(viewModel.urlInput == rssURL.absoluteString)
 
-        // Simulate the user tapping OK on the notice.
-        viewModel.acknowledgeAtomFallbackNotice()
+        // Simulate the user tapping OK on the notice (nils the binding,
+        // which triggers didSet → didAddFeed = true).
+        viewModel.atomFallbackNotice = nil
 
         #expect(viewModel.atomFallbackNotice == nil)
         #expect(viewModel.didAddFeed == true)

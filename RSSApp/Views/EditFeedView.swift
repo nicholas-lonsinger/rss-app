@@ -85,11 +85,10 @@ struct EditFeedView: View {
             }
             .atomFeedAlerts(
                 atomAlternatePrompt: $viewModel.atomAlternatePrompt,
-                atomFallbackNotice: viewModel.atomFallbackNotice,
+                atomFallbackNotice: $viewModel.atomFallbackNotice,
                 switchToAtom: { prompt in await viewModel.switchToAtomAlternate(from: prompt) },
                 keepRSS: { prompt in viewModel.keepOriginalFeed(from: prompt) },
-                acknowledgeFallback: { viewModel.acknowledgeAtomFallbackNotice() },
-                actionVerb: "saved"
+                actionVerb: .saved
             )
         }
     }

@@ -3,15 +3,28 @@ import SwiftUI
 /// Encapsulates the two Atom-related alert modifiers shared by `AddFeedView`
 /// and `EditFeedView`: the "Atom feed available" prompt (Switch to Atom / Keep
 /// RSS) and the "Atom feed unavailable" fallback notice (OK).
+///
+/// `atomAlternatePrompt` and `atomFallbackNotice` are mutually exclusive — the
+/// view models ensure at most one is non-nil at a time.
 struct AtomFeedAlerts: ViewModifier {
     @Binding var atomAlternatePrompt: AtomAlternatePrompt?
-    let atomFallbackNotice: URL?
+    @Binding var atomFallbackNotice: URL?
     let switchToAtom: (AtomAlternatePrompt) async -> Void
     let keepRSS: (AtomAlternatePrompt) -> Void
-    let acknowledgeFallback: () -> Void
-    /// Verb used in the fallback message body: "added" (AddFeedView) or
-    /// "saved" (EditFeedView).
-    let actionVerb: String
+    /// Context used in the fallback message body.
+    let actionVerb: ActionVerb
+
+    enum ActionVerb {
+        case added
+        case saved
+
+        var string: String {
+            switch self {
+            case .added: "added"
+            case .saved: "saved"
+            }
+        }
+    }
 
     func body(content: Content) -> some View {
         content
@@ -23,11 +36,14 @@ struct AtomFeedAlerts: ViewModifier {
                 ),
                 presenting: atomAlternatePrompt
             ) { prompt in
-                // RATIONALE: capture `prompt` synchronously here rather than
-                // re-reading `atomAlternatePrompt` inside the Task. SwiftUI's
-                // `.alert(isPresented:)` clears the bound state as the alert
-                // dismisses, which races with the spawned Task and would cause
-                // switchToAtom/keepRSS to see nil and no-op silently.
+                // RATIONALE: We pass `prompt` directly into switchToAtom/keepRSS
+                // rather than re-reading `atomAlternatePrompt` from the binding,
+                // because SwiftUI clears the bound state as part of alert dismissal
+                // — and the ordering between that setter and the button-action
+                // closure is not guaranteed. If the setter fires first,
+                // `atomAlternatePrompt` would be nil and the call site would have
+                // no value to pass. The async Task in Switch to Atom makes the
+                // window larger, but both paths share the same defense.
                 Button("Switch to Atom") {
                     Task { await switchToAtom(prompt) }
                 }
@@ -41,16 +57,15 @@ struct AtomFeedAlerts: ViewModifier {
                 "Atom feed unavailable",
                 isPresented: Binding(
                     get: { atomFallbackNotice != nil },
-                    // Acknowledging the notice both clears it and signals
-                    // the sheet to dismiss so the successfully-persisted feed
-                    // becomes visible.
-                    set: { if !$0 { acknowledgeFallback() } }
+                    // Acknowledging the notice clears it; the view model's
+                    // didSet on atomFallbackNotice then signals sheet dismissal.
+                    set: { if !$0 { atomFallbackNotice = nil } }
                 ),
                 presenting: atomFallbackNotice
             ) { _ in
                 Button("OK", role: .cancel) { }
             } message: { atomURL in
-                Text("The Atom feed at \(atomURL.absoluteString) couldn't be loaded. The RSS version has been \(actionVerb) instead.")
+                Text("The Atom feed at \(atomURL.absoluteString) couldn't be loaded. The RSS version has been \(actionVerb.string) instead.")
             }
     }
 }
@@ -58,18 +73,16 @@ struct AtomFeedAlerts: ViewModifier {
 extension View {
     func atomFeedAlerts(
         atomAlternatePrompt: Binding<AtomAlternatePrompt?>,
-        atomFallbackNotice: URL?,
+        atomFallbackNotice: Binding<URL?>,
         switchToAtom: @escaping (AtomAlternatePrompt) async -> Void,
         keepRSS: @escaping (AtomAlternatePrompt) -> Void,
-        acknowledgeFallback: @escaping () -> Void,
-        actionVerb: String
+        actionVerb: AtomFeedAlerts.ActionVerb
     ) -> some View {
         modifier(AtomFeedAlerts(
             atomAlternatePrompt: atomAlternatePrompt,
             atomFallbackNotice: atomFallbackNotice,
             switchToAtom: switchToAtom,
             keepRSS: keepRSS,
-            acknowledgeFallback: acknowledgeFallback,
             actionVerb: actionVerb
         ))
     }
