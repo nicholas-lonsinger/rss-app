@@ -61,10 +61,17 @@ struct ArticleRowView: View {
     ///     [icon] Feed title · Apr 8  [Updated]               [bookmark]
     ///
     /// A middle dot (`·`) separates the feed name from the date or updated
-    /// text. When `shouldShowUpdatedSuffix` is true the dot precedes the
-    /// relative freshness string; otherwise it precedes the absolute publish
-    /// date. The orange "Updated" capsule badge is appended when `wasUpdated`
-    /// is true.
+    /// text. When `isRead && shouldShowUpdatedSuffix` is true the dot precedes
+    /// the relative freshness string; otherwise it precedes the absolute publish
+    /// date. The `isRead` gate prevents "Updated 3 hours ago" from appearing on
+    /// articles the user has never opened — that label implies the user saw an
+    /// earlier version, which is meaningless before first read.
+    ///
+    /// The orange "Updated" capsule badge is appended when `wasUpdated` is true,
+    /// without an `isRead` gate. `upsertArticles` sets `wasUpdated = true` while
+    /// the article is unread; `markRead` clears `wasUpdated` before setting
+    /// `isRead = true`, so the badge is only ever visible on unread articles —
+    /// suppressing it behind `isRead` would make it permanently invisible.
     @ViewBuilder
     private var metadataFooter: some View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
@@ -72,7 +79,7 @@ struct ArticleRowView: View {
             Text("·")
                 .foregroundStyle(.tertiary)
                 .accessibilityHidden(true)
-            if article.shouldShowUpdatedSuffix, let updated = article.updatedDate {
+            if article.isRead && article.shouldShowUpdatedSuffix, let updated = article.updatedDate {
                 Text("Updated \(updated, format: .relative(presentation: .named))")
             } else {
                 Text(publishDateText)
