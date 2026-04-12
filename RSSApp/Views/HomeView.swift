@@ -249,6 +249,10 @@ struct HomeView: View {
 
     // MARK: - Helpers
 
+    // RATIONALE: `Binding(presentingIfNonNil:)` is not used here because
+    // dismissal must call `viewModel.clearError()` rather than nil the optional
+    // directly — `clearError()` performs additional side-effect cleanup beyond
+    // setting `errorMessage = nil`.
     private var errorAlertBinding: Binding<Bool> {
         Binding(
             get: { viewModel.errorMessage != nil },

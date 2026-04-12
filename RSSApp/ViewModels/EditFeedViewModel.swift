@@ -18,6 +18,9 @@ final class EditFeedViewModel {
     /// alert that explains the fallback. The edit has already been committed
     /// at this point — clearing this to `nil` (e.g. when the user taps OK)
     /// triggers `didSave = true` via `didSet` and allows the sheet to dismiss.
+    // RATIONALE: No `private(set)` here — `AtomFeedAlerts` receives this as a
+    // `@Binding`, which requires a public setter. Misuse is constrained by the
+    // `didSet` guard: only a non-nil → nil transition triggers `didSave = true`.
     var atomFallbackNotice: URL? {
         didSet {
             // Guard against double-fire: only transition to didSave when the
