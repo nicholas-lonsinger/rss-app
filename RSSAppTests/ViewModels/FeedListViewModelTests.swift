@@ -1153,6 +1153,7 @@ struct FeedListViewModelTests {
 
         #expect(viewModel.opmlExportURL == nil)
         #expect(viewModel.importExportErrorMessage == "Unable to export feeds.")
+        #expect(viewModel.errorMessage == nil)
     }
 
     // MARK: - Refresh Delegation — outcome → errorMessage translation

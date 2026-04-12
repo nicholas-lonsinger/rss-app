@@ -285,17 +285,29 @@ final class FeedListViewModel {
     func exportOPML() {
         importExportErrorMessage = nil
         Self.logger.debug("exportOPML() called")
-        do {
-            // Fetch all memberships in one query and build a lookup table so the
-            // per-feed group-name resolution below is O(1) instead of N queries.
-            let allMemberships = try persistence.allGroupMemberships()
-            var groupNamesByFeedID: [UUID: [String]] = [:]
-            for membership in allMemberships {
-                guard let feedID = membership.feed?.id,
-                      let groupName = membership.group?.name else { continue }
-                groupNamesByFeedID[feedID, default: []].append(groupName)
-            }
 
+        // Fetch all memberships in one query and build a lookup table so the
+        // per-feed group-name resolution below is O(1) instead of N queries.
+        let allMemberships: [PersistentFeedGroupMembership]
+        do {
+            allMemberships = try persistence.allGroupMemberships()
+        } catch {
+            importExportErrorMessage = "Unable to export feeds."
+            Self.logger.error("OPML export failed — could not fetch group memberships: \(error, privacy: .public)")
+            return
+        }
+
+        var groupNamesByFeedID: [UUID: [String]] = [:]
+        for membership in allMemberships {
+            guard let feedID = membership.feed?.id,
+                  let groupName = membership.group?.name else {
+                Self.logger.warning("Skipping membership with nil feed or group during OPML export — orphaned record in SwiftData")
+                continue
+            }
+            groupNamesByFeedID[feedID, default: []].append(groupName)
+        }
+
+        do {
             let groupedFeeds: [GroupedFeed] = feeds.map { feed in
                 let groupNames = groupNamesByFeedID[feed.id] ?? []
                 return GroupedFeed(feed: feed.toSubscribedFeed(), groupNames: groupNames)
@@ -307,7 +319,7 @@ final class FeedListViewModel {
             opmlExportURL = tempURL
         } catch {
             importExportErrorMessage = "Unable to export feeds."
-            Self.logger.error("OPML export failed: \(error, privacy: .public)")
+            Self.logger.error("OPML export failed — could not generate or write OPML data: \(error, privacy: .public)")
         }
     }
 
