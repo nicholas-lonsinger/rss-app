@@ -71,6 +71,7 @@ struct ArticleRowView: View {
             feedLabel
             Text("·")
                 .foregroundStyle(.tertiary)
+                .accessibilityHidden(true)
             if article.shouldShowUpdatedSuffix, let updated = article.updatedDate {
                 Text("Updated \(updated, format: .relative(presentation: .named))")
             } else {
