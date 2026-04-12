@@ -1,3 +1,4 @@
+import os
 import SwiftUI
 
 /// Single shared implementation of every article list in the app. Generic
@@ -14,6 +15,8 @@ import SwiftUI
 /// is gated by the two-gate `hasAppeared` + `returningFromReader` mechanism
 /// documented below and in ARCHITECTURE.md.
 struct ArticleListScreen<Source: ArticleListSource>: View {
+
+    private static let logger = Logger(category: "ArticleListScreen")
 
     let source: Source
     let persistence: FeedPersisting
@@ -173,6 +176,7 @@ struct ArticleListScreen<Source: ArticleListSource>: View {
             // back `HomeViewModel` get a harmless no-op reload of already-loaded
             // state. Fixes #347.
             guard newPhase == .active, hasAppeared else { return }
+            Self.logger.info("Foregrounded — rehydrating '\(source.title, privacy: .public)' article list from store")
             source.reload()
         }
     }
