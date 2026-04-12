@@ -676,22 +676,18 @@ final class FeedRefreshService {
             }
             return
         }
-        guard let resolved = await feedIconService.resolveAndCacheIcon(
+        let resolved = await feedIconService.resolveAndCacheIcon(
             feedSiteURL: siteURL,
             feedImageURL: feedImageURL,
             feedID: feed.id
-        ) else { return }
+        )
         do {
-            try persistence.updateFeedIcon(
-                feed,
-                iconURL: resolved.url,
-                backgroundStyle: resolved.backgroundStyle
-            )
+            try persistence.applyIconResolution(resolved, to: feed)
         } catch {
-            // RATIONALE: No error surfaced here. This runs inside a fire-and-forget Task
-            // spawned by performRefresh(), so mutating the caller's errorMessage would race
-            // with the post-refresh error state assignment. Icon persistence failure is also
-            // cosmetic and self-healing — the icon is re-resolved on the next refresh.
+            // RATIONALE: No error surfaced to the caller. This runs inside a fire-and-forget
+            // Task spawned by performRefresh(), so mutating the caller's errorMessage would
+            // race with the post-refresh error state assignment. Icon persistence failure is
+            // also cosmetic and self-healing — the icon is re-resolved on the next refresh.
             Self.logger.error("Failed to persist icon URL for '\(feed.title, privacy: .public)': \(error, privacy: .public)")
         }
     }

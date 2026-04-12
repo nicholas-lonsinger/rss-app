@@ -261,17 +261,14 @@ final class AddFeedViewModel {
         let feedImageURL = rssFeed.imageURL
         let persistenceRef = self.persistence
         Task {
-            guard let resolved = await iconService.resolveAndCacheIcon(
+            let resolved = await iconService.resolveAndCacheIcon(
                 feedSiteURL: siteURL,
                 feedImageURL: feedImageURL,
                 feedID: newFeed.id
-            ) else { return }
+            )
+            guard resolved != nil else { return }
             do {
-                try persistenceRef.updateFeedIcon(
-                    newFeed,
-                    iconURL: resolved.url,
-                    backgroundStyle: resolved.backgroundStyle
-                )
+                try persistenceRef.applyIconResolution(resolved, to: newFeed)
                 try persistenceRef.save()
             } catch {
                 Self.logger.error("Failed to persist icon for '\(feedTitle, privacy: .public)': \(error, privacy: .public)")
