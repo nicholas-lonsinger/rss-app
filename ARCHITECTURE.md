@@ -79,6 +79,7 @@ RSSApp/
 ├── Views/                              # SwiftUI views
 │   ├── ActivityShareView.swift          # UIViewControllerRepresentable wrapping UIActivityViewController
 │   ├── AddFeedView.swift               # Sheet for adding a new feed — URL input + validation
+│   ├── AtomFeedAlertsModifier.swift    # `AtomFeedAlerts` ViewModifier + `atomFeedAlerts(...)` View extension — encapsulates the "Atom feed available" prompt (Switch to Atom / Keep RSS) and "Atom feed unavailable" fallback notice (OK) alerts shared by `AddFeedView` and `EditFeedView`; accepts an `actionVerb` string ("added" vs "saved") to differentiate the fallback message copy
 │   ├── APIKeySettingsView.swift        # Keychain API key entry/removal UI (pushed from SettingsView or presented as sheet)
 │   ├── ArticleDiscussionView.swift     # Chat sheet — message bubbles + streaming input
 │   ├── ArticleListScreen.swift         # Single shared implementation of every article list in the app (per-feed, All, Unread, Saved — and future feed-group / label variants). Generic over `ArticleListSource`. Owns the two-gate snapshot preservation (#209), loading/error-with-retry/empty/content rendering in a single `List` container so `.refreshable` is reachable from every state, toolbar Menu assembled from source capability flags, row-tap gating on `markAsRead` success, and `navigationDestination` into `ArticleReaderView`. No list-specific logic lives here — source-specific behavior flows through the injected source
