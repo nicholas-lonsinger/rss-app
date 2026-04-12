@@ -27,7 +27,8 @@ struct OPMLImportResult: Sendable, Equatable {
 
     /// A user-facing multi-line bulleted summary of the import result.
     var importSummary: String {
-        if addedCount == 0 && skippedCount > 0 && failedCount == 0 && groupsFailedCount == 0 {
+        if addedCount == 0 && skippedCount > 0 && failedCount == 0
+            && groupsCreatedCount == 0 && groupsReusedCount == 0 && groupsFailedCount == 0 {
             return "All \(skippedCount) \(skippedCount == 1 ? "feed was" : "feeds were") already in your list."
         }
 

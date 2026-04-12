@@ -151,4 +151,22 @@ struct OPMLImportResultTests {
         #expect(summary.contains("3 duplicates skipped"))
         #expect(summary.contains("group assignment failed"))
     }
+
+    @Test("All-duplicates special case is not triggered when feed failures also present")
+    func allDuplicatesWithFeedFailureNotSpecialCased() {
+        let result = OPMLImportResult(addedCount: 0, skippedCount: 3, failedCount: 1)
+        let summary = result.importSummary
+        #expect(summary.hasPrefix("Imported from OPML:"))
+        #expect(summary.contains("3 duplicates skipped"))
+        #expect(summary.contains("feed couldn't be saved"))
+    }
+
+    @Test("All-duplicates special case is not triggered when groups were created")
+    func allDuplicatesWithGroupCreationNotSpecialCased() {
+        let result = OPMLImportResult(addedCount: 0, skippedCount: 2, groupsCreatedCount: 1)
+        let summary = result.importSummary
+        #expect(summary.hasPrefix("Imported from OPML:"))
+        #expect(summary.contains("2 duplicates skipped"))
+        #expect(summary.contains("group"))
+    }
 }
