@@ -165,6 +165,9 @@ protocol FeedPersisting: Sendable {
     func removeFeed(_ feed: PersistentFeed, from group: PersistentFeedGroup) throws
     func feeds(in group: PersistentFeedGroup) throws -> [PersistentFeed]
     func groups(for feed: PersistentFeed) throws -> [PersistentFeedGroup]
+    /// Returns all group memberships in a single query. Use this for bulk
+    /// operations (e.g. OPML export) to avoid N+1 per-feed queries.
+    func allGroupMemberships() throws -> [PersistentFeedGroupMembership]
 
     /// Returns a page of articles from all feeds in the group, sorted by `sortDate`,
     /// using cursor-based pagination. Fetches only `limit` articles per feed regardless
@@ -994,6 +997,13 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
             .sorted { $0.sortOrder < $1.sortOrder }
         Self.logger.debug("Feed '\(feed.title, privacy: .public)' belongs to \(groups.count, privacy: .public) groups")
         return groups
+    }
+
+    func allGroupMemberships() throws -> [PersistentFeedGroupMembership] {
+        let descriptor = FetchDescriptor<PersistentFeedGroupMembership>()
+        let memberships = try modelContext.fetch(descriptor)
+        Self.logger.debug("Fetched \(memberships.count, privacy: .public) group memberships")
+        return memberships
     }
 
     // RATIONALE: SwiftData's #Predicate does not support `array.contains(keypath)` on

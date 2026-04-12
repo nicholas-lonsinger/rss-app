@@ -286,9 +286,18 @@ final class FeedListViewModel {
         importExportErrorMessage = nil
         Self.logger.debug("exportOPML() called")
         do {
-            let groupedFeeds: [GroupedFeed] = try feeds.map { feed in
-                let groups = try persistence.groups(for: feed)
-                let groupNames = groups.map(\.name)
+            // Fetch all memberships in one query and build a lookup table so the
+            // per-feed group-name resolution below is O(1) instead of N queries.
+            let allMemberships = try persistence.allGroupMemberships()
+            var groupNamesByFeedID: [UUID: [String]] = [:]
+            for membership in allMemberships {
+                guard let feedID = membership.feed?.id,
+                      let groupName = membership.group?.name else { continue }
+                groupNamesByFeedID[feedID, default: []].append(groupName)
+            }
+
+            let groupedFeeds: [GroupedFeed] = feeds.map { feed in
+                let groupNames = groupNamesByFeedID[feed.id] ?? []
                 return GroupedFeed(feed: feed.toSubscribedFeed(), groupNames: groupNames)
             }
             let data = try opmlService.generateOPML(from: groupedFeeds)
