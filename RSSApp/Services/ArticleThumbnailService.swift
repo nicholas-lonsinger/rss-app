@@ -53,7 +53,19 @@ struct ArticleThumbnailService: ArticleThumbnailCaching {
 
     private static let cacheDirectoryName = "article-thumbnails"
     private static let fetchTimeout: TimeInterval = 15
-    private static let thumbnailDimension: CGFloat = 120 // 2× retina for 60pt display
+    // RATIONALE: thumbnailSize is the single source of truth for the display size of article
+    // thumbnails. It lives here (the service) rather than in ArticleThumbnailView so that the
+    // non-isolated service can reference it without a @MainActor hop. The view reads it back
+    // from here via ArticleThumbnailService.thumbnailSize, keeping the natural dependency
+    // direction (view depends on service, not vice versa).
+    static let thumbnailSize: CGFloat = 72
+    // RATIONALE: thumbnailDimension uses a hardcoded 3× multiplier — the maximum pixel density
+    // across all supported iPhone models (3× for Pro/Plus) — rather than reading
+    // UIScreen.main.scale, which is @MainActor-isolated and deprecated since iOS 16. This
+    // makes the constant a compile-time value, thread-safe, and correct on every device class.
+    // Caching at 3× on 1× and 2× devices costs a small amount of extra disk space but
+    // eliminates all runtime UIScreen access.
+    private static let thumbnailDimension: CGFloat = ceil(thumbnailSize * 3)
     private static let jpegQuality: CGFloat = 0.8
 
     /// Session used to fetch article HTML for og:image resolution. Injectable so tests

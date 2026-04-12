@@ -14,7 +14,6 @@ struct ArticleThumbnailView: View {
     @State private var thumbnailImage: UIImage?
 
     private static let logger = Logger(category: "ArticleThumbnailView")
-    private static let thumbnailSize: CGFloat = 72
     private static let cornerRadius: CGFloat = 8
 
     var body: some View {
@@ -29,7 +28,7 @@ struct ArticleThumbnailView: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .frame(width: Self.thumbnailSize, height: Self.thumbnailSize)
+        .frame(width: ArticleThumbnailService.thumbnailSize, height: ArticleThumbnailService.thumbnailSize)
         .task(id: thumbnailURL) {
             await loadThumbnail()
         }
