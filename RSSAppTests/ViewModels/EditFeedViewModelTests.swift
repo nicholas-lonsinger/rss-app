@@ -338,9 +338,7 @@ struct EditFeedViewModelTests {
         #expect(viewModel.errorMessage == nil)
         #expect(feed.feedURL == rssURL)
         #expect(feed.title == "New RSS")
-        // The user's original (pre-edit) URL stays in the field while the
-        // notice is up — wait, actually they edited to rssURL, so rssURL
-        // is what they typed and should remain.
+        // The URL in the field is the one the user typed (rssURL), not the original feed URL.
         #expect(viewModel.urlInput == rssURL.absoluteString)
 
         // Simulate the user tapping OK on the notice (nils the binding,

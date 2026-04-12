@@ -176,18 +176,12 @@ struct ArticleReaderView: View {
                         persistence: persistence
                     )
                 }
-                .alert("Error", isPresented: errorAlertBinding) {
+                .alert("Error", isPresented: $errorMessage.isPresented()) {
                     Button("OK") { errorMessage = nil }
                 } message: {
                     Text(errorMessage ?? "")
                 }
         }
-    }
-
-    // MARK: - Helpers
-
-    private var errorAlertBinding: Binding<Bool> {
-        Binding(presentingIfNonNil: $errorMessage)
     }
 
     // MARK: - Navigation

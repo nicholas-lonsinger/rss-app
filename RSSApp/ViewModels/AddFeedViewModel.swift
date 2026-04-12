@@ -28,7 +28,12 @@ final class AddFeedViewModel {
             // the property moves from a non-nil value to nil. Re-assigning
             // nil (e.g. a second binding-setter call during alert dismissal)
             // is a no-op so the observation tracker stays clean.
-            guard oldValue != nil, atomFallbackNotice == nil else { return }
+            guard oldValue != nil, atomFallbackNotice == nil else {
+                if oldValue == nil, atomFallbackNotice == nil {
+                    Self.logger.debug("atomFallbackNotice double-fire ignored (was already nil)")
+                }
+                return
+            }
             didAddFeed = true
         }
     }
