@@ -256,19 +256,22 @@ struct FeedIconService: FeedIconResolving {
         // by suitability for small-size display, and cache the highest-scoring one.
         let candidatesToScore = Array(typedCandidates.prefix(Self.maxCandidatesForScoring))
 
-        // Download all candidates concurrently and collect (candidate, image, stats) tuples
-        let downloadedCandidates: [(IconCandidate, UIImage, IconPixelStats)] = await withTaskGroup(
-            of: (IconCandidate, UIImage, IconPixelStats)?.self
+        // Download all candidates concurrently and collect (candidate, priorityIndex, image, stats) tuples.
+        // The priority index (position in candidatesToScore) is preserved so that equal-scored
+        // candidates resolve deterministically to the highest-priority source rather than whichever
+        // download finished first (TaskGroup yields results in completion order, which is jitter-dependent).
+        let downloadedCandidates: [(IconCandidate, Int, UIImage, IconPixelStats)] = await withTaskGroup(
+            of: (IconCandidate, Int, UIImage, IconPixelStats)?.self
         ) { group in
-            for candidate in candidatesToScore {
+            for (index, candidate) in candidatesToScore.enumerated() {
                 group.addTask {
                     guard let (image, stats) = await self.downloadAndAnalyze(url: candidate.url, feedID: feedID) else {
                         return nil
                     }
-                    return (candidate, image, stats)
+                    return (candidate, index, image, stats)
                 }
             }
-            var results: [(IconCandidate, UIImage, IconPixelStats)] = []
+            var results: [(IconCandidate, Int, UIImage, IconPixelStats)] = []
             for await result in group {
                 if let result {
                     results.append(result)
@@ -291,14 +294,19 @@ struct FeedIconService: FeedIconResolving {
             return nil
         }
 
-        // Score each downloaded candidate and pick the best
-        let scored = downloadedCandidates.map { (candidate, image, stats) in
+        // Score each downloaded candidate and pick the best.
+        // Tie-breaking uses the original priority index (lower index = higher priority source),
+        // making selection deterministic regardless of download completion order.
+        let scored = downloadedCandidates.map { (candidate, priorityIndex, image, stats) in
             let score = Self.scoreIconCandidate(image: image, type: candidate.type)
-            Self.logger.debug("Candidate \(candidate.url.absoluteString, privacy: .public) type=\(String(describing: candidate.type), privacy: .public) score=\(score, privacy: .public) size=\(image.size.width, privacy: .public)x\(image.size.height, privacy: .public)")
-            return (candidate: candidate, image: image, stats: stats, score: score)
+            Self.logger.debug("Candidate \(candidate.url.absoluteString, privacy: .public) type=\(String(describing: candidate.type), privacy: .public) score=\(score, privacy: .public) size=\(image.size.width, privacy: .public)x\(image.size.height, privacy: .public) priorityIndex=\(priorityIndex, privacy: .public)")
+            return (candidate: candidate, priorityIndex: priorityIndex, image: image, stats: stats, score: score)
         }
 
-        guard let best = scored.max(by: { $0.score < $1.score }) else {
+        guard let best = scored.max(by: {
+            // Primary: higher score wins. Tie-break: lower priority index wins (higher-priority source).
+            $0.score != $1.score ? $0.score < $1.score : $0.priorityIndex > $1.priorityIndex
+        }) else {
             Self.logger.fault("scored array is empty despite non-empty downloadedCandidates — logic error in resolveAndCacheIcon")
             assertionFailure("scored.max() returned nil with \(scored.count) elements")
             return nil
@@ -311,10 +319,13 @@ struct FeedIconService: FeedIconResolving {
             return (best.candidate.url, backgroundStyle)
         }
 
-        // Fallback: if writing the best candidate failed, try the remaining ones in score order
+        // Fallback: if writing the best candidate failed, try the remaining ones in score order.
+        // Apply the same deterministic tie-breaking (lower priority index wins) used when selecting best.
         let fallbacks = scored
             .filter { $0.candidate.url != best.candidate.url }
-            .sorted { $0.score > $1.score }
+            .sorted { lhs, rhs in
+                lhs.score != rhs.score ? lhs.score > rhs.score : lhs.priorityIndex < rhs.priorityIndex
+            }
         for fallback in fallbacks {
             if let backgroundStyle = await writeNormalizedIcon(image: fallback.image, stats: fallback.stats, from: fallback.candidate.url, feedID: feedID) {
                 Self.logger.notice("Fell back to candidate \(fallback.candidate.url.absoluteString, privacy: .public) for feed \(feedID.uuidString, privacy: .public)")
