@@ -253,7 +253,7 @@ struct ArticleListScreen<Source: ArticleListSource>: View {
             }
             .buttonStyle(.plain)
             .disabled(article.link == nil)
-            .listRowInsets(EdgeInsets(top: 10, leading: 20, bottom: 10, trailing: 20))
+            .listRowInsets(EdgeInsets(top: 10, leading: 8, bottom: 10, trailing: 8))
             .swipeActions(edge: .leading) {
                 Button {
                     source.toggleReadStatus(article)

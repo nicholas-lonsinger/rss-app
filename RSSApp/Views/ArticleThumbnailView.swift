@@ -14,7 +14,7 @@ struct ArticleThumbnailView: View {
     @State private var thumbnailImage: UIImage?
 
     private static let logger = Logger(category: "ArticleThumbnailView")
-    private static let thumbnailSize: CGFloat = 60
+    private static let thumbnailSize: CGFloat = 72
     private static let cornerRadius: CGFloat = 8
 
     var body: some View {
