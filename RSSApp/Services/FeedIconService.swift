@@ -113,6 +113,9 @@ struct FeedIconService: FeedIconResolving {
     func cacheIcon(from remoteURL: URL, feedID: UUID) async -> FeedIconBackgroundStyle? {
         Self.logger.debug("cacheIcon() from \(remoteURL.absoluteString, privacy: .public) for feed \(feedID.uuidString, privacy: .public)")
 
+        let pngData: Data
+        let stats: IconPixelStats
+
         do {
             var request = URLRequest(url: remoteURL, timeoutInterval: Self.iconFetchTimeout)
             request.setBrowserUserAgent()
@@ -140,28 +143,36 @@ struct FeedIconService: FeedIconResolving {
             // .dark default tile) on CGContext failure so we don't reject an
             // otherwise-valid icon over a bitmap-inspection glitch — matching
             // the legacy `hasVisibleContent` accept-on-failure semantic.
-            let stats = Self.analyzeIconPixels(normalized, feedID: feedID)
-            guard stats.isVisible else {
+            let pixelStats = Self.analyzeIconPixels(normalized, feedID: feedID)
+            guard pixelStats.isVisible else {
                 Self.logger.warning("Image has no visible content (\(data.count, privacy: .public) bytes) from \(remoteURL.absoluteString, privacy: .public)")
                 return nil
             }
 
-            guard let pngData = normalized.pngData() else {
+            guard let encoded = normalized.pngData() else {
                 Self.logger.warning("Failed to generate PNG data from image")
                 return nil
             }
 
-            let fileURL = iconFileURL(for: feedID)
-            try ensureCacheDirectoryExists()
-            try pngData.write(to: fileURL, options: .atomic)
-
-            let backgroundStyle = Self.classifyBackgroundStyle(averageLuminance: stats.averageLuminance)
-            Self.logger.debug("Cached icon for feed \(feedID.uuidString, privacy: .public) (\(pngData.count, privacy: .public) bytes, luminance=\(stats.averageLuminance, privacy: .public), background=\(backgroundStyle.rawValue, privacy: .public))")
-            return backgroundStyle
+            pngData = encoded
+            stats = pixelStats
         } catch {
-            Self.logger.warning("Failed to cache icon for \(remoteURL.absoluteString, privacy: .public): \(error, privacy: .public)")
+            Self.logger.warning("Failed to fetch or decode icon for \(remoteURL.absoluteString, privacy: .public): \(error, privacy: .public)")
             return nil
         }
+
+        let fileURL = iconFileURL(for: feedID)
+        do {
+            try ensureCacheDirectoryExists()
+            try pngData.write(to: fileURL, options: .atomic)
+        } catch {
+            Self.logger.error("Failed to write icon cache for feed \(feedID.uuidString, privacy: .public) at \(fileURL.path(percentEncoded: false), privacy: .public): \(error, privacy: .public)")
+            return nil
+        }
+
+        let backgroundStyle = Self.classifyBackgroundStyle(averageLuminance: stats.averageLuminance)
+        Self.logger.debug("Cached icon for feed \(feedID.uuidString, privacy: .public) (\(pngData.count, privacy: .public) bytes, luminance=\(stats.averageLuminance, privacy: .public), background=\(backgroundStyle.rawValue, privacy: .public))")
+        return backgroundStyle
     }
 
     func cachedIconFileURL(for feedID: UUID) -> URL? {
