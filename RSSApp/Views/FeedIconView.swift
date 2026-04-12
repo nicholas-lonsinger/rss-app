@@ -22,6 +22,10 @@ struct FeedIconView: View {
     /// Drives `.task(id:)` so the icon load re-runs after the feed's icon URL is
     /// resolved and cached. The value itself isn't used for rendering.
     let iconURL: URL?
+    /// The feed's persisted icon-background classification. `nil` falls back
+    /// to the legacy black tile for feeds that predate the classifier
+    /// (issue #342); they back-fill on the next successful refresh.
+    let iconBackgroundStyle: FeedIconBackgroundStyle?
     let iconService: FeedIconResolving
     var style: Style = .standard
 
@@ -52,16 +56,27 @@ struct FeedIconView: View {
         }
     }
 
+    /// The tile color that best contrasts against the cached icon (issue #342).
+    /// `nil` → legacy black tile for feeds that predate the classifier.
+    private var backgroundColor: Color {
+        switch iconBackgroundStyle {
+        case .light: return .white
+        case .dark, .none: return .black
+        }
+    }
+
+    /// The globe placeholder color is paired with the background so it stays
+    /// legible regardless of which tile is rendered. The placeholder never
+    /// sits on an icon — it only shows while loading or when no icon exists
+    /// — so its color is chosen purely against the tile.
+    private var placeholderForegroundColor: Color {
+        backgroundColor == .white ? .black.opacity(0.4) : .white.opacity(0.6)
+    }
+
     var body: some View {
         ZStack {
-            // Solid black tile behind every icon so favicons without their own
-            // background (e.g. Apple Insider's transparent-edge logo) sit on a
-            // consistent chrome that matches the larger `.standard` rows in
-            // `FeedListView`. Icons with their own opaque background paint over
-            // this tile, so the black is only visible where the icon itself
-            // has transparency.
             RoundedRectangle(cornerRadius: cornerRadius)
-                .fill(Color.black)
+                .fill(backgroundColor)
 
             if let iconImage {
                 Image(uiImage: iconImage)
@@ -74,7 +89,7 @@ struct FeedIconView: View {
                 // tracks Dynamic Type scaling at both style sizes.
                 Image(systemName: "globe")
                     .font(.system(size: iconSize * 0.6))
-                    .foregroundStyle(.white.opacity(0.6))
+                    .foregroundStyle(placeholderForegroundColor)
             }
         }
         .frame(width: iconSize, height: iconSize)

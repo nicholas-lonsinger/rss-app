@@ -788,6 +788,7 @@ enum TestFixtures {
         addedDate: Date = Date(timeIntervalSince1970: 1_711_800_000),
         sortOrder: Int = 0,
         iconURL: URL? = nil,
+        iconBackgroundStyleRaw: String? = nil,
         lastFetchError: String? = nil,
         lastFetchErrorDate: Date? = nil,
         firstFetchErrorDate: Date? = nil
@@ -800,6 +801,7 @@ enum TestFixtures {
             addedDate: addedDate,
             sortOrder: sortOrder,
             iconURL: iconURL,
+            iconBackgroundStyleRaw: iconBackgroundStyleRaw,
             lastFetchError: lastFetchError,
             lastFetchErrorDate: lastFetchErrorDate,
             firstFetchErrorDate: firstFetchErrorDate

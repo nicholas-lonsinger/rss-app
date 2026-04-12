@@ -205,7 +205,10 @@ struct AddFeedViewModelTests {
         )
         let mockPersistence = MockFeedPersistenceService()
         let mockIconService = MockFeedIconService()
-        mockIconService.resolveAndCacheResult = URL(string: "https://example.com/icon.png")
+        mockIconService.resolveAndCacheResult = (
+            url: URL(string: "https://example.com/icon.png")!,
+            backgroundStyle: .light
+        )
 
         let viewModel = AddFeedViewModel(
             feedFetching: mockFetching,
@@ -220,6 +223,10 @@ struct AddFeedViewModelTests {
 
         #expect(viewModel.didAddFeed == true)
         #expect(mockIconService.resolveAndCacheCallCount == 1)
+        // End-to-end: resolved style must round-trip into the persisted feed
+        // so a refactor that drops the backgroundStyle argument is caught.
+        let persistedFeed = mockPersistence.feeds.first
+        #expect(persistedFeed?.iconBackgroundStyleRaw == "light")
     }
 
     @Test("addFeed does not trigger icon resolution on fetch failure")

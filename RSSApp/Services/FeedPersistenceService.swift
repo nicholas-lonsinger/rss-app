@@ -42,7 +42,11 @@ protocol FeedPersisting: Sendable {
     func updateFeedError(_ feed: PersistentFeed, error: String?) throws
     func updateFeedURL(_ feed: PersistentFeed, newURL: URL) throws
     func updateFeedCacheHeaders(_ feed: PersistentFeed, etag: String?, lastModified: String?) throws
-    func updateFeedIcon(_ feed: PersistentFeed, iconURL: URL?) throws
+    /// Persists the feed's cached icon URL and the luminance-based
+    /// background-style classification produced by `FeedIconService`.
+    /// Passing `nil` for `backgroundStyle` clears the classification (used
+    /// when the icon is cleared).
+    func updateFeedIcon(_ feed: PersistentFeed, iconURL: URL?, backgroundStyle: FeedIconBackgroundStyle?) throws
     func feedExists(url: URL) throws -> Bool
 
     // MARK: Article operations
@@ -268,9 +272,10 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
         Self.logger.debug("Updated cache headers for '\(feed.title, privacy: .public)'")
     }
 
-    func updateFeedIcon(_ feed: PersistentFeed, iconURL: URL?) throws {
+    func updateFeedIcon(_ feed: PersistentFeed, iconURL: URL?, backgroundStyle: FeedIconBackgroundStyle?) throws {
         feed.iconURL = iconURL
-        Self.logger.debug("Updated icon for '\(feed.title, privacy: .public)'")
+        feed.iconBackgroundStyle = backgroundStyle
+        Self.logger.debug("Updated icon for '\(feed.title, privacy: .public)' (background=\(backgroundStyle?.rawValue ?? "nil", privacy: .public))")
     }
 
     func feedExists(url: URL) throws -> Bool {

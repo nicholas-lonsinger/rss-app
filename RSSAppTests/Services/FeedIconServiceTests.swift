@@ -435,6 +435,89 @@ struct FeedIconServiceTests {
         #expect(FeedIconService.hasVisibleContent(image))
     }
 
+    // MARK: - analyzeIconPixels (luminance + visibility)
+
+    @Test("Analysis classifies a fully white image as needing a dark background")
+    @MainActor
+    func analyzeIconPixelsClassifiesWhiteAsNeedingDarkBackground() {
+        // White-on-transparent favicons (e.g. Apple Insider) are the reason
+        // the feature exists (issue #342). They must map to a black tile so
+        // the icon is still visible.
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 16, height: 16), format: format)
+            .image { ctx in
+                UIColor.white.setFill()
+                ctx.fill(CGRect(x: 0, y: 0, width: 16, height: 16))
+            }
+
+        let stats = FeedIconService.analyzeIconPixels(image)
+        #expect(stats.isVisible == true)
+        // White is luminance 1.0; tiny drift is tolerated for bitmap roundtrip.
+        #expect(stats.averageLuminance > 0.95)
+        #expect(FeedIconService.classifyBackgroundStyle(averageLuminance: stats.averageLuminance) == .dark)
+    }
+
+    @Test("Analysis classifies a fully black image as needing a light background")
+    @MainActor
+    func analyzeIconPixelsClassifiesBlackAsNeedingLightBackground() {
+        // Black-on-transparent icons are the other side of the bug: they
+        // disappeared against the old black tile. They must map to a white
+        // tile so the icon stays visible.
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 16, height: 16), format: format)
+            .image { ctx in
+                UIColor.black.setFill()
+                ctx.fill(CGRect(x: 0, y: 0, width: 16, height: 16))
+            }
+
+        let stats = FeedIconService.analyzeIconPixels(image)
+        #expect(stats.isVisible == true)
+        #expect(stats.averageLuminance < 0.05)
+        #expect(FeedIconService.classifyBackgroundStyle(averageLuminance: stats.averageLuminance) == .light)
+    }
+
+    @Test("Analysis ignores fully transparent pixels when averaging luminance")
+    @MainActor
+    func analyzeIconPixelsIgnoresTransparentPixels() {
+        // Half-transparent, half opaque-white icon: the transparent half
+        // must not drag the luminance average toward zero. Otherwise a
+        // single opaque white stroke on a transparent canvas — the exact
+        // Apple-Insider case — would misclassify as dark.
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 16, height: 16), format: format)
+            .image { ctx in
+                UIColor.clear.setFill()
+                ctx.fill(CGRect(x: 0, y: 0, width: 16, height: 16))
+                UIColor.white.setFill()
+                // Only the top row is opaque, but those pixels are fully white.
+                ctx.fill(CGRect(x: 0, y: 0, width: 16, height: 1))
+            }
+
+        let stats = FeedIconService.analyzeIconPixels(image)
+        #expect(stats.isVisible == true)
+        // Average should reflect the opaque pixels only, not the 0-alpha background.
+        #expect(stats.averageLuminance > 0.95)
+        #expect(FeedIconService.classifyBackgroundStyle(averageLuminance: stats.averageLuminance) == .dark)
+    }
+
+    @Test("Analysis reports not visible for fully transparent image")
+    @MainActor
+    func analyzeIconPixelsReportsNotVisibleForTransparent() {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 16, height: 16), format: format)
+            .image { ctx in
+                UIColor.clear.setFill()
+                ctx.fill(CGRect(x: 0, y: 0, width: 16, height: 16))
+            }
+
+        let stats = FeedIconService.analyzeIconPixels(image)
+        #expect(stats.isVisible == false)
+    }
+
     // MARK: - ICO Decoding
 
     @Test("Decodes ICO file with embedded PNG")
