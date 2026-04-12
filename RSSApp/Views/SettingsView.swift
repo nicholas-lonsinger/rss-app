@@ -253,7 +253,7 @@ struct ImportExportView: View {
         .alert("Import Complete", isPresented: $showImportResult, presenting: viewModel.opmlImportResult) { _ in
             Button("OK") { viewModel.opmlImportResult = nil }
         } message: { result in
-            Text(importResultMessage(result))
+            Text(result.importSummary)
         }
         .alert("Error", isPresented: $showError) {
             Button("OK") { viewModel.importExportErrorMessage = nil }
@@ -278,33 +278,6 @@ struct ImportExportView: View {
     }
 
     // MARK: - Helpers
-
-    private func importResultMessage(_ result: OPMLImportResult) -> String {
-        var parts: [String] = []
-
-        if result.addedCount == 0 && result.skippedCount > 0 && result.failedCount == 0 && result.groupsFailedCount == 0 {
-            return "All \(result.skippedCount) feeds were already in your list."
-        }
-
-        if result.addedCount > 0 {
-            parts.append("Added \(result.addedCount) feed(s).")
-        }
-        if result.skippedCount > 0 {
-            parts.append("\(result.skippedCount) duplicate(s) skipped.")
-        }
-        if result.failedCount > 0 {
-            parts.append("\(result.failedCount) feed(s) could not be saved.")
-        }
-        if result.groupsFailedCount > 0 {
-            parts.append("\(result.groupsFailedCount) group assignment(s) failed.")
-        }
-
-        if parts.isEmpty {
-            return "No feeds were found in the file."
-        }
-
-        return parts.joined(separator: " ")
-    }
 
     private func handleFileImport(_ result: Result<URL, any Error>) {
         switch result {
