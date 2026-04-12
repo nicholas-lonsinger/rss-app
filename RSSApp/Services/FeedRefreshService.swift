@@ -655,13 +655,17 @@ final class FeedRefreshService {
             Self.logger.debug("Icon already cached for '\(feed.title, privacy: .public)'")
             return
         }
-        guard let iconURL = await feedIconService.resolveAndCacheIcon(
+        guard let resolved = await feedIconService.resolveAndCacheIcon(
             feedSiteURL: siteURL,
             feedImageURL: feedImageURL,
             feedID: feed.id
         ) else { return }
         do {
-            try persistence.updateFeedIcon(feed, iconURL: iconURL)
+            try persistence.updateFeedIcon(
+                feed,
+                iconURL: resolved.url,
+                backgroundStyle: resolved.analysis.backgroundStyle
+            )
         } catch {
             // RATIONALE: No error surfaced here. This runs inside a fire-and-forget Task
             // spawned by performRefresh(), so mutating the caller's errorMessage would race

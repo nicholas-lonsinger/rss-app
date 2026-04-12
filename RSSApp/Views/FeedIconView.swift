@@ -22,6 +22,13 @@ struct FeedIconView: View {
     /// Drives `.task(id:)` so the icon load re-runs after the feed's icon URL is
     /// resolved and cached. The value itself isn't used for rendering.
     let iconURL: URL?
+    /// Raw value of the feed's persisted `FeedIconBackgroundStyle`. Classifies
+    /// the cached icon as "light icon, needs dark tile" (`.dark`) or
+    /// "dark icon, needs light tile" (`.light`). `nil` falls back to the
+    /// legacy black tile so feeds that predate the classifier render as they
+    /// did before issue #342 — they reclassify automatically on the next
+    /// successful refresh.
+    let iconBackgroundStyleRawValue: String?
     let iconService: FeedIconResolving
     var style: Style = .standard
 
@@ -52,16 +59,44 @@ struct FeedIconView: View {
         }
     }
 
+    /// The tile color that best contrasts against the cached icon. Picked
+    /// from the persisted `iconBackgroundStyle` (issue #342): dark icons get
+    /// a white tile, light icons get a black tile. Nil falls back to black
+    /// for backward compatibility with feeds cached before the classifier
+    /// existed — those feeds will reclassify on their next successful
+    /// refresh, and the black tile matches their prior rendering in the
+    /// meantime so there's no visual regression.
+    private var backgroundColor: Color {
+        guard let raw = iconBackgroundStyleRawValue,
+              let style = FeedIconBackgroundStyle(rawValue: raw) else {
+            return .black
+        }
+        switch style {
+        case .light: return .white
+        case .dark: return .black
+        }
+    }
+
+    /// The globe placeholder color is paired with the background so it stays
+    /// legible regardless of which tile is rendered. The placeholder never
+    /// sits on an icon — it only shows while loading or when no icon exists
+    /// — so its color is chosen purely against the tile.
+    private var placeholderForegroundColor: Color {
+        backgroundColor == .white ? .black.opacity(0.4) : .white.opacity(0.6)
+    }
+
     var body: some View {
         ZStack {
-            // Solid black tile behind every icon so favicons without their own
-            // background (e.g. Apple Insider's transparent-edge logo) sit on a
-            // consistent chrome that matches the larger `.standard` rows in
-            // `FeedListView`. Icons with their own opaque background paint over
-            // this tile, so the black is only visible where the icon itself
-            // has transparency.
+            // Solid background tile behind every icon so favicons without
+            // their own background (e.g. Apple Insider's transparent-edge
+            // logo) sit on a consistent chrome. The tile color is picked
+            // from the feed's persisted luminance classification so dark
+            // icons get a white tile and light icons get a black tile
+            // (issue #342). Icons with their own opaque background paint
+            // over this tile, so the tile color is only visible where the
+            // icon itself has transparency.
             RoundedRectangle(cornerRadius: cornerRadius)
-                .fill(Color.black)
+                .fill(backgroundColor)
 
             if let iconImage {
                 Image(uiImage: iconImage)
@@ -74,7 +109,7 @@ struct FeedIconView: View {
                 // tracks Dynamic Type scaling at both style sizes.
                 Image(systemName: "globe")
                     .font(.system(size: iconSize * 0.6))
-                    .foregroundStyle(.white.opacity(0.6))
+                    .foregroundStyle(placeholderForegroundColor)
             }
         }
         .frame(width: iconSize, height: iconSize)

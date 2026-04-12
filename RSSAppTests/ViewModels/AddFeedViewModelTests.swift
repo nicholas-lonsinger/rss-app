@@ -205,7 +205,10 @@ struct AddFeedViewModelTests {
         )
         let mockPersistence = MockFeedPersistenceService()
         let mockIconService = MockFeedIconService()
-        mockIconService.resolveAndCacheResult = URL(string: "https://example.com/icon.png")
+        mockIconService.resolveAndCacheResult = (
+            url: URL(string: "https://example.com/icon.png")!,
+            analysis: CachedIconAnalysis(backgroundStyle: .dark)
+        )
 
         let viewModel = AddFeedViewModel(
             feedFetching: mockFetching,

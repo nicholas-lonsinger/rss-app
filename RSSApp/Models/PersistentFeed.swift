@@ -31,6 +31,18 @@ final class PersistentFeed {
 
     var iconURL: URL?
 
+    /// Classification of the cached icon's opaque-pixel luminance, computed
+    /// at fetch/cache time by `FeedIconService` and persisted so
+    /// `FeedIconView` can pick a contrasting background tile without
+    /// re-analyzing the image on every display (issue #342).
+    ///
+    /// Stored as the raw value of `FeedIconBackgroundStyle` (`"light"` or
+    /// `"dark"`). `nil` means the icon predates the classifier or the
+    /// classification has not yet run — `FeedIconView` falls back to the
+    /// legacy black tile in that case, which keeps existing cached icons
+    /// looking as they did before the classifier was introduced.
+    var iconBackgroundStyle: String?
+
     // MARK: - Error state
 
     var lastFetchError: String?
@@ -62,6 +74,7 @@ final class PersistentFeed {
         etag: String? = nil,
         lastModifiedHeader: String? = nil,
         iconURL: URL? = nil,
+        iconBackgroundStyle: String? = nil,
         lastFetchError: String? = nil,
         lastFetchErrorDate: Date? = nil,
         firstFetchErrorDate: Date? = nil
@@ -76,6 +89,7 @@ final class PersistentFeed {
         self.etag = etag
         self.lastModifiedHeader = lastModifiedHeader
         self.iconURL = iconURL
+        self.iconBackgroundStyle = iconBackgroundStyle
         self.lastFetchError = lastFetchError
         self.lastFetchErrorDate = lastFetchErrorDate
         self.firstFetchErrorDate = firstFetchErrorDate

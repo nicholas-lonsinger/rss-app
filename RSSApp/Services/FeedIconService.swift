@@ -2,6 +2,29 @@ import Foundation
 import os
 import UIKit
 
+// MARK: - Result Types
+
+/// The background tile color that best contrasts against a cached icon's opaque
+/// pixels. Persisted per-feed on `PersistentFeed.iconBackgroundStyle` so
+/// `FeedIconView` can render the right tile without re-analyzing the image on
+/// every display (issue #342).
+///
+/// - `light`: icon is predominantly dark — render a light (white) tile so the
+///   icon's dark strokes stay visible where the PNG has transparency.
+/// - `dark`: icon is predominantly light — render a dark (black) tile so
+///   white-on-transparent icons (e.g. Apple Insider) stay visible.
+enum FeedIconBackgroundStyle: String, Sendable, Equatable {
+    case light
+    case dark
+}
+
+/// Result of analyzing a cached icon's opaque pixels for visibility and
+/// average luminance. Produced by `FeedIconService` at fetch/cache time and
+/// returned alongside the cached URL so callers can persist the classification.
+struct CachedIconAnalysis: Sendable, Equatable {
+    let backgroundStyle: FeedIconBackgroundStyle
+}
+
 // MARK: - Protocol
 
 protocol FeedIconResolving: Sendable {
@@ -13,8 +36,11 @@ protocol FeedIconResolving: Sendable {
     func resolveIconCandidates(feedSiteURL: URL?, feedImageURL: URL?) async -> [URL]
 
     /// Downloads the image at `remoteURL`, normalizes it to PNG, and caches it
-    /// to disk under the feed's UUID. Returns `true` on success.
-    func cacheIcon(from remoteURL: URL, feedID: UUID) async -> Bool
+    /// to disk under the feed's UUID. Returns an analysis result on success,
+    /// or `nil` on failure (download error, decode failure, or no visible
+    /// content). The analysis tells callers which background tile color to
+    /// persist for the feed so `FeedIconView` can pick black or white.
+    func cacheIcon(from remoteURL: URL, feedID: UUID) async -> CachedIconAnalysis?
 
     /// Returns the local file URL for a cached icon, or `nil` if not cached.
     func cachedIconFileURL(for feedID: UUID) -> URL?
@@ -30,8 +56,9 @@ protocol FeedIconResolving: Sendable {
     func loadValidatedIcon(for feedID: UUID) async -> UIImage?
 
     /// Resolves candidate icon URLs and caches the first one that downloads successfully.
-    /// Returns the remote URL of the cached icon, or `nil` if no candidate could be cached.
-    func resolveAndCacheIcon(feedSiteURL: URL?, feedImageURL: URL?, feedID: UUID) async -> URL?
+    /// Returns the remote URL of the cached icon along with the luminance analysis
+    /// result, or `nil` if no candidate could be cached.
+    func resolveAndCacheIcon(feedSiteURL: URL?, feedImageURL: URL?, feedID: UUID) async -> (url: URL, analysis: CachedIconAnalysis)?
 
     /// Deletes the cached icon file for the given feed.
     func deleteCachedIcon(for feedID: UUID)
@@ -82,7 +109,7 @@ struct FeedIconService: FeedIconResolving {
         return candidates
     }
 
-    func cacheIcon(from remoteURL: URL, feedID: UUID) async -> Bool {
+    func cacheIcon(from remoteURL: URL, feedID: UUID) async -> CachedIconAnalysis? {
         Self.logger.debug("cacheIcon() from \(remoteURL.absoluteString, privacy: .public) for feed \(feedID.uuidString, privacy: .public)")
 
         do {
@@ -94,37 +121,40 @@ struct FeedIconService: FeedIconResolving {
                   (200...299).contains(httpResponse.statusCode) else {
                 let code = (response as? HTTPURLResponse)?.statusCode ?? -1
                 Self.logger.warning("Icon fetch returned HTTP \(code, privacy: .public) for \(remoteURL.absoluteString, privacy: .public)")
-                return false
+                return nil
             }
 
             guard let image = UIImage(data: data) ?? Self.decodeICO(data) else {
                 let contentType = httpResponse.value(forHTTPHeaderField: "Content-Type") ?? "unknown"
                 Self.logger.warning("Downloaded data is not a valid image (\(contentType, privacy: .public), \(data.count, privacy: .public) bytes) from \(remoteURL.absoluteString, privacy: .public)")
-                return false
+                return nil
             }
 
             // Normalize: resize if too large, convert to PNG
             let normalized = normalizeImage(image)
 
-            guard Self.hasVisibleContent(normalized) else {
+            // Single bitmap walk: visibility gate + average luminance of opaque
+            // pixels. Sharing the pass avoids a second CGContext allocation.
+            guard let stats = Self.analyzeIconPixels(normalized), stats.isVisible else {
                 Self.logger.warning("Image has no visible content (\(data.count, privacy: .public) bytes) from \(remoteURL.absoluteString, privacy: .public)")
-                return false
+                return nil
             }
 
             guard let pngData = normalized.pngData() else {
                 Self.logger.warning("Failed to generate PNG data from image")
-                return false
+                return nil
             }
 
             let fileURL = iconFileURL(for: feedID)
             try ensureCacheDirectoryExists()
             try pngData.write(to: fileURL, options: .atomic)
 
-            Self.logger.debug("Cached icon for feed \(feedID.uuidString, privacy: .public) (\(pngData.count, privacy: .public) bytes)")
-            return true
+            let backgroundStyle = Self.classifyBackgroundStyle(averageLuminance: stats.averageLuminance)
+            Self.logger.debug("Cached icon for feed \(feedID.uuidString, privacy: .public) (\(pngData.count, privacy: .public) bytes, luminance=\(stats.averageLuminance, privacy: .public), background=\(backgroundStyle.rawValue, privacy: .public))")
+            return CachedIconAnalysis(backgroundStyle: backgroundStyle)
         } catch {
             Self.logger.warning("Failed to cache icon for \(remoteURL.absoluteString, privacy: .public): \(error, privacy: .public)")
-            return false
+            return nil
         }
     }
 
@@ -153,12 +183,11 @@ struct FeedIconService: FeedIconResolving {
         }.value
     }
 
-    func resolveAndCacheIcon(feedSiteURL: URL?, feedImageURL: URL?, feedID: UUID) async -> URL? {
+    func resolveAndCacheIcon(feedSiteURL: URL?, feedImageURL: URL?, feedID: UUID) async -> (url: URL, analysis: CachedIconAnalysis)? {
         let candidates = await resolveIconCandidates(feedSiteURL: feedSiteURL, feedImageURL: feedImageURL)
         for candidate in candidates {
-            let cached = await cacheIcon(from: candidate, feedID: feedID)
-            if cached {
-                return candidate
+            if let analysis = await cacheIcon(from: candidate, feedID: feedID) {
+                return (candidate, analysis)
             }
         }
         Self.logger.debug("No icon cached for feed \(feedID.uuidString, privacy: .public) (\(candidates.count, privacy: .public) candidates tried)")
@@ -413,24 +442,51 @@ struct FeedIconService: FeedIconResolving {
         return UIImage(data: bmpFile)
     }
 
+    /// Result of a single-pass bitmap walk: whether the image has visible
+    /// opaque content and the average luminance of its opaque pixels.
+    ///
+    /// `averageLuminance` is meaningful only when `isVisible == true`. When the
+    /// image is fully transparent, the walk produces `averageLuminance == 0`
+    /// and the caller should ignore it. Values are in `[0, 1]`, computed over
+    /// premultiplied-alpha-adjusted RGB using ITU-R BT.601 coefficients.
+    struct IconPixelStats: Equatable {
+        let isVisible: Bool
+        let averageLuminance: Double
+    }
+
     /// Returns `false` if the image is fully or mostly transparent (e.g., a tracking pixel
     /// or placeholder favicon). Pixels with alpha > 25 (out of 255) are considered visible;
     /// at least 1% of pixels must be visible for the image to pass.
     /// Returns `true` when inspection fails (safe default: accept rather than reject).
     static func hasVisibleContent(_ image: UIImage) -> Bool {
+        guard let stats = analyzeIconPixels(image) else { return true }
+        return stats.isVisible
+    }
+
+    /// Walks the image bitmap once to compute visibility and the average
+    /// luminance of opaque pixels. Returns `nil` when the image lacks a
+    /// `CGImage` backing or the `CGContext` cannot be created — callers treat
+    /// that as "accept as visible, no luminance information."
+    ///
+    /// Combines the visibility gate and luminance analysis in a single pass
+    /// so `cacheIcon` doesn't need to allocate a second bitmap to classify
+    /// the icon's background style (issue #342).
+    static func analyzeIconPixels(_ image: UIImage) -> IconPixelStats? {
         guard let cgImage = image.cgImage else {
-            logger.warning("hasVisibleContent: image has no CGImage backing — accepting as visible")
-            return true
+            logger.warning("analyzeIconPixels: image has no CGImage backing — skipping analysis")
+            return nil
         }
         let width = cgImage.width
         let height = cgImage.height
-        guard width > 0, height > 0 else { return false }
+        guard width > 0, height > 0 else {
+            return IconPixelStats(isVisible: false, averageLuminance: 0)
+        }
 
         let bytesPerPixel = 4
         let bytesPerRow = width * bytesPerPixel
         var pixelData = [UInt8](repeating: 0, count: height * bytesPerRow)
 
-        return pixelData.withUnsafeMutableBytes { ptr in
+        return pixelData.withUnsafeMutableBytes { ptr -> IconPixelStats? in
             guard let context = CGContext(
                 data: ptr.baseAddress,
                 width: width,
@@ -440,24 +496,55 @@ struct FeedIconService: FeedIconResolving {
                 space: CGColorSpaceCreateDeviceRGB(),
                 bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
             ) else {
-                logger.warning("hasVisibleContent: CGContext creation failed for \(width)x\(height) image — accepting as visible")
-                return true
+                logger.warning("analyzeIconPixels: CGContext creation failed for \(width)x\(height) image — skipping analysis")
+                return nil
             }
 
             context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
 
             let totalPixels = width * height
             var opaquePixels = 0
+            var luminanceSum: Double = 0
             let alphaThreshold: UInt8 = 25
+            // ITU-R BT.601 luminance coefficients
+            let redWeight = 0.299
+            let greenWeight = 0.587
+            let blueWeight = 0.114
 
-            for i in stride(from: 3, to: ptr.count, by: bytesPerPixel) {
-                if ptr[i] > alphaThreshold {
-                    opaquePixels += 1
-                }
+            for i in stride(from: 0, to: ptr.count, by: bytesPerPixel) {
+                let alpha = ptr[i + 3]
+                guard alpha > alphaThreshold else { continue }
+                opaquePixels += 1
+                // Context is premultipliedLast — divide by alpha to recover the
+                // original color so dark-on-semitransparent strokes contribute
+                // their true color, not a washed-out value.
+                let alphaFraction = Double(alpha) / 255.0
+                let r = Double(ptr[i]) / 255.0 / alphaFraction
+                let g = Double(ptr[i + 1]) / 255.0 / alphaFraction
+                let b = Double(ptr[i + 2]) / 255.0 / alphaFraction
+                luminanceSum += redWeight * r + greenWeight * g + blueWeight * b
             }
 
-            return Double(opaquePixels) / Double(totalPixels) >= 0.01
+            let isVisible = Double(opaquePixels) / Double(totalPixels) >= 0.01
+            let averageLuminance = opaquePixels > 0 ? luminanceSum / Double(opaquePixels) : 0
+            return IconPixelStats(isVisible: isVisible, averageLuminance: averageLuminance)
         }
+    }
+
+    /// Luminance threshold above which an icon is considered "light enough"
+    /// to need a dark (black) background behind it. Icons at or below the
+    /// threshold get a light (white) background so their dark strokes stay
+    /// visible where the PNG has transparency. Tuned per the issue spec
+    /// (issue #342) to match the common case of Apple-Insider-style
+    /// white-on-transparent logos versus dark-colored flat icons; exact
+    /// value may need revisiting if specific real-world feeds misclassify.
+    static let iconLightBackgroundLuminanceThreshold: Double = 0.7
+
+    /// Maps an average luminance value to a `FeedIconBackgroundStyle`.
+    /// Centralized so the threshold and the classification rule live in one
+    /// place and tests can pin the boundary without reaching into `cacheIcon`.
+    static func classifyBackgroundStyle(averageLuminance: Double) -> FeedIconBackgroundStyle {
+        averageLuminance > iconLightBackgroundLuminanceThreshold ? .dark : .light
     }
 
     private func normalizeImage(_ image: UIImage) -> UIImage {
