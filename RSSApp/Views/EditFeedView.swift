@@ -42,10 +42,11 @@ struct EditFeedView: View {
                                     Spacer()
                                     if viewModel.memberGroupIDs.contains(group.id) {
                                         Image(systemName: "checkmark")
-                                            .foregroundStyle(.blue)
+                                            .foregroundStyle(.tint)
                                     }
                                 }
                             }
+                            .buttonStyle(.plain)
                         }
                     } header: {
                         Text("Groups")
