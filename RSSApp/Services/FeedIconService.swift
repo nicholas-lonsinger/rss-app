@@ -206,6 +206,7 @@ struct FeedIconService: FeedIconResolving {
             if let backgroundStyle = await writeNormalizedIcon(image: image, stats: stats, from: feedXMLCandidate.url, feedID: feedID) {
                 return (feedXMLCandidate.url, backgroundStyle)
             }
+            Self.logger.warning("Fast-path write failed for feed \(feedID.uuidString, privacy: .public) — falling through to full scoring pass")
         }
 
         // General path: download all candidates concurrently (up to the cap), score each
@@ -234,7 +235,7 @@ struct FeedIconService: FeedIconResolving {
         }
 
         guard !downloadedCandidates.isEmpty else {
-            Self.logger.debug("No icon candidates downloaded for feed \(feedID.uuidString, privacy: .public) (\(candidatesToScore.count, privacy: .public) tried)")
+            Self.logger.warning("No icon candidates downloaded for feed \(feedID.uuidString, privacy: .public) (\(candidatesToScore.count, privacy: .public) tried)")
             return nil
         }
 
@@ -246,6 +247,8 @@ struct FeedIconService: FeedIconResolving {
         }
 
         guard let best = scored.max(by: { $0.score < $1.score }) else {
+            Self.logger.fault("scored array is empty despite non-empty downloadedCandidates — logic error in resolveAndCacheIcon")
+            assertionFailure("scored.max() returned nil with \(scored.count) elements")
             return nil
         }
 
@@ -266,7 +269,7 @@ struct FeedIconService: FeedIconResolving {
             }
         }
 
-        Self.logger.debug("No icon cached for feed \(feedID.uuidString, privacy: .public) after scoring \(downloadedCandidates.count, privacy: .public) candidates")
+        Self.logger.warning("No icon cached for feed \(feedID.uuidString, privacy: .public) after scoring \(downloadedCandidates.count, privacy: .public) candidates")
         return nil
     }
 
@@ -748,7 +751,8 @@ struct FeedIconService: FeedIconResolving {
     /// A score of 0.7 requires the image to be roughly square (aspect ≥ 0.6) and not oversized.
     /// feedXML type bonus (0.2) is already included in the score so a 180×180 feed XML image
     /// scores 0.5 * 1.0 + 0.3 * 1.0 + 0.2 * 1.0 = 1.0 and easily qualifies.
-    /// A 1200×630 feed XML image scores 0.5 * 0.525 + 0.3 * 0.52 + 0.2 * 1.0 ≈ 0.618 — below threshold.
+    /// A 512×268 feed XML image scores 0.5 * (268/512) + 0.3 * (1 - (512-256)/(1024-256)) + 0.2 * 1.0
+    /// ≈ 0.5 * 0.523 + 0.3 * 0.667 + 0.2 = 0.262 + 0.200 + 0.200 ≈ 0.662 — below threshold.
     static let feedXMLFastPathScoreThreshold: Double = 0.7
 
     /// Returns `true` if a feed XML image qualifies for the fast path — skip scoring other candidates.
@@ -770,25 +774,28 @@ struct FeedIconService: FeedIconResolving {
             guard let httpResponse = response as? HTTPURLResponse,
                   (200...299).contains(httpResponse.statusCode) else {
                 let code = (response as? HTTPURLResponse)?.statusCode ?? -1
-                Self.logger.debug("downloadAndAnalyze: HTTP \(code, privacy: .public) for \(url.absoluteString, privacy: .public)")
+                Self.logger.warning("downloadAndAnalyze: HTTP \(code, privacy: .public) for \(url.absoluteString, privacy: .public)")
                 return nil
             }
 
             guard let image = UIImage(data: data) ?? Self.decodeICO(data) else {
-                Self.logger.debug("downloadAndAnalyze: not a valid image from \(url.absoluteString, privacy: .public)")
+                Self.logger.warning("downloadAndAnalyze: not a valid image from \(url.absoluteString, privacy: .public)")
                 return nil
             }
 
             let normalized = normalizeImage(image)
             let stats = Self.analyzeIconPixels(normalized, feedID: feedID)
             guard stats.isVisible else {
-                Self.logger.debug("downloadAndAnalyze: image has no visible content from \(url.absoluteString, privacy: .public)")
+                Self.logger.warning("downloadAndAnalyze: image has no visible content from \(url.absoluteString, privacy: .public)")
                 return nil
             }
 
             return (normalized, stats)
+        } catch let error as URLError where error.code == .cancelled {
+            Self.logger.debug("downloadAndAnalyze: download cancelled for \(url.absoluteString, privacy: .public)")
+            return nil
         } catch {
-            Self.logger.debug("downloadAndAnalyze: download failed for \(url.absoluteString, privacy: .public): \(error, privacy: .public)")
+            Self.logger.warning("downloadAndAnalyze: download failed for \(url.absoluteString, privacy: .public): \(error, privacy: .public)")
             return nil
         }
     }
