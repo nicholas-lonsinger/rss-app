@@ -815,7 +815,7 @@ struct FeedIconService: FeedIconResolving {
             Self.logger.debug("Cached icon for feed \(feedID.uuidString, privacy: .public) (\(pngData.count, privacy: .public) bytes, luminance=\(stats.averageLuminance, privacy: .public), background=\(backgroundStyle.rawValue, privacy: .public))")
             return backgroundStyle
         } catch {
-            Self.logger.warning("writeNormalizedIcon: failed to write cache for feed \(feedID.uuidString, privacy: .public): \(error, privacy: .public)")
+            Self.logger.error("writeNormalizedIcon: failed to write cache for feed \(feedID.uuidString, privacy: .public): \(error, privacy: .public)")
             return nil
         }
     }
