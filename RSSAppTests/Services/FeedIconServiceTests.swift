@@ -79,6 +79,7 @@ struct FeedIconServiceTests {
         let linkIcon = URL(string: "https://medium.com/favicon.png")!
         let htmlResult = FeedIconService.HTMLIconResult(
             linkIcons: [linkIcon],
+            appleTouchIconURLs: [],
             ogImageURL: ogImage,
             redirectedHost: "medium.com"
         )
@@ -104,6 +105,7 @@ struct FeedIconServiceTests {
         let ogImage = URL(string: "https://cdn.example.com/og-logo.png")!
         let htmlResult = FeedIconService.HTMLIconResult(
             linkIcons: [],
+            appleTouchIconURLs: [],
             ogImageURL: ogImage,
             redirectedHost: nil
         )
@@ -128,6 +130,7 @@ struct FeedIconServiceTests {
         let siteURL = URL(string: "https://myblog.example.com")!
         let htmlResult = FeedIconService.HTMLIconResult(
             linkIcons: [],
+            appleTouchIconURLs: [],
             ogImageURL: nil,
             redirectedHost: "medium.com"
         )
@@ -153,6 +156,7 @@ struct FeedIconServiceTests {
         let siteURL = URL(string: "https://example.com")!
         let htmlResult = FeedIconService.HTMLIconResult(
             linkIcons: [],
+            appleTouchIconURLs: [],
             ogImageURL: nil,
             redirectedHost: nil
         )
@@ -177,6 +181,7 @@ struct FeedIconServiceTests {
         let linkIcon = URL(string: "https://medium.com/favicon.png")!
         let htmlResult = FeedIconService.HTMLIconResult(
             linkIcons: [appleTouchIcon, linkIcon],
+            appleTouchIconURLs: [appleTouchIcon],
             ogImageURL: ogImage,
             redirectedHost: "medium.com"
         )
@@ -209,6 +214,176 @@ struct FeedIconServiceTests {
         )
 
         #expect(candidates.isEmpty)
+    }
+
+    // MARK: - assembleTypedCandidates (source type assignment)
+
+    @Test("Feed XML candidate is assigned .feedXML type")
+    func assembleTypedCandidatesFeedXMLType() {
+        let feedImage = URL(string: "https://example.com/logo.png")!
+
+        let candidates = FeedIconService.assembleTypedCandidates(
+            feedSiteURL: nil,
+            feedImageURL: feedImage,
+            htmlResult: nil
+        )
+
+        #expect(candidates.count == 1)
+        #expect(candidates[0].type == .feedXML)
+        #expect(candidates[0].url == feedImage)
+    }
+
+    @Test("og:image candidate is assigned .ogImage type")
+    func assembleTypedCandidatesOgImageType() {
+        let ogImage = URL(string: "https://cdn.example.com/og.png")!
+        let htmlResult = FeedIconService.HTMLIconResult(
+            linkIcons: [],
+            appleTouchIconURLs: [],
+            ogImageURL: ogImage,
+            redirectedHost: nil
+        )
+
+        let candidates = FeedIconService.assembleTypedCandidates(
+            feedSiteURL: URL(string: "https://example.com")!,
+            feedImageURL: nil,
+            htmlResult: htmlResult
+        )
+
+        // favicon.ico fallback + og:image
+        let ogCandidate = candidates.first { $0.url == ogImage }
+        #expect(ogCandidate?.type == .ogImage)
+    }
+
+    @Test("Apple-touch-icon candidates are assigned .appleTouchIcon type")
+    func assembleTypedCandidatesAppleTouchIconType() {
+        let appleTouchIcon = URL(string: "https://example.com/apple-touch.png")!
+        let htmlResult = FeedIconService.HTMLIconResult(
+            linkIcons: [appleTouchIcon],
+            appleTouchIconURLs: [appleTouchIcon],
+            ogImageURL: nil,
+            redirectedHost: nil
+        )
+
+        let candidates = FeedIconService.assembleTypedCandidates(
+            feedSiteURL: URL(string: "https://example.com")!,
+            feedImageURL: nil,
+            htmlResult: htmlResult
+        )
+
+        let candidate = candidates.first { $0.url == appleTouchIcon }
+        #expect(candidate?.type == .appleTouchIcon)
+    }
+
+    @Test("Link icon candidates not in appleTouchIconURLs are assigned .linkIcon type")
+    func assembleTypedCandidatesLinkIconType() {
+        let linkIcon = URL(string: "https://example.com/favicon.png")!
+        let htmlResult = FeedIconService.HTMLIconResult(
+            linkIcons: [linkIcon],
+            appleTouchIconURLs: [],
+            ogImageURL: nil,
+            redirectedHost: nil
+        )
+
+        let candidates = FeedIconService.assembleTypedCandidates(
+            feedSiteURL: URL(string: "https://example.com")!,
+            feedImageURL: nil,
+            htmlResult: htmlResult
+        )
+
+        let candidate = candidates.first { $0.url == linkIcon }
+        #expect(candidate?.type == .linkIcon)
+    }
+
+    @Test("favicon.ico fallback candidates are assigned .faviconICO type")
+    func assembleTypedCandidatesFaviconICOType() {
+        let siteURL = URL(string: "https://example.com")!
+
+        let candidates = FeedIconService.assembleTypedCandidates(
+            feedSiteURL: siteURL,
+            feedImageURL: nil,
+            htmlResult: nil
+        )
+
+        let faviconURL = URL(string: "https://example.com/favicon.ico")!
+        let candidate = candidates.first { $0.url == faviconURL }
+        #expect(candidate?.type == .faviconICO)
+    }
+
+    // MARK: - scoreIconCandidate
+
+    @Test("Square image scores higher than wide banner for same source type")
+    @MainActor
+    func scorePreferssquareOverWideBanner() {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let squareImage = UIGraphicsImageRenderer(size: CGSize(width: 96, height: 96), format: format)
+            .image { ctx in UIColor.red.setFill(); ctx.fill(CGRect(x: 0, y: 0, width: 96, height: 96)) }
+        let bannerImage = UIGraphicsImageRenderer(size: CGSize(width: 1200, height: 630), format: format)
+            .image { ctx in UIColor.red.setFill(); ctx.fill(CGRect(x: 0, y: 0, width: 1200, height: 630)) }
+
+        let squareScore = FeedIconService.scoreIconCandidate(image: squareImage, type: .ogImage)
+        let bannerScore = FeedIconService.scoreIconCandidate(image: bannerImage, type: .ogImage)
+
+        #expect(squareScore > bannerScore)
+    }
+
+    @Test("apple-touch-icon type bonus exceeds og:image for same dimensions")
+    @MainActor
+    func scoreAppleTouchIconOutranksSameShapeOgImage() {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        // Both 180×180 (square, good dimensions) — source type is the differentiator
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 180, height: 180), format: format)
+            .image { ctx in UIColor.red.setFill(); ctx.fill(CGRect(x: 0, y: 0, width: 180, height: 180)) }
+
+        let appleTouchScore = FeedIconService.scoreIconCandidate(image: image, type: .appleTouchIcon)
+        let ogScore = FeedIconService.scoreIconCandidate(image: image, type: .ogImage)
+
+        #expect(appleTouchScore > ogScore)
+    }
+
+    @Test("Score is in [0, 1] range for representative inputs")
+    @MainActor
+    func scoreIsBoundedInZeroToOne() {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+
+        let cases: [(CGSize, IconCandidateType)] = [
+            (CGSize(width: 16, height: 16), .faviconICO),
+            (CGSize(width: 96, height: 96), .appleTouchIcon),
+            (CGSize(width: 1200, height: 630), .ogImage),
+            (CGSize(width: 180, height: 180), .feedXML),
+            (CGSize(width: 32, height: 32), .linkIcon),
+        ]
+
+        for (size, type) in cases {
+            let image = UIGraphicsImageRenderer(size: size, format: format)
+                .image { ctx in UIColor.red.setFill(); ctx.fill(CGRect(origin: .zero, size: size)) }
+            let score = FeedIconService.scoreIconCandidate(image: image, type: type)
+            #expect(score >= 0.0 && score <= 1.0, "Score \(score) out of range for size \(size) type \(type)")
+        }
+    }
+
+    @Test("A 180x180 feed XML image passes the fast-path threshold")
+    @MainActor
+    func fastPathPassesFor180x180FeedXMLImage() {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 180, height: 180), format: format)
+            .image { ctx in UIColor.red.setFill(); ctx.fill(CGRect(x: 0, y: 0, width: 180, height: 180)) }
+
+        #expect(FeedIconService.passesFastPathThreshold(image: image))
+    }
+
+    @Test("A 1200x630 feed XML image does not pass the fast-path threshold")
+    @MainActor
+    func fastPathFailsForWideBannerFeedXMLImage() {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 1200, height: 630), format: format)
+            .image { ctx in UIColor.red.setFill(); ctx.fill(CGRect(x: 0, y: 0, width: 1200, height: 630)) }
+
+        #expect(!FeedIconService.passesFastPathThreshold(image: image))
     }
 
     // MARK: - cachedIconFileURL

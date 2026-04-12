@@ -137,6 +137,22 @@ enum HTMLUtilities {
     /// apple-touch-icon → shortcut icon / icon.
     /// Relative hrefs are resolved against the provided base URL.
     static func extractIconURLs(from html: String, baseURL: URL) -> [URL] {
+        let separated = extractIconURLsSeparated(from: html, baseURL: baseURL)
+        return separated.appleTouchIcons + separated.linkIcons
+    }
+
+    /// The icon URLs extracted from `<link>` tags, split by source type.
+    struct ExtractedIconURLs {
+        /// URLs from `<link rel="apple-touch-icon">` tags.
+        let appleTouchIcons: [URL]
+        /// URLs from `<link rel="icon">` and `<link rel="shortcut icon">` tags.
+        let linkIcons: [URL]
+    }
+
+    /// Extracts icon URLs from HTML `<link>` tags, separated by source type:
+    /// `appleTouchIcons` for `rel="apple-touch-icon"`, `linkIcons` for `rel="icon"`.
+    /// Relative hrefs are resolved against the provided base URL.
+    static func extractIconURLsSeparated(from html: String, baseURL: URL) -> ExtractedIconURLs {
         var appleTouchIcons: [URL] = []
         var linkIcons: [URL] = []
 
@@ -170,7 +186,7 @@ enum HTMLUtilities {
             }
         }
 
-        return appleTouchIcons + linkIcons
+        return ExtractedIconURLs(appleTouchIcons: appleTouchIcons, linkIcons: linkIcons)
     }
 
     /// Extracts the first `<link rel="alternate" type="application/atom+xml" href="...">`

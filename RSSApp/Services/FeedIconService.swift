@@ -18,6 +18,25 @@ enum FeedIconBackgroundStyle: String, Sendable, Equatable {
     case dark
 }
 
+/// The source type of an icon candidate, used to apply a type-specific bonus
+/// during suitability scoring. Apple-touch-icon and feed XML icons are designed
+/// for small-size display and receive a higher bonus than generic HTML link icons
+/// or social share banners (og:image).
+enum IconCandidateType: Sendable, Equatable {
+    /// Image URL from the feed's own XML `<image>` element.
+    case feedXML
+    /// `<meta property="og:image">` from the site homepage — often a social share
+    /// banner (1200×630) rather than a compact logo.
+    case ogImage
+    /// `<link rel="apple-touch-icon">` — designed for home-screen display;
+    /// strongly prefer these when available.
+    case appleTouchIcon
+    /// `<link rel="icon">` or `<link rel="shortcut icon">` from the site HTML.
+    case linkIcon
+    /// `/favicon.ico` fallback (original host or redirected host).
+    case faviconICO
+}
+
 // MARK: - Protocol
 
 protocol FeedIconResolving: Sendable {
@@ -50,7 +69,14 @@ protocol FeedIconResolving: Sendable {
     /// so the invariant is enforced once, at the service boundary.
     func loadValidatedIcon(for feedID: UUID) async -> UIImage?
 
-    /// Resolves candidate icon URLs and caches the first one that downloads successfully.
+    /// Resolves candidate icon URLs, downloads them concurrently, scores each by
+    /// suitability for small-size display (aspect ratio, dimensions, source type),
+    /// and caches the highest-scoring candidate.
+    ///
+    /// **Fast path:** if the feed XML image downloads and passes a minimum quality
+    /// threshold (square-ish aspect ratio, not oversized), it is used immediately
+    /// without evaluating the remaining candidates.
+    ///
     /// Returns the remote URL of the cached icon along with the luminance-based
     /// background-style classification, or `nil` when no candidate could be cached.
     func resolveAndCacheIcon(feedSiteURL: URL?, feedImageURL: URL?, feedID: UUID) async -> (url: URL, backgroundStyle: FeedIconBackgroundStyle)?
@@ -78,6 +104,11 @@ struct FeedIconService: FeedIconResolving {
     /// The icon-related meta tags are in the `<head>`, so we only need the first portion of the page.
     private static let htmlHeadMaxBytes = 51_200 // 50 KB
     private static let maxIconDimension: CGFloat = 128
+
+    /// Maximum number of candidates downloaded concurrently and scored for suitability.
+    /// Limits network activity when many link icons are present while still covering the
+    /// most likely good sources (feed XML, og:image, apple-touch-icon, link icon, favicon).
+    static let maxCandidatesForScoring = 5
 
     /// Optional override for the on-disk cache directory. When `nil`, the service writes to
     /// `<Caches>/feed-icons` (production default). Tests can pass a unique temporary directory
@@ -113,55 +144,10 @@ struct FeedIconService: FeedIconResolving {
     func cacheIcon(from remoteURL: URL, feedID: UUID) async -> FeedIconBackgroundStyle? {
         Self.logger.debug("cacheIcon() from \(remoteURL.absoluteString, privacy: .public) for feed \(feedID.uuidString, privacy: .public)")
 
-        do {
-            var request = URLRequest(url: remoteURL, timeoutInterval: Self.iconFetchTimeout)
-            request.setBrowserUserAgent()
-            let (data, response) = try await URLSession.shared.data(for: request)
-
-            guard let httpResponse = response as? HTTPURLResponse,
-                  (200...299).contains(httpResponse.statusCode) else {
-                let code = (response as? HTTPURLResponse)?.statusCode ?? -1
-                Self.logger.warning("Icon fetch returned HTTP \(code, privacy: .public) for \(remoteURL.absoluteString, privacy: .public)")
-                return nil
-            }
-
-            guard let image = UIImage(data: data) ?? Self.decodeICO(data) else {
-                let contentType = httpResponse.value(forHTTPHeaderField: "Content-Type") ?? "unknown"
-                Self.logger.warning("Downloaded data is not a valid image (\(contentType, privacy: .public), \(data.count, privacy: .public) bytes) from \(remoteURL.absoluteString, privacy: .public)")
-                return nil
-            }
-
-            // Normalize: resize if too large, convert to PNG
-            let normalized = normalizeImage(image)
-
-            // Single bitmap walk: visibility gate + average luminance of opaque
-            // pixels. Sharing the pass avoids a second CGContext allocation.
-            // `analyzeIconPixels` returns a sentinel neutral result (accept +
-            // .dark default tile) on CGContext failure so we don't reject an
-            // otherwise-valid icon over a bitmap-inspection glitch — matching
-            // the legacy `hasVisibleContent` accept-on-failure semantic.
-            let stats = Self.analyzeIconPixels(normalized, feedID: feedID)
-            guard stats.isVisible else {
-                Self.logger.warning("Image has no visible content (\(data.count, privacy: .public) bytes) from \(remoteURL.absoluteString, privacy: .public)")
-                return nil
-            }
-
-            guard let pngData = normalized.pngData() else {
-                Self.logger.warning("Failed to generate PNG data from image")
-                return nil
-            }
-
-            let fileURL = iconFileURL(for: feedID)
-            try ensureCacheDirectoryExists()
-            try pngData.write(to: fileURL, options: .atomic)
-
-            let backgroundStyle = Self.classifyBackgroundStyle(averageLuminance: stats.averageLuminance)
-            Self.logger.debug("Cached icon for feed \(feedID.uuidString, privacy: .public) (\(pngData.count, privacy: .public) bytes, luminance=\(stats.averageLuminance, privacy: .public), background=\(backgroundStyle.rawValue, privacy: .public))")
-            return backgroundStyle
-        } catch {
-            Self.logger.warning("Failed to cache icon for \(remoteURL.absoluteString, privacy: .public): \(error, privacy: .public)")
+        guard let (image, stats) = await downloadAndAnalyze(url: remoteURL, feedID: feedID) else {
             return nil
         }
+        return await writeNormalizedIcon(image: image, stats: stats, from: remoteURL, feedID: feedID)
     }
 
     func cachedIconFileURL(for feedID: UUID) -> URL? {
@@ -190,13 +176,97 @@ struct FeedIconService: FeedIconResolving {
     }
 
     func resolveAndCacheIcon(feedSiteURL: URL?, feedImageURL: URL?, feedID: UUID) async -> (url: URL, backgroundStyle: FeedIconBackgroundStyle)? {
-        let candidates = await resolveIconCandidates(feedSiteURL: feedSiteURL, feedImageURL: feedImageURL)
-        for candidate in candidates {
-            if let backgroundStyle = await cacheIcon(from: candidate, feedID: feedID) {
-                return (candidate, backgroundStyle)
+        Self.logger.debug("resolveAndCacheIcon() for feed \(feedID.uuidString, privacy: .public)")
+
+        // Fetch site HTML to discover link icons
+        var htmlResult: HTMLIconResult?
+        if let siteURL = feedSiteURL {
+            htmlResult = await resolveFromHTML(siteURL: siteURL)
+        }
+
+        let typedCandidates = Self.assembleTypedCandidates(
+            feedSiteURL: feedSiteURL,
+            feedImageURL: feedImageURL,
+            htmlResult: htmlResult
+        )
+
+        guard !typedCandidates.isEmpty else {
+            Self.logger.debug("No icon candidates for feed \(feedID.uuidString, privacy: .public)")
+            return nil
+        }
+
+        // Fast path: if a feed XML image candidate exists and passes the quality threshold,
+        // use it immediately without evaluating remaining candidates. Feed XML icons are
+        // purpose-built for the feed (compact logo, square, not a social share banner)
+        // and the quality gate rejects obvious mismatches (extreme aspect ratios, oversized).
+        if let feedXMLCandidate = typedCandidates.first(where: { $0.type == .feedXML }),
+           let (image, stats) = await downloadAndAnalyze(url: feedXMLCandidate.url, feedID: feedID),
+           Self.passesFastPathThreshold(image: image) {
+            Self.logger.info("Fast-path: feed XML icon passed quality threshold for feed \(feedID.uuidString, privacy: .public) — using \(feedXMLCandidate.url.absoluteString, privacy: .public)")
+            if let backgroundStyle = await writeNormalizedIcon(image: image, stats: stats, from: feedXMLCandidate.url, feedID: feedID) {
+                return (feedXMLCandidate.url, backgroundStyle)
             }
         }
-        Self.logger.debug("No icon cached for feed \(feedID.uuidString, privacy: .public) (\(candidates.count, privacy: .public) candidates tried)")
+
+        // General path: download all candidates concurrently (up to the cap), score each
+        // by suitability for small-size display, and cache the highest-scoring one.
+        let candidatesToScore = Array(typedCandidates.prefix(Self.maxCandidatesForScoring))
+
+        // Download all candidates concurrently and collect (candidate, image, stats) tuples
+        let downloadedCandidates: [(IconCandidate, UIImage, IconPixelStats)] = await withTaskGroup(
+            of: (IconCandidate, UIImage, IconPixelStats)?.self
+        ) { group in
+            for candidate in candidatesToScore {
+                group.addTask {
+                    guard let (image, stats) = await self.downloadAndAnalyze(url: candidate.url, feedID: feedID) else {
+                        return nil
+                    }
+                    return (candidate, image, stats)
+                }
+            }
+            var results: [(IconCandidate, UIImage, IconPixelStats)] = []
+            for await result in group {
+                if let result {
+                    results.append(result)
+                }
+            }
+            return results
+        }
+
+        guard !downloadedCandidates.isEmpty else {
+            Self.logger.debug("No icon candidates downloaded for feed \(feedID.uuidString, privacy: .public) (\(candidatesToScore.count, privacy: .public) tried)")
+            return nil
+        }
+
+        // Score each downloaded candidate and pick the best
+        let scored = downloadedCandidates.map { (candidate, image, stats) in
+            let score = Self.scoreIconCandidate(image: image, type: candidate.type)
+            Self.logger.debug("Candidate \(candidate.url.absoluteString, privacy: .public) type=\(String(describing: candidate.type), privacy: .public) score=\(score, privacy: .public) size=\(image.size.width, privacy: .public)x\(image.size.height, privacy: .public)")
+            return (candidate: candidate, image: image, stats: stats, score: score)
+        }
+
+        guard let best = scored.max(by: { $0.score < $1.score }) else {
+            return nil
+        }
+
+        Self.logger.info("Best icon candidate for feed \(feedID.uuidString, privacy: .public): \(best.candidate.url.absoluteString, privacy: .public) (score=\(best.score, privacy: .public))")
+
+        if let backgroundStyle = await writeNormalizedIcon(image: best.image, stats: best.stats, from: best.candidate.url, feedID: feedID) {
+            return (best.candidate.url, backgroundStyle)
+        }
+
+        // Fallback: if writing the best candidate failed, try the remaining ones in score order
+        let fallbacks = scored
+            .filter { $0.candidate.url != best.candidate.url }
+            .sorted { $0.score > $1.score }
+        for fallback in fallbacks {
+            if let backgroundStyle = await writeNormalizedIcon(image: fallback.image, stats: fallback.stats, from: fallback.candidate.url, feedID: feedID) {
+                Self.logger.notice("Fell back to candidate \(fallback.candidate.url.absoluteString, privacy: .public) for feed \(feedID.uuidString, privacy: .public)")
+                return (fallback.candidate.url, backgroundStyle)
+            }
+        }
+
+        Self.logger.debug("No icon cached for feed \(feedID.uuidString, privacy: .public) after scoring \(downloadedCandidates.count, privacy: .public) candidates")
         return nil
     }
 
@@ -243,6 +313,10 @@ struct FeedIconService: FeedIconResolving {
     struct HTMLIconResult {
         /// Icon URLs extracted from `<link>` tags, ordered by priority: apple-touch-icon first, then rel="icon".
         let linkIcons: [URL]
+        /// The subset of `linkIcons` that came from `<link rel="apple-touch-icon">` tags.
+        /// Used by `assembleTypedCandidates` to assign `.appleTouchIcon` source type so the
+        /// scorer can apply the appropriate suitability bonus.
+        let appleTouchIconURLs: [URL]
         /// The `og:image` URL from `<meta property="og:image">`, if present.
         /// Resolved against the page's base URL to handle protocol-relative and relative URLs.
         let ogImageURL: URL?
@@ -258,22 +332,46 @@ struct FeedIconService: FeedIconResolving {
         feedImageURL: URL?,
         htmlResult: HTMLIconResult?
     ) -> [URL] {
-        var candidates: [URL] = []
+        assembleTypedCandidates(feedSiteURL: feedSiteURL, feedImageURL: feedImageURL, htmlResult: htmlResult)
+            .map(\.url)
+    }
+
+    /// A typed icon candidate that pairs a URL with its source type.
+    struct IconCandidate: Sendable, Equatable {
+        let url: URL
+        let type: IconCandidateType
+    }
+
+    /// Assembles typed icon candidates in priority order from the given inputs.
+    /// Pure function — no I/O — enabling direct unit testing of ordering and scoring logic.
+    static func assembleTypedCandidates(
+        feedSiteURL: URL?,
+        feedImageURL: URL?,
+        htmlResult: HTMLIconResult?
+    ) -> [IconCandidate] {
+        var candidates: [IconCandidate] = []
 
         // Priority 1: Image URL from feed XML
         if let feedImageURL, feedImageURL.scheme == "http" || feedImageURL.scheme == "https" {
-            candidates.append(normalizeIconURL(feedImageURL))
+            candidates.append(IconCandidate(url: normalizeIconURL(feedImageURL), type: .feedXML))
         }
 
         if let htmlResult {
             // Priority 2: og:image from homepage — often blog-specific branding, which
             // survives platform redirects (Medium, Substack, Ghost) better than link icons
             if let ogImageURL = htmlResult.ogImageURL {
-                candidates.append(ogImageURL)
+                candidates.append(IconCandidate(url: ogImageURL, type: .ogImage))
             }
 
             // Priority 3: HTML link icons (apple-touch-icon first, then rel="icon")
-            candidates.append(contentsOf: htmlResult.linkIcons)
+            // HTMLUtilities.extractIconURLs already orders apple-touch-icons before rel="icon".
+            // We determine the candidate type by checking whether the URL also appears in the
+            // apple-touch-icon URL set produced by extractIconURLs' priority partition.
+            let appleTouchIconURLs = Set(htmlResult.appleTouchIconURLs)
+            for linkURL in htmlResult.linkIcons {
+                let candidateType: IconCandidateType = appleTouchIconURLs.contains(linkURL) ? .appleTouchIcon : .linkIcon
+                candidates.append(IconCandidate(url: linkURL, type: candidateType))
+            }
         }
 
         // Priority 4: /favicon.ico fallback from the original site host
@@ -281,7 +379,7 @@ struct FeedIconService: FeedIconResolving {
            let host = siteURL.host(percentEncoded: false),
            !host.isEmpty,
            let faviconURL = URL(string: "\(siteURL.scheme ?? "https")://\(host)/favicon.ico") {
-            candidates.append(faviconURL)
+            candidates.append(IconCandidate(url: faviconURL, type: .faviconICO))
         }
 
         // Priority 5: When a cross-domain redirect occurred (e.g., bothsidesofthetable.com
@@ -292,7 +390,7 @@ struct FeedIconService: FeedIconResolving {
            let siteURL = feedSiteURL,
            redirectedHost != siteURL.host(percentEncoded: false),
            let faviconURL = URL(string: "\(siteURL.scheme ?? "https")://\(redirectedHost)/favicon.ico") {
-            candidates.append(faviconURL)
+            candidates.append(IconCandidate(url: faviconURL, type: .faviconICO))
         }
 
         return candidates
@@ -330,7 +428,8 @@ struct FeedIconService: FeedIconResolving {
                 return nil
             }
 
-            let linkIcons = HTMLUtilities.extractIconURLs(from: html, baseURL: baseURL)
+            let extractedIcons = HTMLUtilities.extractIconURLsSeparated(from: html, baseURL: baseURL)
+            let linkIcons = extractedIcons.appleTouchIcons + extractedIcons.linkIcons
             let ogImageURL = HTMLUtilities.extractOGImageURL(from: html, baseURL: baseURL)
 
             // Detect cross-domain redirects (e.g., bothsidesofthetable.com → medium.com)
@@ -346,6 +445,7 @@ struct FeedIconService: FeedIconResolving {
 
             return HTMLIconResult(
                 linkIcons: linkIcons,
+                appleTouchIconURLs: extractedIcons.appleTouchIcons,
                 ogImageURL: ogImageURL,
                 redirectedHost: redirectedHost
             )
@@ -584,6 +684,133 @@ struct FeedIconService: FeedIconResolving {
     /// place and tests can pin the boundary without reaching into `cacheIcon`.
     static func classifyBackgroundStyle(averageLuminance: Double) -> FeedIconBackgroundStyle {
         averageLuminance > iconLightBackgroundLuminanceThreshold ? .dark : .light
+    }
+
+    // MARK: - Icon Suitability Scoring
+
+    /// Scores an icon candidate's suitability for display at small size (~32pt).
+    ///
+    /// The score is a value in `[0, 1]` computed from three factors:
+    /// - **Aspect ratio** (weight 0.5): `min(w,h) / max(w,h)`. Square = 1.0; 1200×630 ≈ 0.53.
+    /// - **Dimension** (weight 0.3): peaks at the sweet spot (~96px), decays for very
+    ///   small (<16px) or very large (>512px) images. The decay curves reflect that
+    ///   huge images lose detail when downscaled to 32pt, and tiny images are already
+    ///   pixelated.
+    /// - **Source type bonus** (weight 0.2): `.appleTouchIcon` and `.feedXML` receive the
+    ///   full bonus (1.0); `.faviconICO` receives a partial bonus (0.6); `.ogImage`
+    ///   receives no bonus (0.0) because og:image is designed for social sharing
+    ///   (wide banners) rather than compact display. `.linkIcon` receives a small bonus (0.4).
+    ///
+    /// Pure function — no I/O.
+    static func scoreIconCandidate(image: UIImage, type: IconCandidateType) -> Double {
+        let width = image.size.width
+        let height = image.size.height
+        guard width > 0, height > 0 else { return 0 }
+
+        // Aspect ratio score: 1.0 for square, lower for elongated images
+        let aspectRatio = min(width, height) / max(width, height)
+
+        // Dimension score: peaks near the icon sweet spot (~96px), penalizes extremes.
+        // Uses a piecewise function: linearly ramps from 0 at 1px to 1.0 at sweetSpot,
+        // then decays from 1.0 at sweetSpot toward 0 at penaltyStart.
+        let maxDim = max(width, height)
+        let sweetSpot: Double = 96
+        let penaltyStart: Double = 256  // starts penalizing above this
+        let penaltyEnd: Double = 1024   // zero score at this size
+
+        let dimensionScore: Double
+        if maxDim <= sweetSpot {
+            // Ramp from 0 at 1px to 1.0 at sweetSpot — small but crisp icons are good
+            dimensionScore = maxDim / sweetSpot
+        } else if maxDim <= penaltyStart {
+            dimensionScore = 1.0
+        } else {
+            // Linear decay from 1.0 at penaltyStart toward 0 at penaltyEnd
+            let decay = (maxDim - penaltyStart) / (penaltyEnd - penaltyStart)
+            dimensionScore = max(0, 1.0 - decay)
+        }
+
+        // Source type bonus
+        let typeBonus: Double
+        switch type {
+        case .feedXML:        typeBonus = 1.0
+        case .appleTouchIcon: typeBonus = 1.0
+        case .linkIcon:       typeBonus = 0.4
+        case .faviconICO:     typeBonus = 0.6
+        case .ogImage:        typeBonus = 0.0
+        }
+
+        // Weighted sum
+        return 0.5 * aspectRatio + 0.3 * dimensionScore + 0.2 * typeBonus
+    }
+
+    /// Minimum score for a feed XML image to qualify for the fast path (skip scoring other candidates).
+    /// A score of 0.7 requires the image to be roughly square (aspect ≥ 0.6) and not oversized.
+    /// feedXML type bonus (0.2) is already included in the score so a 180×180 feed XML image
+    /// scores 0.5 * 1.0 + 0.3 * 1.0 + 0.2 * 1.0 = 1.0 and easily qualifies.
+    /// A 1200×630 feed XML image scores 0.5 * 0.525 + 0.3 * 0.52 + 0.2 * 1.0 ≈ 0.618 — below threshold.
+    static let feedXMLFastPathScoreThreshold: Double = 0.7
+
+    /// Returns `true` if a feed XML image qualifies for the fast path — skip scoring other candidates.
+    static func passesFastPathThreshold(image: UIImage) -> Bool {
+        scoreIconCandidate(image: image, type: .feedXML) >= feedXMLFastPathScoreThreshold
+    }
+
+    // MARK: - Private download helpers
+
+    /// Downloads and decodes the image at `url`, returning the normalized image and its pixel stats.
+    /// Returns `nil` when the download fails, the response is not HTTP 2xx, the data is not a
+    /// decodable image, or the image has no visible content.
+    private func downloadAndAnalyze(url: URL, feedID: UUID) async -> (UIImage, IconPixelStats)? {
+        do {
+            var request = URLRequest(url: url, timeoutInterval: Self.iconFetchTimeout)
+            request.setBrowserUserAgent()
+            let (data, response) = try await URLSession.shared.data(for: request)
+
+            guard let httpResponse = response as? HTTPURLResponse,
+                  (200...299).contains(httpResponse.statusCode) else {
+                let code = (response as? HTTPURLResponse)?.statusCode ?? -1
+                Self.logger.debug("downloadAndAnalyze: HTTP \(code, privacy: .public) for \(url.absoluteString, privacy: .public)")
+                return nil
+            }
+
+            guard let image = UIImage(data: data) ?? Self.decodeICO(data) else {
+                Self.logger.debug("downloadAndAnalyze: not a valid image from \(url.absoluteString, privacy: .public)")
+                return nil
+            }
+
+            let normalized = normalizeImage(image)
+            let stats = Self.analyzeIconPixels(normalized, feedID: feedID)
+            guard stats.isVisible else {
+                Self.logger.debug("downloadAndAnalyze: image has no visible content from \(url.absoluteString, privacy: .public)")
+                return nil
+            }
+
+            return (normalized, stats)
+        } catch {
+            Self.logger.debug("downloadAndAnalyze: download failed for \(url.absoluteString, privacy: .public): \(error, privacy: .public)")
+            return nil
+        }
+    }
+
+    /// Writes a normalized (already downloaded and analyzed) image to the cache.
+    /// Returns the background style classification on success, `nil` on PNG-encode or write failure.
+    private func writeNormalizedIcon(image: UIImage, stats: IconPixelStats, from remoteURL: URL, feedID: UUID) async -> FeedIconBackgroundStyle? {
+        guard let pngData = image.pngData() else {
+            Self.logger.warning("writeNormalizedIcon: failed to generate PNG data for \(remoteURL.absoluteString, privacy: .public)")
+            return nil
+        }
+        do {
+            let fileURL = iconFileURL(for: feedID)
+            try ensureCacheDirectoryExists()
+            try pngData.write(to: fileURL, options: .atomic)
+            let backgroundStyle = Self.classifyBackgroundStyle(averageLuminance: stats.averageLuminance)
+            Self.logger.debug("Cached icon for feed \(feedID.uuidString, privacy: .public) (\(pngData.count, privacy: .public) bytes, luminance=\(stats.averageLuminance, privacy: .public), background=\(backgroundStyle.rawValue, privacy: .public))")
+            return backgroundStyle
+        } catch {
+            Self.logger.warning("writeNormalizedIcon: failed to write cache for feed \(feedID.uuidString, privacy: .public): \(error, privacy: .public)")
+            return nil
+        }
     }
 
     private func normalizeImage(_ image: UIImage) -> UIImage {
