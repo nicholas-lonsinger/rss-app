@@ -266,6 +266,7 @@ final class AddFeedViewModel {
                 feedImageURL: feedImageURL,
                 feedID: newFeed.id
             )
+            guard resolved != nil else { return }
             do {
                 try persistenceRef.applyIconResolution(resolved, to: newFeed)
                 try persistenceRef.save()
