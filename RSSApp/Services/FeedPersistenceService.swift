@@ -189,6 +189,22 @@ protocol FeedPersisting: Sendable {
     func save() throws
 }
 
+// MARK: - Icon Resolution Helpers
+
+extension FeedPersisting {
+    /// Applies a resolved icon to a feed. A no-op when `resolution` is `nil`.
+    /// Centralises the early-return-on-nil + `updateFeedIcon` call that
+    /// `FeedRefreshService` and `AddFeedViewModel` previously duplicated,
+    /// so both call sites evolve together when the resolution result type changes.
+    func applyIconResolution(
+        _ resolution: (url: URL, backgroundStyle: FeedIconBackgroundStyle)?,
+        to feed: PersistentFeed
+    ) throws {
+        guard let resolved = resolution else { return }
+        try updateFeedIcon(feed, iconURL: resolved.url, backgroundStyle: resolved.backgroundStyle)
+    }
+}
+
 // MARK: - SwiftData Implementation
 
 @MainActor
