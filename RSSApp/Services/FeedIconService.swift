@@ -867,7 +867,7 @@ struct FeedIconService: FeedIconResolving {
     /// Returns the background style classification on success, `nil` on PNG-encode or write failure.
     private func writeNormalizedIcon(image: UIImage, stats: IconPixelStats, from remoteURL: URL, feedID: UUID) async -> FeedIconBackgroundStyle? {
         guard let pngData = image.pngData() else {
-            Self.logger.warning("writeNormalizedIcon: failed to generate PNG data for \(remoteURL.absoluteString, privacy: .public)")
+            Self.logger.warning("writeNormalizedIcon: failed to generate PNG data for \(remoteURL.absoluteString, privacy: .public) (feed \(feedID.uuidString, privacy: .public))")
             return nil
         }
         do {
