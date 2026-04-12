@@ -1137,6 +1137,25 @@ struct FeedListViewModelTests {
         #expect(feedBGrouped?.groupNames == [])
     }
 
+    @Test("exportOPML sets error when allGroupMemberships throws")
+    @MainActor
+    func exportOPMLGroupMembershipsError() {
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [TestFixtures.makePersistentFeed()]
+        mockPersistence.groupError = NSError(domain: "test", code: 1)
+
+        let mockOPML = MockOPMLService()
+        mockOPML.dataToReturn = Data("opml-content".utf8)
+
+        let viewModel = Self.makeViewModel(persistence: mockPersistence, opmlService: mockOPML)
+        viewModel.loadFeeds()
+        viewModel.exportOPML()
+
+        #expect(viewModel.opmlExportURL == nil)
+        #expect(viewModel.importExportErrorMessage == "Unable to export feeds.")
+        #expect(viewModel.errorMessage == nil)
+    }
+
     // MARK: - Refresh Delegation — outcome → errorMessage translation
     //
     // These tests defend the `refreshAllFeeds()` switch that maps a

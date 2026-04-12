@@ -427,6 +427,11 @@ final class MockFeedPersistenceService: FeedPersisting {
             .sorted { $0.sortOrder < $1.sortOrder }
     }
 
+    func allGroupMemberships() throws -> [PersistentFeedGroupMembership] {
+        if let error = groupError ?? errorToThrow { throw error }
+        return memberships
+    }
+
     func articles(in group: PersistentFeedGroup, cursor: ArticlePaginationCursor?, limit: Int, ascending: Bool = false) throws -> [PersistentArticle] {
         if let error = groupError ?? errorToThrow { throw error }
         let feedIDs = Set(memberships.filter { $0.group?.id == group.id }.compactMap { $0.feed?.id })
