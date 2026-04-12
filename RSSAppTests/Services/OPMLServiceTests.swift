@@ -608,10 +608,10 @@ struct OPMLServiceTests {
         ]
 
         let data = try service.generateOPML(from: feeds)
-        let entries = try service.parseOPML(data)
+        let result = try service.parseOPML(data)
 
-        #expect(entries.count == 1)
-        #expect(entries[0].siteURL == siteURL)
+        #expect(result.entries.count == 1)
+        #expect(result.entries[0].siteURL == siteURL)
     }
 
     @Test("siteURL round-trips for a feed nested in a category")
@@ -629,10 +629,10 @@ struct OPMLServiceTests {
         ]
 
         let data = try service.generateOPML(from: groupedFeeds)
-        let entries = try service.parseOPML(data)
+        let result = try service.parseOPML(data)
 
-        #expect(entries.count == 1)
-        #expect(entries[0].siteURL == siteURL)
-        #expect(entries[0].groupName == "Tech")
+        #expect(result.entries.count == 1)
+        #expect(result.entries[0].siteURL == siteURL)
+        #expect(result.entries[0].groupName == "Tech")
     }
 }
