@@ -290,6 +290,8 @@ private struct HomeRowView: View {
 
     let title: String
     let systemImage: String
+    /// `nil` means this row type never shows a badge (e.g. All Articles, All Feeds),
+    /// which is distinct from a zero unread count where the badge is simply hidden.
     let badgeCount: Int?
     var showErrorIndicator: Bool = false
 
