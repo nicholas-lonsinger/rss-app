@@ -30,10 +30,7 @@ struct AtomFeedAlerts: ViewModifier {
         content
             .alert(
                 "Atom feed available",
-                isPresented: Binding(
-                    get: { atomAlternatePrompt != nil },
-                    set: { if !$0 { atomAlternatePrompt = nil } }
-                ),
+                isPresented: Binding(presentingIfNonNil: $atomAlternatePrompt),
                 presenting: atomAlternatePrompt
             ) { prompt in
                 // RATIONALE: We pass `prompt` directly into switchToAtom/keepRSS
@@ -55,12 +52,9 @@ struct AtomFeedAlerts: ViewModifier {
             }
             .alert(
                 "Atom feed unavailable",
-                isPresented: Binding(
-                    get: { atomFallbackNotice != nil },
-                    // Acknowledging the notice clears it; the view model's
-                    // didSet on atomFallbackNotice then signals sheet dismissal.
-                    set: { if !$0 { atomFallbackNotice = nil } }
-                ),
+                // Acknowledging the notice clears it; the view model's
+                // didSet on atomFallbackNotice then signals sheet dismissal.
+                isPresented: Binding(presentingIfNonNil: $atomFallbackNotice),
                 presenting: atomFallbackNotice
             ) { _ in
                 Button("OK", role: .cancel) { }

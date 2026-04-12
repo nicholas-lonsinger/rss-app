@@ -300,6 +300,10 @@ struct ArticleListScreen<Source: ArticleListSource>: View {
     /// The alert is only shown when there are articles to return to — when
     /// the list is empty, the error goes to the `errorEmptyRow` with its
     /// Retry button instead, so the two presentations don't race.
+    // RATIONALE: `Binding(presentingIfNonNil:)` is not used here because the
+    // `get` requires a compound condition (`errorMessage != nil &&
+    // !articles.isEmpty`) that the utility cannot express, and `set` calls
+    // `source.clearError()` rather than assigning nil directly.
     private var errorAlertBinding: Binding<Bool> {
         Binding(
             get: { source.errorMessage != nil && !source.articles.isEmpty },

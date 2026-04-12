@@ -15,6 +15,12 @@ extension Binding where Value == Bool {
     ///     Text(errorMessage ?? "")
     /// }
     /// ```
+    ///
+    /// Writing `true` through this binding is a no-op — the optional is never
+    /// populated from the outside. Alert buttons that only need to dismiss the
+    /// alert require no explicit action: the binding's `set` closure clears the
+    /// optional automatically when SwiftUI sets the binding to `false` on
+    /// dismissal.
     init<Wrapped>(presentingIfNonNil optional: Binding<Wrapped?>) {
         self.init(
             get: { optional.wrappedValue != nil },
