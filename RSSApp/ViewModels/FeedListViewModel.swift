@@ -147,18 +147,20 @@ final class FeedListViewModel {
         importExportErrorMessage = nil
         Self.logger.debug("importOPML() called with \(data.count, privacy: .public) bytes")
 
-        let entries: [OPMLFeedEntry]
+        let parseResult: OPMLParseResult
         do {
-            entries = try opmlService.parseOPML(data)
+            parseResult = try opmlService.parseOPML(data)
         } catch {
             importExportErrorMessage = "Unable to import feeds. The file may be invalid."
             Self.logger.error("OPML parse failed: \(error, privacy: .public)")
             return
         }
 
+        let entries = parseResult.entries
         var addedCount = 0
         var skippedCount = 0
         var failedCount = 0
+        let parseSkippedCount = parseResult.parseSkippedCount
         var groupsCreatedCount = 0
         var groupsReusedCount = 0
         var groupsFailedCount = 0
@@ -275,12 +277,13 @@ final class FeedListViewModel {
             addedCount: addedCount,
             skippedCount: skippedCount,
             failedCount: failedCount,
+            parseSkippedCount: parseSkippedCount,
             groupsCreatedCount: groupsCreatedCount,
             groupsReusedCount: groupsReusedCount,
             groupsFailedCount: groupsFailedCount
         )
         importExportErrorMessage = nil
-        Self.logger.notice("OPML import: added \(addedCount, privacy: .public), skipped \(skippedCount, privacy: .public), failed \(failedCount, privacy: .public), groups created \(groupsCreatedCount, privacy: .public), groups reused \(groupsReusedCount, privacy: .public), groups failed \(groupsFailedCount, privacy: .public)")
+        Self.logger.notice("OPML import: added \(addedCount, privacy: .public), skipped \(skippedCount, privacy: .public), failed \(failedCount, privacy: .public), parse-skipped \(parseSkippedCount, privacy: .public), groups created \(groupsCreatedCount, privacy: .public), groups reused \(groupsReusedCount, privacy: .public), groups failed \(groupsFailedCount, privacy: .public)")
     }
 
     func exportOPML() {

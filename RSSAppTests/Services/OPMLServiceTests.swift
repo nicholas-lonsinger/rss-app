@@ -12,7 +12,7 @@ struct OPMLServiceTests {
     @Test("parses simple flat OPML with three feeds")
     func parsesSimpleOPML() throws {
         let data = Data(TestFixtures.sampleOPML.utf8)
-        let entries = try service.parseOPML(data)
+        let entries = try service.parseOPML(data).entries
 
         #expect(entries.count == 3)
 
@@ -38,7 +38,7 @@ struct OPMLServiceTests {
     @Test("parses nested OPML with category group names")
     func parsesNestedOPML() throws {
         let data = Data(TestFixtures.nestedOPML.utf8)
-        let entries = try service.parseOPML(data)
+        let entries = try service.parseOPML(data).entries
 
         #expect(entries.count == 3)
         #expect(entries[0].title == "Ars Technica")
@@ -62,7 +62,7 @@ struct OPMLServiceTests {
               </body>
             </opml>
             """
-        let entries = try service.parseOPML(Data(opml.utf8))
+        let entries = try service.parseOPML(Data(opml.utf8)).entries
 
         #expect(entries.count == 1)
         #expect(entries[0].title == "Real Feed")
@@ -79,7 +79,7 @@ struct OPMLServiceTests {
               </body>
             </opml>
             """
-        let entries = try service.parseOPML(Data(opml.utf8))
+        let entries = try service.parseOPML(Data(opml.utf8)).entries
 
         #expect(entries.count == 1)
         #expect(entries[0].title == "https://example.com/feed")
@@ -96,7 +96,7 @@ struct OPMLServiceTests {
               </body>
             </opml>
             """
-        let entries = try service.parseOPML(Data(opml.utf8))
+        let entries = try service.parseOPML(Data(opml.utf8)).entries
 
         #expect(entries[0].title == "Title Attr Feed")
     }
@@ -122,7 +122,7 @@ struct OPMLServiceTests {
     @Test("parses empty body and returns empty array")
     func parsesEmptyBody() throws {
         let data = Data(TestFixtures.emptyBodyOPML.utf8)
-        let entries = try service.parseOPML(data)
+        let entries = try service.parseOPML(data).entries
 
         #expect(entries.isEmpty)
     }
@@ -142,7 +142,7 @@ struct OPMLServiceTests {
               </body>
             </opml>
             """
-        let entries = try service.parseOPML(Data(opml.utf8))
+        let entries = try service.parseOPML(Data(opml.utf8)).entries
 
         #expect(entries.count == 1)
         #expect(entries[0].title == "Deep Feed")
@@ -163,10 +163,61 @@ struct OPMLServiceTests {
               </body>
             </opml>
             """
-        let entries = try service.parseOPML(Data(opml.utf8))
+        let entries = try service.parseOPML(Data(opml.utf8)).entries
 
         #expect(entries.count == 1)
         #expect(entries[0].title == "Body Feed")
+    }
+
+    // MARK: - Parse Skip Count
+
+    @Test("parseSkippedCount is zero when all entries have valid xmlUrl")
+    func parseSkippedCountIsZeroForValidEntries() throws {
+        let data = Data(TestFixtures.sampleOPML.utf8)
+        let result = try service.parseOPML(data)
+
+        #expect(result.entries.count == 3)
+        #expect(result.parseSkippedCount == 0)
+    }
+
+    @Test("parseSkippedCount reflects only entries with unparseable xmlUrl")
+    func parseSkippedCountMixedValidAndInvalid() throws {
+        // URLs containing spaces in the scheme are rejected by URL(string:).
+        let opml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <opml version="2.0">
+              <head><title>Test</title></head>
+              <body>
+                <outline text="Valid Feed" xmlUrl="https://valid.com/feed"/>
+                <outline text="Bad URL Feed" xmlUrl="ht tp://bad.example.com"/>
+                <outline text="Another Valid" xmlUrl="https://another.com/feed"/>
+                <outline text="Also Bad" xmlUrl="ht tp://also-bad.example.com"/>
+              </body>
+            </opml>
+            """
+        let result = try service.parseOPML(Data(opml.utf8))
+
+        #expect(result.entries.count == 2)
+        #expect(result.parseSkippedCount == 2)
+    }
+
+    @Test("parseSkippedCount equals total outlines when every entry is invalid")
+    func parseSkippedCountAllInvalid() throws {
+        // URLs containing spaces in the scheme are rejected by URL(string:).
+        let opml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <opml version="2.0">
+              <head><title>Test</title></head>
+              <body>
+                <outline text="Bad Feed 1" xmlUrl="ht tp://bad1.example.com"/>
+                <outline text="Bad Feed 2" xmlUrl="ht tp://bad2.example.com"/>
+              </body>
+            </opml>
+            """
+        let result = try service.parseOPML(Data(opml.utf8))
+
+        #expect(result.entries.isEmpty)
+        #expect(result.parseSkippedCount == 2)
     }
 
     // MARK: - Generation
@@ -187,7 +238,7 @@ struct OPMLServiceTests {
         ]
 
         let data = try service.generateOPML(from: feeds)
-        let entries = try service.parseOPML(data)
+        let entries = try service.parseOPML(data).entries
 
         #expect(entries.count == 2)
         #expect(entries[0].title == "Feed A")
@@ -200,7 +251,7 @@ struct OPMLServiceTests {
     @Test("generates valid OPML from empty feed list")
     func generatesEmptyOPML() throws {
         let data = try service.generateOPML(from: [] as [SubscribedFeed])
-        let entries = try service.parseOPML(data)
+        let entries = try service.parseOPML(data).entries
 
         #expect(entries.isEmpty)
     }
@@ -222,7 +273,7 @@ struct OPMLServiceTests {
         #expect(xml.contains("It&apos;s &lt;special&gt;"))
 
         // Verify it still parses correctly
-        let entries = try service.parseOPML(data)
+        let entries = try service.parseOPML(data).entries
         #expect(entries.count == 1)
         #expect(entries[0].title == "Feed <A> & \"B\"")
     }
@@ -278,7 +329,7 @@ struct OPMLServiceTests {
               </body>
             </opml>
             """
-        let entries = try service.parseOPML(Data(opml.utf8))
+        let entries = try service.parseOPML(Data(opml.utf8)).entries
 
         #expect(entries.count == 4)
         #expect(entries[0].title == "Ars")
@@ -307,7 +358,7 @@ struct OPMLServiceTests {
               </body>
             </opml>
             """
-        let entries = try service.parseOPML(Data(opml.utf8))
+        let entries = try service.parseOPML(Data(opml.utf8)).entries
 
         // Feed appears once per category — two entries with different group names.
         #expect(entries.count == 2)
@@ -329,7 +380,7 @@ struct OPMLServiceTests {
               </body>
             </opml>
             """
-        let entries = try service.parseOPML(Data(opml.utf8))
+        let entries = try service.parseOPML(Data(opml.utf8)).entries
 
         #expect(entries.count == 1)
         #expect(entries[0].groupName == "My Category")
@@ -348,7 +399,7 @@ struct OPMLServiceTests {
               </body>
             </opml>
             """
-        let entries = try service.parseOPML(Data(opml.utf8))
+        let entries = try service.parseOPML(Data(opml.utf8)).entries
 
         #expect(entries.count == 1)
         // Category outline with no text/title attributes is skipped as a group.
@@ -372,7 +423,7 @@ struct OPMLServiceTests {
               </body>
             </opml>
             """
-        let entries = try service.parseOPML(Data(opml.utf8))
+        let entries = try service.parseOPML(Data(opml.utf8)).entries
 
         #expect(entries.count == 3)
         #expect(entries[0].groupName == "Category A")
@@ -410,7 +461,7 @@ struct OPMLServiceTests {
 
         // Ungrouped feed should be at top level (not nested).
         // Verify by round-tripping.
-        let entries = try service.parseOPML(data)
+        let entries = try service.parseOPML(data).entries
         #expect(entries.count == 3)
 
         let techEntry = entries.first { $0.feedURL == URL(string: "https://tech.com/feed") }
@@ -432,7 +483,7 @@ struct OPMLServiceTests {
         ]
 
         let data = try service.generateOPML(from: groupedFeeds)
-        let entries = try service.parseOPML(data)
+        let entries = try service.parseOPML(data).entries
 
         // Feed should appear under both categories.
         #expect(entries.count == 2)
@@ -458,7 +509,7 @@ struct OPMLServiceTests {
         ]
 
         let data = try service.generateOPML(from: groupedFeeds)
-        let entries = try service.parseOPML(data)
+        let entries = try service.parseOPML(data).entries
 
         #expect(entries.count == 3)
         #expect(entries[0].title == "Feed A")
@@ -507,7 +558,7 @@ struct OPMLServiceTests {
         #expect(xml.contains("Tech &amp; Science"))
 
         // Verify round-trip preserves the name.
-        let entries = try service.parseOPML(data)
+        let entries = try service.parseOPML(data).entries
         #expect(entries[0].groupName == "Tech & Science")
     }
 
