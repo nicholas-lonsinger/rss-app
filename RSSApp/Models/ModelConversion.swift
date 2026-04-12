@@ -10,6 +10,7 @@ extension PersistentFeed {
             title: subscribedFeed.title,
             feedURL: subscribedFeed.url,
             feedDescription: subscribedFeed.feedDescription,
+            siteURL: subscribedFeed.siteURL,
             addedDate: subscribedFeed.addedDate,
             lastFetchError: subscribedFeed.lastFetchError,
             lastFetchErrorDate: subscribedFeed.lastFetchErrorDate
@@ -22,6 +23,7 @@ extension PersistentFeed {
             title: title,
             url: feedURL,
             feedDescription: feedDescription,
+            siteURL: siteURL,
             addedDate: addedDate,
             lastFetchError: lastFetchError,
             lastFetchErrorDate: lastFetchErrorDate

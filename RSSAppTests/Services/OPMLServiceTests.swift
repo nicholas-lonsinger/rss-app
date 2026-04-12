@@ -510,4 +510,78 @@ struct OPMLServiceTests {
         let entries = try service.parseOPML(data)
         #expect(entries[0].groupName == "Tech & Science")
     }
+
+    // MARK: - htmlUrl / siteURL round-trip
+
+    @Test("generates htmlUrl attribute when feed has a siteURL")
+    func generatesHtmlUrlWhenSiteURLPresent() throws {
+        let feeds = [
+            TestFixtures.makeSubscribedFeed(
+                title: "Feed With Site",
+                url: URL(string: "https://example.com/feed")!,
+                siteURL: URL(string: "https://example.com")
+            ),
+        ]
+
+        let data = try service.generateOPML(from: feeds)
+        let xml = String(data: data, encoding: .utf8)!
+
+        #expect(xml.contains("htmlUrl=\"https://example.com\""))
+    }
+
+    @Test("omits htmlUrl attribute when feed has no siteURL")
+    func omitsHtmlUrlWhenSiteURLAbsent() throws {
+        let feeds = [
+            TestFixtures.makeSubscribedFeed(
+                title: "Feed Without Site",
+                url: URL(string: "https://example.com/feed")!,
+                siteURL: nil
+            ),
+        ]
+
+        let data = try service.generateOPML(from: feeds)
+        let xml = String(data: data, encoding: .utf8)!
+
+        #expect(!xml.contains("htmlUrl="))
+    }
+
+    @Test("siteURL round-trips through generate then parse")
+    func siteURLRoundTrips() throws {
+        let siteURL = URL(string: "https://example.com")!
+        let feeds = [
+            TestFixtures.makeSubscribedFeed(
+                title: "Round-Trip Feed",
+                url: URL(string: "https://example.com/feed")!,
+                siteURL: siteURL
+            ),
+        ]
+
+        let data = try service.generateOPML(from: feeds)
+        let entries = try service.parseOPML(data)
+
+        #expect(entries.count == 1)
+        #expect(entries[0].siteURL == siteURL)
+    }
+
+    @Test("siteURL round-trips for a feed nested in a category")
+    func siteURLRoundTripsInGroupedFeed() throws {
+        let siteURL = URL(string: "https://tech.com")!
+        let groupedFeeds = [
+            GroupedFeed(
+                feed: TestFixtures.makeSubscribedFeed(
+                    title: "Tech Feed",
+                    url: URL(string: "https://tech.com/feed")!,
+                    siteURL: siteURL
+                ),
+                groupNames: ["Tech"]
+            ),
+        ]
+
+        let data = try service.generateOPML(from: groupedFeeds)
+        let entries = try service.parseOPML(data)
+
+        #expect(entries.count == 1)
+        #expect(entries[0].siteURL == siteURL)
+        #expect(entries[0].groupName == "Tech")
+    }
 }

@@ -5,11 +5,13 @@ import Foundation
 @Suite("SubscribedFeed Tests")
 struct SubscribedFeedTests {
 
-    @Test("updatingMetadata preserves id, url, and addedDate")
+    @Test("updatingMetadata preserves id, url, siteURL, and addedDate")
     func updatingMetadataPreservesIdentity() {
+        let siteURL = URL(string: "https://example.com")!
         let original = TestFixtures.makeSubscribedFeed(
             title: "Old Title",
-            feedDescription: "Old Description"
+            feedDescription: "Old Description",
+            siteURL: siteURL
         )
         let updated = original.updatingMetadata(
             title: "New Title",
@@ -18,6 +20,7 @@ struct SubscribedFeedTests {
 
         #expect(updated.id == original.id)
         #expect(updated.url == original.url)
+        #expect(updated.siteURL == siteURL)
         #expect(updated.addedDate == original.addedDate)
         #expect(updated.title == "New Title")
         #expect(updated.feedDescription == "New Description")
@@ -35,20 +38,24 @@ struct SubscribedFeedTests {
         #expect(updated.lastFetchErrorDate == nil)
     }
 
-    @Test("updatingError sets error fields")
+    @Test("updatingError sets error fields and preserves siteURL")
     func updatingErrorSetsFields() {
-        let feed = TestFixtures.makeSubscribedFeed()
+        let siteURL = URL(string: "https://example.com")!
+        let feed = TestFixtures.makeSubscribedFeed(siteURL: siteURL)
         let updated = feed.updatingError("HTTP 404")
 
         #expect(updated.lastFetchError == "HTTP 404")
         #expect(updated.lastFetchErrorDate != nil)
         #expect(updated.id == feed.id)
         #expect(updated.url == feed.url)
+        #expect(updated.siteURL == siteURL)
     }
 
-    @Test("updatingURL changes URL and clears error")
+    @Test("updatingURL changes URL, clears error, and preserves siteURL")
     func updatingURLChangesAndClearsError() {
+        let siteURL = URL(string: "https://example.com")!
         let feed = TestFixtures.makeSubscribedFeed(
+            siteURL: siteURL,
             lastFetchError: "HTTP 404",
             lastFetchErrorDate: Date()
         )
@@ -60,6 +67,7 @@ struct SubscribedFeedTests {
         #expect(updated.lastFetchErrorDate == nil)
         #expect(updated.id == feed.id)
         #expect(updated.title == feed.title)
+        #expect(updated.siteURL == siteURL)
     }
 
     @Test("Codable roundtrip preserves error fields")

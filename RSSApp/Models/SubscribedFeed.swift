@@ -5,6 +5,7 @@ struct SubscribedFeed: Identifiable, Hashable, Codable, Sendable {
     let title: String
     let url: URL
     let feedDescription: String
+    let siteURL: URL?
     let addedDate: Date
     let lastFetchError: String?
     let lastFetchErrorDate: Date?
@@ -14,6 +15,7 @@ struct SubscribedFeed: Identifiable, Hashable, Codable, Sendable {
         title: String,
         url: URL,
         feedDescription: String,
+        siteURL: URL? = nil,
         addedDate: Date,
         lastFetchError: String? = nil,
         lastFetchErrorDate: Date? = nil
@@ -22,6 +24,7 @@ struct SubscribedFeed: Identifiable, Hashable, Codable, Sendable {
         self.title = title
         self.url = url
         self.feedDescription = feedDescription
+        self.siteURL = siteURL
         self.addedDate = addedDate
         self.lastFetchError = lastFetchError
         self.lastFetchErrorDate = lastFetchErrorDate
@@ -30,14 +33,16 @@ struct SubscribedFeed: Identifiable, Hashable, Codable, Sendable {
     func updatingMetadata(title: String, feedDescription: String) -> SubscribedFeed {
         SubscribedFeed(
             id: id, title: title, url: url,
-            feedDescription: feedDescription, addedDate: addedDate
+            feedDescription: feedDescription, siteURL: siteURL,
+            addedDate: addedDate
         )
     }
 
     func updatingError(_ message: String) -> SubscribedFeed {
         SubscribedFeed(
             id: id, title: title, url: url,
-            feedDescription: feedDescription, addedDate: addedDate,
+            feedDescription: feedDescription, siteURL: siteURL,
+            addedDate: addedDate,
             lastFetchError: message, lastFetchErrorDate: Date()
         )
     }
@@ -45,7 +50,8 @@ struct SubscribedFeed: Identifiable, Hashable, Codable, Sendable {
     func updatingURL(_ newURL: URL) -> SubscribedFeed {
         SubscribedFeed(
             id: id, title: title, url: newURL,
-            feedDescription: feedDescription, addedDate: addedDate
+            feedDescription: feedDescription, siteURL: siteURL,
+            addedDate: addedDate
         )
     }
 }
