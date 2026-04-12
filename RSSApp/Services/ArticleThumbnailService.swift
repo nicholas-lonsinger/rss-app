@@ -53,7 +53,13 @@ struct ArticleThumbnailService: ArticleThumbnailCaching {
 
     private static let cacheDirectoryName = "article-thumbnails"
     private static let fetchTimeout: TimeInterval = 15
-    private static let thumbnailDimension: CGFloat = 120 // 2× retina for 60pt display
+    // RATIONALE: thumbnailDimension derives from ArticleThumbnailView.thumbnailSize (the
+    // single source of truth for the display size) multiplied by the screen scale, ensuring
+    // cached thumbnails are always full-resolution (2× on SE/standard, 3× on Pro/Plus).
+    // Both types live in the same RSSApp module so the cross-file reference adds no import.
+    private static var thumbnailDimension: CGFloat {
+        ceil(ArticleThumbnailView.thumbnailSize * UIScreen.main.scale)
+    }
     private static let jpegQuality: CGFloat = 0.8
 
     /// Session used to fetch article HTML for og:image resolution. Injectable so tests
