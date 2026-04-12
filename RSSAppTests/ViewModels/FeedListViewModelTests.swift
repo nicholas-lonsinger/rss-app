@@ -1447,6 +1447,43 @@ struct FeedListViewModelTests {
         #expect(viewModel.errorMessage == nil)
     }
 
+    // MARK: - OPML Parse Skip Count
+
+    @Test("importOPML propagates parseSkippedCount from parse result into OPMLImportResult")
+    @MainActor
+    func importOPMLPropagatesParseSkippedCount() {
+        let mockPersistence = MockFeedPersistenceService()
+        let mockOPML = MockOPMLService()
+        // Simulate the parser returning 2 valid entries and reporting 3 skipped
+        mockOPML.entriesToReturn = [
+            TestFixtures.makeOPMLFeedEntry(title: "Feed A", feedURL: URL(string: "https://a.com/feed")!),
+            TestFixtures.makeOPMLFeedEntry(title: "Feed B", feedURL: URL(string: "https://b.com/feed")!),
+        ]
+        mockOPML.parseSkippedCountToReturn = 3
+
+        let viewModel = Self.makeViewModel(persistence: mockPersistence, opmlService: mockOPML)
+        viewModel.importOPML(from: Data())
+
+        #expect(viewModel.opmlImportResult?.addedCount == 2)
+        #expect(viewModel.opmlImportResult?.parseSkippedCount == 3)
+    }
+
+    @Test("importOPML result has zero parseSkippedCount when no entries were skipped")
+    @MainActor
+    func importOPMLParseSkippedCountIsZeroWhenNoneSkipped() {
+        let mockPersistence = MockFeedPersistenceService()
+        let mockOPML = MockOPMLService()
+        mockOPML.entriesToReturn = [
+            TestFixtures.makeOPMLFeedEntry(title: "Feed A", feedURL: URL(string: "https://a.com/feed")!),
+        ]
+        mockOPML.parseSkippedCountToReturn = 0
+
+        let viewModel = Self.makeViewModel(persistence: mockPersistence, opmlService: mockOPML)
+        viewModel.importOPML(from: Data())
+
+        #expect(viewModel.opmlImportResult?.parseSkippedCount == 0)
+    }
+
     // MARK: - OPML Import sortOrder
 
     @Test("importOPML assigns incrementing sortOrder starting after existing feeds")

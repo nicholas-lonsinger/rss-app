@@ -277,8 +277,6 @@ struct ImportExportView: View {
         }
     }
 
-    // MARK: - Helpers
-
     private func handleFileImport(_ result: Result<URL, any Error>) {
         switch result {
         case .success(let url):

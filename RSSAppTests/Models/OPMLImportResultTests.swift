@@ -57,6 +57,38 @@ struct OPMLImportResultTests {
         #expect(result.importSummary.contains("1 duplicate skipped"))
     }
 
+    // MARK: - parseSkippedCount wording
+
+    @Test("Singular parse-skipped uses 'entry' and 'was'")
+    func parseSkippedSingular() {
+        let result = OPMLImportResult(addedCount: 2, skippedCount: 0, parseSkippedCount: 1)
+        let summary = result.importSummary
+        #expect(summary.contains("1 entry"))
+        #expect(summary.contains("was skipped"))
+    }
+
+    @Test("Plural parse-skipped uses 'entries' and 'were'")
+    func parseSkippedPlural() {
+        let result = OPMLImportResult(addedCount: 0, skippedCount: 0, parseSkippedCount: 3)
+        let summary = result.importSummary
+        #expect(summary.hasPrefix("Imported from OPML:"))
+        #expect(summary.contains("3 entries"))
+        #expect(summary.contains("were skipped"))
+    }
+
+    @Test("All-duplicates fast path does not fire when parseSkippedCount > 0")
+    func allDuplicatesFastPathBlockedByParseSkip() {
+        // addedCount == 0, skippedCount > 0, parseSkippedCount == 1
+        // The all-duplicates guard must not trigger; summary must describe the parse-skip.
+        let result = OPMLImportResult(addedCount: 0, skippedCount: 2, parseSkippedCount: 1)
+        let summary = result.importSummary
+        #expect(!summary.hasPrefix("All"))
+        #expect(summary.hasPrefix("Imported from OPML:"))
+        #expect(summary.contains("invalid feed URL"))
+        #expect(summary.contains("1 entry"))
+        #expect(summary.contains("was skipped"))
+    }
+
     // MARK: - Group counts
 
     @Test("New groups created line appears with correct count")
@@ -120,7 +152,7 @@ struct OPMLImportResultTests {
         #expect(result.importSummary.contains("3 group assignments failed"))
     }
 
-    // MARK: - Realistic combination
+    // MARK: - Realistic combinations
 
     @Test("Full result shows all sections in order")
     func fullResult() {
@@ -146,7 +178,6 @@ struct OPMLImportResultTests {
     func allDuplicatesWithGroupFailureNotSpecialCased() {
         let result = OPMLImportResult(addedCount: 0, skippedCount: 3, groupsFailedCount: 1)
         let summary = result.importSummary
-        // Should fall through to bulleted format, not the short "all feeds already in list" message
         #expect(summary.hasPrefix("Imported from OPML:"))
         #expect(summary.contains("3 duplicates skipped"))
         #expect(summary.contains("group assignment failed"))

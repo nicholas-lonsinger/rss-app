@@ -13,8 +13,16 @@ struct GroupedFeed: Sendable {
     let groupNames: [String]
 }
 
+/// The result of parsing an OPML file, including the parsed feed entries and
+/// the number of feed outlines that were silently skipped due to invalid xmlUrl values.
+struct OPMLParseResult: Sendable {
+    let entries: [OPMLFeedEntry]
+    /// Number of feed outlines whose `xmlUrl` attribute could not be parsed as a valid URL.
+    let parseSkippedCount: Int
+}
+
 protocol OPMLServing: Sendable {
-    func parseOPML(_ data: Data) throws -> [OPMLFeedEntry]
+    func parseOPML(_ data: Data) throws -> OPMLParseResult
     func generateOPML(from feeds: [SubscribedFeed]) throws -> Data
     func generateOPML(from groupedFeeds: [GroupedFeed]) throws -> Data
 }
@@ -23,7 +31,7 @@ struct OPMLService: OPMLServing {
 
     private static let logger = Logger(category: "OPMLService")
 
-    func parseOPML(_ data: Data) throws -> [OPMLFeedEntry] {
+    func parseOPML(_ data: Data) throws -> OPMLParseResult {
         Self.logger.debug("parseOPML() called with \(data.count, privacy: .public) bytes")
 
         let delegate = OPMLParserDelegate()
@@ -43,8 +51,8 @@ struct OPMLService: OPMLServing {
             throw OPMLError.noBodyFound
         }
 
-        Self.logger.notice("OPML parsed: \(delegate.entries.count, privacy: .public) feed entries")
-        return delegate.entries
+        Self.logger.notice("OPML parsed: \(delegate.entries.count, privacy: .public) feed entries, \(delegate.parseSkippedCount, privacy: .public) skipped due to invalid xmlUrl")
+        return OPMLParseResult(entries: delegate.entries, parseSkippedCount: delegate.parseSkippedCount)
     }
 
     func generateOPML(from feeds: [SubscribedFeed]) throws -> Data {
@@ -159,6 +167,8 @@ private final class OPMLParserDelegate: NSObject, XMLParserDelegate, @unchecked 
 
     var foundBody = false
     var entries: [OPMLFeedEntry] = []
+    /// Number of feed outlines whose `xmlUrl` attribute could not be parsed as a valid URL.
+    var parseSkippedCount = 0
 
     /// Stack of category names representing the current nesting path.
     /// Only `<outline>` elements inside `<body>` that lack `xmlUrl` are
@@ -195,6 +205,7 @@ private final class OPMLParserDelegate: NSObject, XMLParserDelegate, @unchecked 
                 // This is a feed outline.
                 guard let feedURL = URL(string: xmlUrlString) else {
                     Self.logger.warning("Skipped outline with unparseable xmlUrl: '\(xmlUrlString, privacy: .public)'")
+                    parseSkippedCount += 1
                     outlinePushedCategory.append(false)
                     return
                 }
