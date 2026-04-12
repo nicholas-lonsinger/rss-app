@@ -343,7 +343,9 @@ struct EditFeedViewModelTests {
         // is what they typed and should remain.
         #expect(viewModel.urlInput == rssURL.absoluteString)
 
-        viewModel.acknowledgeAtomFallbackNotice()
+        // Simulate the user tapping OK on the notice (nils the binding,
+        // which triggers didSet → didSave = true).
+        viewModel.atomFallbackNotice = nil
 
         #expect(viewModel.atomFallbackNotice == nil)
         #expect(viewModel.didSave == true)
