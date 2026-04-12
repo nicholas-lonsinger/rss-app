@@ -210,10 +210,7 @@ struct HomeView: View {
             }
             .alert(
                 "Delete Group?",
-                isPresented: Binding(
-                    get: { groupToDelete != nil },
-                    set: { if !$0 { groupToDelete = nil } }
-                ),
+                isPresented: $groupToDelete.isPresented(),
                 presenting: groupToDelete
             ) { group in
                 Button("Delete", role: .destructive) {

@@ -107,7 +107,7 @@ struct FeedListView: View {
             }) { feed in
                 EditFeedView(feed: feed, persistence: persistence)
             }
-            .alert("Error", isPresented: errorAlertBinding) {
+            .alert("Error", isPresented: $viewModel.errorMessage.isPresented()) {
                 Button("OK") { viewModel.errorMessage = nil }
             } message: {
                 Text(viewModel.errorMessage ?? "")
@@ -185,9 +185,4 @@ struct FeedListView: View {
         }
     }
 
-    // MARK: - Helpers
-
-    private var errorAlertBinding: Binding<Bool> {
-        Binding(presentingIfNonNil: $viewModel.errorMessage)
-    }
 }

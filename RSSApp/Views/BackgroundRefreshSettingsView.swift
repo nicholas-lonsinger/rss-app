@@ -111,10 +111,7 @@ struct BackgroundRefreshSettingsView: View {
         .navigationTitle("Background Refresh")
         .alert(
             "Background Refresh Unavailable",
-            isPresented: Binding(
-                get: { scheduleError != nil },
-                set: { if !$0 { scheduleError = nil } }
-            ),
+            isPresented: $scheduleError.isPresented(),
             presenting: scheduleError
         ) { _ in
             Button("OK") { scheduleError = nil }

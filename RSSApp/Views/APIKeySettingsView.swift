@@ -75,17 +75,17 @@ struct APIKeySettingsView: View {
         } message: {
             Text("Your Anthropic API key has been saved to the Keychain.")
         }
-        .alert("Save Failed", isPresented: Binding(presentingIfNonNil: $saveError)) {
+        .alert("Save Failed", isPresented: $saveError.isPresented()) {
             Button("OK", role: .cancel) {}
         } message: {
             Text(saveError ?? "")
         }
-        .alert("Remove Failed", isPresented: Binding(presentingIfNonNil: $deleteError)) {
+        .alert("Remove Failed", isPresented: $deleteError.isPresented()) {
             Button("OK", role: .cancel) {}
         } message: {
             Text(deleteError ?? "")
         }
-        .alert("Load Failed", isPresented: Binding(presentingIfNonNil: $loadError)) {
+        .alert("Load Failed", isPresented: $loadError.isPresented()) {
             Button("OK", role: .cancel) {}
         } message: {
             Text(loadError ?? "")
