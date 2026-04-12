@@ -16,7 +16,10 @@ import SwiftUI
 /// documented below and in ARCHITECTURE.md.
 struct ArticleListScreen<Source: ArticleListSource>: View {
 
-    private static let logger = Logger(category: "ArticleListScreen")
+    // RATIONALE: Logger cannot be a `static let` in a generic type (Swift 6 restriction),
+    // so it is declared as a computed property that vends the same lightweight Logger
+    // value on each access. Logger creation is O(1) and cheap relative to any log call.
+    private var logger: Logger { Logger(category: "ArticleListScreen") }
 
     let source: Source
     let persistence: FeedPersisting
@@ -176,7 +179,7 @@ struct ArticleListScreen<Source: ArticleListSource>: View {
             // back `HomeViewModel` get a harmless no-op reload of already-loaded
             // state. Fixes #347.
             guard newPhase == .active, hasAppeared else { return }
-            Self.logger.info("Foregrounded — rehydrating '\(source.title, privacy: .public)' article list from store")
+            logger.info("Foregrounded — rehydrating '\(source.title, privacy: .public)' article list from store")
             source.reload()
         }
     }

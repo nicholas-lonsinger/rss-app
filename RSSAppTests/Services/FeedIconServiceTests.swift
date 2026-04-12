@@ -519,6 +519,24 @@ struct FeedIconServiceTests {
         #expect(!FileManager.default.fileExists(atPath: fileURL.path(percentEncoded: false)))
     }
 
+    // MARK: - resolveAndCacheIcon miss-tracker integration
+
+    @Test("resolveAndCacheIcon records exactly one miss when all candidates fail")
+    func resolveAndCacheIconRecordsOneMissWhenAllCandidatesFail() async {
+        let tracker = FeedIconMissTracker()
+        let isolatedService = FeedIconService(cacheDirectoryOverride: cacheDirectory, missTracker: tracker)
+        let feedID = UUID()
+        // Use a URL under a reserved TLD — guaranteed to fail DNS resolution without touching the network.
+        let siteURL = URL(string: "https://example-invalid-no-icon.invalid")!
+
+        _ = await isolatedService.resolveAndCacheIcon(feedSiteURL: siteURL, feedImageURL: nil, feedID: feedID)
+
+        // After one resolveAndCacheIcon call with all candidates failing, the tracker
+        // should have recorded exactly 1 miss. Calling recordMiss again should return 2.
+        let nextCount = await tracker.recordMiss(for: feedID)
+        #expect(nextCount == 2)
+    }
+
     // MARK: - Test helpers
 
     /// Writes `data` to the path the `service` expects for `feedID`'s cached icon. Primes
@@ -917,5 +935,84 @@ struct HTMLUtilitiesIconExtractionTests {
         let urls = HTMLUtilities.extractIconURLs(from: html, baseURL: baseURL)
 
         #expect(urls.count == 2)
+    }
+}
+
+// MARK: - FeedIconMissTracker Tests
+
+@Suite("FeedIconMissTracker Tests")
+struct FeedIconMissTrackerTests {
+
+    @Test("Miss count starts at zero for unknown feed")
+    func initialMissCountIsZero() async {
+        let tracker = FeedIconMissTracker()
+        // If the counter starts at 0, the first recordMiss returns 1
+        let firstMiss = await tracker.recordMiss(for: UUID())
+        #expect(firstMiss == 1)
+    }
+
+    @Test("recordMiss increments counter and returns new count")
+    func recordMissIncrementsCounter() async {
+        let tracker = FeedIconMissTracker()
+        let feedID = UUID()
+
+        let first = await tracker.recordMiss(for: feedID)
+        let second = await tracker.recordMiss(for: feedID)
+
+        #expect(first == 1)
+        #expect(second == 2)
+    }
+
+    @Test("recordSuccess resets counter to zero")
+    func recordSuccessResetsCounter() async {
+        let tracker = FeedIconMissTracker()
+        let feedID = UUID()
+
+        _ = await tracker.recordMiss(for: feedID)
+        _ = await tracker.recordMiss(for: feedID)
+        await tracker.recordSuccess(for: feedID)
+
+        // If the counter was reset to 0, the next miss returns 1
+        let afterReset = await tracker.recordMiss(for: feedID)
+        #expect(afterReset == 1)
+    }
+
+    @Test("Counters are isolated per feed ID")
+    func countersIsolatedPerFeed() async {
+        let tracker = FeedIconMissTracker()
+        let feedA = UUID()
+        let feedB = UUID()
+
+        _ = await tracker.recordMiss(for: feedA)
+        let secondA = await tracker.recordMiss(for: feedA)
+        let firstB = await tracker.recordMiss(for: feedB)
+
+        #expect(secondA == 2)
+        #expect(firstB == 1)
+    }
+
+    @Test("recordSuccess on feed with no misses is a no-op")
+    func recordSuccessNoMissesIsNoOp() async {
+        let tracker = FeedIconMissTracker()
+        let feedID = UUID()
+
+        await tracker.recordSuccess(for: feedID)
+
+        // If success was a no-op, the next miss returns 1 (counter still at 0)
+        let firstMiss = await tracker.recordMiss(for: feedID)
+        #expect(firstMiss == 1)
+    }
+
+    @Test("Miss count after success followed by a new miss is one")
+    func missCountRestartsAfterSuccess() async {
+        let tracker = FeedIconMissTracker()
+        let feedID = UUID()
+
+        _ = await tracker.recordMiss(for: feedID)
+        _ = await tracker.recordMiss(for: feedID)
+        await tracker.recordSuccess(for: feedID)
+        let afterReset = await tracker.recordMiss(for: feedID)
+
+        #expect(afterReset == 1)
     }
 }
