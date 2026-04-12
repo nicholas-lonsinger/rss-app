@@ -1,3 +1,4 @@
+import os
 import SwiftUI
 
 /// Single shared implementation of every article list in the app. Generic
@@ -15,6 +16,8 @@ import SwiftUI
 /// documented below and in ARCHITECTURE.md.
 struct ArticleListScreen<Source: ArticleListSource>: View {
 
+    private static let logger = Logger(category: "ArticleListScreen")
+
     let source: Source
     let persistence: FeedPersisting
     let thumbnailService: ArticleThumbnailCaching
@@ -30,6 +33,7 @@ struct ArticleListScreen<Source: ArticleListSource>: View {
     }
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
 
     @State private var selectedArticleIndex: Int?
     @State private var showMarkAllReadConfirmation = false
@@ -153,6 +157,27 @@ struct ArticleListScreen<Source: ArticleListSource>: View {
         }
         .onDisappear {
             source.onDisappear()
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            // RATIONALE: Per-feed and group article lists create fresh source
+            // instances inside `navigationDestination` closures. When the app
+            // foregrounds, SwiftUI may re-evaluate those closures, handing
+            // `ArticleListScreen` a new source with `articles = []`. The
+            // `.onAppear` callback does not fire for an already-visible view on
+            // foreground, so the new empty source never gets `reload()` called
+            // on it. Observing `scenePhase` here fills that gap: a local store
+            // re-query (no network) repopulates the list from the already-
+            // persisted data. The two-gate snapshot-preservation flags
+            // (`hasAppeared` + `returningFromReader`) are intentionally NOT
+            // consulted here — this is a foreground re-hydration path, not a
+            // reader-return path, and it must always run regardless of those
+            // flags. This does NOT break #209: the reader push remains gated by
+            // `returningFromReader`, and cross-feed lists (All/Unread/Saved) that
+            // back `HomeViewModel` get a harmless no-op reload of already-loaded
+            // state. Fixes #347.
+            guard newPhase == .active, hasAppeared else { return }
+            Self.logger.info("Foregrounded — rehydrating '\(source.title, privacy: .public)' article list from store")
+            source.reload()
         }
     }
 
