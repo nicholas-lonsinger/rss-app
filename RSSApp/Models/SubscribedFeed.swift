@@ -33,14 +33,16 @@ struct SubscribedFeed: Identifiable, Hashable, Codable, Sendable {
     func updatingMetadata(title: String, feedDescription: String) -> SubscribedFeed {
         SubscribedFeed(
             id: id, title: title, url: url,
-            feedDescription: feedDescription, addedDate: addedDate
+            feedDescription: feedDescription, siteURL: siteURL,
+            addedDate: addedDate
         )
     }
 
     func updatingError(_ message: String) -> SubscribedFeed {
         SubscribedFeed(
             id: id, title: title, url: url,
-            feedDescription: feedDescription, addedDate: addedDate,
+            feedDescription: feedDescription, siteURL: siteURL,
+            addedDate: addedDate,
             lastFetchError: message, lastFetchErrorDate: Date()
         )
     }
@@ -48,7 +50,8 @@ struct SubscribedFeed: Identifiable, Hashable, Codable, Sendable {
     func updatingURL(_ newURL: URL) -> SubscribedFeed {
         SubscribedFeed(
             id: id, title: title, url: newURL,
-            feedDescription: feedDescription, addedDate: addedDate
+            feedDescription: feedDescription, siteURL: siteURL,
+            addedDate: addedDate
         )
     }
 }
