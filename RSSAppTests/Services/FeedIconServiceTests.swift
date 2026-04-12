@@ -451,13 +451,11 @@ struct FeedIconServiceTests {
                 ctx.fill(CGRect(x: 0, y: 0, width: 16, height: 16))
             }
 
-        let stats = try? #require(FeedIconService.analyzeIconPixels(image))
-        #expect(stats?.isVisible == true)
+        let stats = FeedIconService.analyzeIconPixels(image)
+        #expect(stats.isVisible == true)
         // White is luminance 1.0; tiny drift is tolerated for bitmap roundtrip.
-        if let luminance = stats?.averageLuminance {
-            #expect(luminance > 0.95)
-            #expect(FeedIconService.classifyBackgroundStyle(averageLuminance: luminance) == .dark)
-        }
+        #expect(stats.averageLuminance > 0.95)
+        #expect(FeedIconService.classifyBackgroundStyle(averageLuminance: stats.averageLuminance) == .dark)
     }
 
     @Test("Analysis classifies a fully black image as needing a light background")
@@ -474,12 +472,10 @@ struct FeedIconServiceTests {
                 ctx.fill(CGRect(x: 0, y: 0, width: 16, height: 16))
             }
 
-        let stats = try? #require(FeedIconService.analyzeIconPixels(image))
-        #expect(stats?.isVisible == true)
-        if let luminance = stats?.averageLuminance {
-            #expect(luminance < 0.05)
-            #expect(FeedIconService.classifyBackgroundStyle(averageLuminance: luminance) == .light)
-        }
+        let stats = FeedIconService.analyzeIconPixels(image)
+        #expect(stats.isVisible == true)
+        #expect(stats.averageLuminance < 0.05)
+        #expect(FeedIconService.classifyBackgroundStyle(averageLuminance: stats.averageLuminance) == .light)
     }
 
     @Test("Analysis ignores fully transparent pixels when averaging luminance")
@@ -500,13 +496,11 @@ struct FeedIconServiceTests {
                 ctx.fill(CGRect(x: 0, y: 0, width: 16, height: 1))
             }
 
-        let stats = try? #require(FeedIconService.analyzeIconPixels(image))
-        #expect(stats?.isVisible == true)
-        if let luminance = stats?.averageLuminance {
-            // Average should reflect the opaque pixels only, not the 0-alpha background.
-            #expect(luminance > 0.95)
-            #expect(FeedIconService.classifyBackgroundStyle(averageLuminance: luminance) == .dark)
-        }
+        let stats = FeedIconService.analyzeIconPixels(image)
+        #expect(stats.isVisible == true)
+        // Average should reflect the opaque pixels only, not the 0-alpha background.
+        #expect(stats.averageLuminance > 0.95)
+        #expect(FeedIconService.classifyBackgroundStyle(averageLuminance: stats.averageLuminance) == .dark)
     }
 
     @Test("Analysis reports not visible for fully transparent image")
@@ -520,23 +514,8 @@ struct FeedIconServiceTests {
                 ctx.fill(CGRect(x: 0, y: 0, width: 16, height: 16))
             }
 
-        let stats = try? #require(FeedIconService.analyzeIconPixels(image))
-        #expect(stats?.isVisible == false)
-    }
-
-    // MARK: - classifyBackgroundStyle (threshold behavior)
-
-    @Test("Classifier is pinned to the BT.601 luminance threshold boundary")
-    func classifyBackgroundStyleThresholdBoundary() {
-        // Protects the boundary rule itself (strict `>`), not an arbitrary
-        // numeric line — a refactor that accidentally flipped the comparison
-        // to `>=` would misclassify icons exactly at the threshold. The
-        // chosen luminance values sit on either side of the published
-        // threshold and would flip classification if the rule changed.
-        let threshold = FeedIconService.iconLightBackgroundLuminanceThreshold
-        #expect(FeedIconService.classifyBackgroundStyle(averageLuminance: threshold) == .light)
-        #expect(FeedIconService.classifyBackgroundStyle(averageLuminance: threshold + 0.01) == .dark)
-        #expect(FeedIconService.classifyBackgroundStyle(averageLuminance: threshold - 0.01) == .light)
+        let stats = FeedIconService.analyzeIconPixels(image)
+        #expect(stats.isVisible == false)
     }
 
     // MARK: - ICO Decoding

@@ -409,6 +409,10 @@ struct FeedRefreshServiceTests {
         let mockFetching = MockFeedFetchingService()
         mockFetching.feedsByURL = [url: TestFixtures.makeFeed()]
         let mockIconService = MockFeedIconService()
+        mockIconService.resolveAndCacheResult = (
+            url: URL(string: "https://example.com/icon.png")!,
+            backgroundStyle: .light
+        )
 
         let service = Self.makeService(
             persistence: mockPersistence,
@@ -421,6 +425,9 @@ struct FeedRefreshServiceTests {
         for _ in 0..<10 { await Task.yield() }
 
         #expect(mockIconService.resolveAndCacheCallCount == 1)
+        // End-to-end: resolved style must round-trip into the persisted feed
+        // so a refactor that drops the backgroundStyle argument is caught.
+        #expect(feed.iconBackgroundStyleRaw == "light")
     }
 
     @Test("refreshAllFeeds skips icon resolution when icon already cached")

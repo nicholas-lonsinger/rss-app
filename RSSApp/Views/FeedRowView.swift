@@ -11,7 +11,7 @@ struct FeedRowView: View {
                 feedID: feed.id,
                 feedURL: feed.feedURL,
                 iconURL: feed.iconURL,
-                iconBackgroundStyleRawValue: feed.iconBackgroundStyle,
+                iconBackgroundStyle: feed.iconBackgroundStyle,
                 iconService: iconService
             )
 

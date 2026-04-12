@@ -274,7 +274,7 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
 
     func updateFeedIcon(_ feed: PersistentFeed, iconURL: URL?, backgroundStyle: FeedIconBackgroundStyle?) throws {
         feed.iconURL = iconURL
-        feed.iconBackgroundStyle = backgroundStyle?.rawValue
+        feed.iconBackgroundStyle = backgroundStyle
         Self.logger.debug("Updated icon for '\(feed.title, privacy: .public)' (background=\(backgroundStyle?.rawValue ?? "nil", privacy: .public))")
     }
 

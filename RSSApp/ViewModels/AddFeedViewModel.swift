@@ -270,7 +270,7 @@ final class AddFeedViewModel {
                 try persistenceRef.updateFeedIcon(
                     newFeed,
                     iconURL: resolved.url,
-                    backgroundStyle: resolved.analysis.backgroundStyle
+                    backgroundStyle: resolved.backgroundStyle
                 )
                 try persistenceRef.save()
             } catch {

@@ -646,13 +646,34 @@ final class FeedRefreshService {
     }
 
     /// Resolves and caches a feed icon if one is not already cached on disk.
+    /// Also back-fills `iconBackgroundStyle` for feeds that were cached before
+    /// the classifier existed (issue #342) — re-reads the file from disk and
+    /// runs the luminance walk without re-downloading.
     private func resolveAndCacheIconIfNeeded(
         for feed: PersistentFeed,
         siteURL: URL?,
         feedImageURL: URL?
     ) async {
-        guard feedIconService.cachedIconFileURL(for: feed.id) == nil else {
-            Self.logger.debug("Icon already cached for '\(feed.title, privacy: .public)'")
+        if feedIconService.cachedIconFileURL(for: feed.id) != nil {
+            // Icon file is already on disk. If the feed predates the
+            // classifier (nil iconBackgroundStyleRaw), back-fill it now from
+            // the cached image so Apple-Insider-style white-on-transparent
+            // icons become visible on the next render without waiting for
+            // the user to remove and re-add the feed.
+            if feed.iconBackgroundStyleRaw == nil,
+               let backgroundStyle = await feedIconService.classifyCachedIconBackgroundStyle(for: feed.id) {
+                do {
+                    try persistence.updateFeedIcon(
+                        feed,
+                        iconURL: feed.iconURL,
+                        backgroundStyle: backgroundStyle
+                    )
+                } catch {
+                    Self.logger.error("Failed to back-fill icon classification for '\(feed.title, privacy: .public)': \(error, privacy: .public)")
+                }
+            } else {
+                Self.logger.debug("Icon already cached and classified for '\(feed.title, privacy: .public)'")
+            }
             return
         }
         guard let resolved = await feedIconService.resolveAndCacheIcon(
@@ -664,7 +685,7 @@ final class FeedRefreshService {
             try persistence.updateFeedIcon(
                 feed,
                 iconURL: resolved.url,
-                backgroundStyle: resolved.analysis.backgroundStyle
+                backgroundStyle: resolved.backgroundStyle
             )
         } catch {
             // RATIONALE: No error surfaced here. This runs inside a fire-and-forget Task

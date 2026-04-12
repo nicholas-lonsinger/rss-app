@@ -1,8 +1,12 @@
 import Foundation
+import os
 import SwiftData
 
 @Model
 final class PersistentFeed {
+
+    private static let logger = Logger(category: "PersistentFeed")
+
 
     // MARK: - Identity
 
@@ -31,17 +35,25 @@ final class PersistentFeed {
 
     var iconURL: URL?
 
-    /// Classification of the cached icon's opaque-pixel luminance, computed
-    /// at fetch/cache time by `FeedIconService` and persisted so
-    /// `FeedIconView` can pick a contrasting background tile without
-    /// re-analyzing the image on every display (issue #342).
-    ///
-    /// Stored as the raw value of `FeedIconBackgroundStyle` (`"light"` or
-    /// `"dark"`). `nil` means the icon predates the classifier or the
-    /// classification has not yet run — `FeedIconView` falls back to the
-    /// legacy black tile in that case, which keeps existing cached icons
-    /// looking as they did before the classifier was introduced.
-    var iconBackgroundStyle: String?
+    /// Raw-value storage for `iconBackgroundStyle`. Access the enum via the
+    /// computed property below — see `FeedIconBackgroundStyle` for semantics.
+    var iconBackgroundStyleRaw: String?
+
+    /// Typed accessor for the cached icon's background-style classification
+    /// (issue #342). `nil` when the feed predates the classifier. Marked
+    /// `@Transient` so SwiftData leaves this computed accessor alone and only
+    /// persists `iconBackgroundStyleRaw`.
+    @Transient
+    var iconBackgroundStyle: FeedIconBackgroundStyle? {
+        get {
+            guard let raw = iconBackgroundStyleRaw else { return nil }
+            if let style = FeedIconBackgroundStyle(rawValue: raw) { return style }
+            Self.logger.fault("Invalid iconBackgroundStyleRaw '\(raw, privacy: .public)' on feed \(self.id.uuidString, privacy: .public)")
+            assertionFailure("Invalid iconBackgroundStyleRaw: \(raw)")
+            return nil
+        }
+        set { iconBackgroundStyleRaw = newValue?.rawValue }
+    }
 
     // MARK: - Error state
 
@@ -74,7 +86,7 @@ final class PersistentFeed {
         etag: String? = nil,
         lastModifiedHeader: String? = nil,
         iconURL: URL? = nil,
-        iconBackgroundStyle: String? = nil,
+        iconBackgroundStyleRaw: String? = nil,
         lastFetchError: String? = nil,
         lastFetchErrorDate: Date? = nil,
         firstFetchErrorDate: Date? = nil
@@ -89,7 +101,7 @@ final class PersistentFeed {
         self.etag = etag
         self.lastModifiedHeader = lastModifiedHeader
         self.iconURL = iconURL
-        self.iconBackgroundStyle = iconBackgroundStyle
+        self.iconBackgroundStyleRaw = iconBackgroundStyleRaw
         self.lastFetchError = lastFetchError
         self.lastFetchErrorDate = lastFetchErrorDate
         self.firstFetchErrorDate = firstFetchErrorDate
