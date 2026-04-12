@@ -34,15 +34,7 @@ struct FeedRowView: View {
 
             Spacer()
 
-            if unreadCount > 0 {
-                Text("\(unreadCount)")
-                    .font(.caption2.weight(.semibold))
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(.blue)
-                    .foregroundStyle(.white)
-                    .clipShape(Capsule())
-            }
+            BadgeView(count: unreadCount)
         }
         .padding(.vertical, 4)
     }

@@ -306,14 +306,8 @@ private struct HomeRowView: View {
                     .font(.caption)
             }
 
-            if let count = badgeCount, count > 0 {
-                Text("\(count)")
-                    .font(.caption2.weight(.semibold))
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(.blue)
-                    .foregroundStyle(.white)
-                    .clipShape(Capsule())
+            if let count = badgeCount {
+                BadgeView(count: count)
             }
         }
         .padding(.vertical, 4)
