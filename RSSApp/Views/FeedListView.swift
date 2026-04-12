@@ -188,9 +188,6 @@ struct FeedListView: View {
     // MARK: - Helpers
 
     private var errorAlertBinding: Binding<Bool> {
-        Binding(
-            get: { viewModel.errorMessage != nil },
-            set: { if !$0 { viewModel.errorMessage = nil } }
-        )
+        Binding(presentingIfNonNil: $viewModel.errorMessage)
     }
 }

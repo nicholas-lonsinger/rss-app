@@ -187,10 +187,7 @@ struct ArticleReaderView: View {
     // MARK: - Helpers
 
     private var errorAlertBinding: Binding<Bool> {
-        Binding(
-            get: { errorMessage != nil },
-            set: { if !$0 { errorMessage = nil } }
-        )
+        Binding(presentingIfNonNil: $errorMessage)
     }
 
     // MARK: - Navigation
