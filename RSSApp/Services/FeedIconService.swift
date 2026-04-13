@@ -540,13 +540,13 @@ struct FeedIconService: FeedIconResolving {
             collected.reserveCapacity(min(Self.htmlHeadMaxBytes, 65_536))
             let closingTag: [UInt8] = Array("</head>".utf8)
             // Ring buffer for the trailing bytes to match against </head>.
-            // Sized to closingTag.count so we only hold the minimum window.
+            // Sized to closingTag.count so it always holds exactly the last 7 bytes for comparison.
             var tailBuffer = [UInt8](repeating: 0, count: closingTag.count)
             var tailIndex = 0
             var foundClosingTag = false
             for try await byte in bytes {
                 collected.append(byte)
-                tailBuffer[tailIndex % closingTag.count] = byte | 0x20 // lowercase
+                tailBuffer[tailIndex % closingTag.count] = byte | 0x20 // ASCII-lowercase letters; safe for </head> match
                 tailIndex += 1
                 if tailIndex >= closingTag.count {
                     var match = true
@@ -564,7 +564,11 @@ struct FeedIconService: FeedIconResolving {
                 if collected.count >= Self.htmlHeadMaxBytes { break }
             }
             if !foundClosingTag {
-                Self.logger.debug("resolveFromHTML: </head> not found within \(collected.count, privacy: .public) bytes for \(siteURL.absoluteString, privacy: .public) — parsing what was collected")
+                if collected.count >= Self.htmlHeadMaxBytes {
+                    Self.logger.debug("resolveFromHTML: safety cap (\(Self.htmlHeadMaxBytes, privacy: .public) bytes) reached without </head> for \(siteURL.absoluteString, privacy: .public) — parsing what was collected")
+                } else {
+                    Self.logger.debug("resolveFromHTML: stream ended at \(collected.count, privacy: .public) bytes without </head> for \(siteURL.absoluteString, privacy: .public) — parsing what was collected")
+                }
             }
 
             guard let html = String(data: collected, encoding: .utf8) else {
