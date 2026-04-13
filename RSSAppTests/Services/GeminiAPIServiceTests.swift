@@ -47,14 +47,14 @@ struct GeminiAPIServiceTests {
         #expect(contents[0]["role"] as? String == "user")
         #expect(contents[1]["role"] as? String == "model")  // assistant → model
 
-        // System instruction
-        let sysInstruction = try #require(json?["systemInstruction"] as? [String: Any])
+        // System instruction (snake_case via .convertToSnakeCase encoder strategy)
+        let sysInstruction = try #require(json?["system_instruction"] as? [String: Any])
         let sysParts = try #require(sysInstruction["parts"] as? [[String: Any]])
         #expect(sysParts.first?["text"] as? String == "system prompt")
 
-        // Generation config
-        let genConfig = try #require(json?["generationConfig"] as? [String: Any])
-        #expect(genConfig["maxOutputTokens"] as? Int == 1024)
+        // Generation config (snake_case via .convertToSnakeCase encoder strategy)
+        let genConfig = try #require(json?["generation_config"] as? [String: Any])
+        #expect(genConfig["max_output_tokens"] as? Int == 1024)
     }
 
     @Test("buildRequest encodes message parts correctly")
@@ -79,44 +79,55 @@ struct GeminiAPIServiceTests {
     // MARK: - SSE parsing
 
     @Test("parseSSELine returns .text for candidate with text content")
-    func parseTextChunk() {
+    func parseTextChunk() throws {
         let service = GeminiAPIService()
         let json = """
         {"candidates":[{"content":{"role":"model","parts":[{"text":"Hello world"}]}}]}
         """
-        #expect(service.parseSSELine(json) == .text("Hello world"))
+        #expect(try service.parseSSELine(json) == .text("Hello world"))
     }
 
     @Test("parseSSELine returns .skipped for candidate with empty text")
-    func parseEmptyText() {
+    func parseEmptyText() throws {
         let service = GeminiAPIService()
         let json = """
         {"candidates":[{"content":{"role":"model","parts":[{"text":""}]}}]}
         """
-        #expect(service.parseSSELine(json) == .skipped)
+        #expect(try service.parseSSELine(json) == .skipped)
     }
 
     @Test("parseSSELine returns .skipped when candidates array is empty")
-    func parseMissingCandidates() {
+    func parseMissingCandidates() throws {
         let service = GeminiAPIService()
         let json = """
         {"candidates":[]}
         """
-        #expect(service.parseSSELine(json) == .skipped)
+        #expect(try service.parseSSELine(json) == .skipped)
     }
 
     @Test("parseSSELine returns .decodeFailed for malformed JSON")
-    func parseMalformed() {
+    func parseMalformed() throws {
         let service = GeminiAPIService()
-        #expect(service.parseSSELine("not json at all") == .decodeFailed)
+        #expect(try service.parseSSELine("not json at all") == .decodeFailed)
     }
 
     @Test("parseSSELine returns .skipped when parts array is missing")
-    func parseMissingParts() {
+    func parseMissingParts() throws {
         let service = GeminiAPIService()
         let json = """
         {"candidates":[{"content":{"role":"model"}}]}
         """
-        #expect(service.parseSSELine(json) == .skipped)
+        #expect(try service.parseSSELine(json) == .skipped)
+    }
+
+    @Test("parseSSELine throws serverError for error event")
+    func parseErrorEvent() {
+        let service = GeminiAPIService()
+        let json = """
+        {"error":{"code":429,"message":"Quota exceeded","status":"RESOURCE_EXHAUSTED"}}
+        """
+        #expect(throws: AIServiceError.self) {
+            try service.parseSSELine(json)
+        }
     }
 }

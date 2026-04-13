@@ -17,7 +17,10 @@ final class DiscussionViewModel {
 
     private let article: Article
     private let content: ArticleContent
-    private let aiService: any AIServicing
+    // RATIONALE: Stored as optional so send-time resolution uses AIServiceFactory.service(for:)
+    // with the *current* active provider. A non-nil value is an injected test double that is
+    // always used as-is, so tests remain isolated without touching the provider-switching path.
+    private let injectedAIService: (any AIServicing)?
     private let keychainService: any KeychainServicing
 
     init(
@@ -28,7 +31,7 @@ final class DiscussionViewModel {
     ) {
         self.article = article
         self.content = content
-        self.aiService = aiService ?? AIServiceFactory.service(for: AIProvider.active)
+        self.injectedAIService = aiService
         self.keychainService = keychainService ?? KeychainService()
         updateAPIKeyState()
         Self.logger.debug("Initialized with hasAPIKey=\(self.hasAPIKey, privacy: .public)")
@@ -73,6 +76,7 @@ final class DiscussionViewModel {
         isGenerating = true
         defer { isGenerating = false }
 
+        let aiService = injectedAIService ?? AIServiceFactory.service(for: provider)
         Self.logger.debug("sendMessage() — \(self.messages.count, privacy: .public) messages total, provider=\(provider.displayName, privacy: .public)")
 
         do {

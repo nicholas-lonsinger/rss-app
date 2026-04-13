@@ -15,6 +15,10 @@ struct DiscussionViewModelTests {
         )
     }
 
+    /// Creates a `DiscussionViewModel` with a mock AI service and mock Keychain.
+    ///
+    /// Callers are responsible for setting `AIProvider.active` before calling this
+    /// helper and restoring it afterward via `defer { AIProvider.setActive(previous) }`.
     private func makeVM(
         chunks: [String] = ["Hello", " world"],
         error: Error? = nil,
@@ -31,7 +35,7 @@ struct DiscussionViewModelTests {
             // safe and ensures the test fails loudly if that assumption changes.
             try! keychainMock.saveAPIKey("sk-test", for: provider)
         }
-        // Set active provider so DiscussionViewModel reads the right key
+        // Set active provider so DiscussionViewModel reads the right key.
         AIProvider.setActive(provider)
 
         return DiscussionViewModel(
@@ -42,8 +46,14 @@ struct DiscussionViewModelTests {
         )
     }
 
+    /// Saves and returns the current active provider so tests can restore it after
+    /// mutating `AIProvider.active`. Use with `defer { AIProvider.setActive(saved) }`.
+    private func saveActiveProvider() -> AIProvider { AIProvider.active }
+
     @Test("hasAPIKey reflects keychain state")
     func hasAPIKey() {
+        let saved = saveActiveProvider()
+        defer { AIProvider.setActive(saved) }
         let withKey = makeVM(hasKey: true)
         let withoutKey = makeVM(hasKey: false)
         #expect(withKey.hasAPIKey == true)
@@ -52,6 +62,8 @@ struct DiscussionViewModelTests {
 
     @Test("refreshAPIKeyState updates hasAPIKey when keychain changes")
     func refreshAPIKeyState() throws {
+        let saved = saveActiveProvider()
+        defer { AIProvider.setActive(saved) }
         let keychainMock = MockKeychainService()
         AIProvider.setActive(.claude)
         let vm = DiscussionViewModel(
@@ -109,6 +121,8 @@ struct DiscussionViewModelTests {
 
     @Test("sendMessage shows error when keychain load throws")
     func sendMessageKeychainError() async {
+        let saved = saveActiveProvider()
+        defer { AIProvider.setActive(saved) }
         let keychainMock = MockKeychainService()
         try! keychainMock.saveAPIKey("sk-test", for: .claude)
         AIProvider.setActive(.claude)
@@ -128,6 +142,8 @@ struct DiscussionViewModelTests {
 
     @Test("sendMessage appends user message then assistant message")
     func sendAppendsMessages() async {
+        let saved = saveActiveProvider()
+        defer { AIProvider.setActive(saved) }
         let vm = makeVM()
         vm.currentInput = "What is this article about?"
         await vm.sendMessage()
@@ -139,6 +155,8 @@ struct DiscussionViewModelTests {
 
     @Test("sendMessage accumulates streamed chunks into assistant message")
     func sendAccumulatesChunks() async {
+        let saved = saveActiveProvider()
+        defer { AIProvider.setActive(saved) }
         let vm = makeVM(chunks: ["Hello", " world"])
         vm.currentInput = "Tell me more"
         await vm.sendMessage()
@@ -147,6 +165,8 @@ struct DiscussionViewModelTests {
 
     @Test("sendMessage clears currentInput after send")
     func sendClearsInput() async {
+        let saved = saveActiveProvider()
+        defer { AIProvider.setActive(saved) }
         let vm = makeVM()
         vm.currentInput = "A question"
         await vm.sendMessage()
@@ -155,6 +175,8 @@ struct DiscussionViewModelTests {
 
     @Test("sendMessage sets error content when AI service throws")
     func sendHandlesError() async {
+        let saved = saveActiveProvider()
+        defer { AIProvider.setActive(saved) }
         let vm = makeVM(error: AIServiceError.httpError(statusCode: 401))
         vm.currentInput = "A question"
         await vm.sendMessage()
@@ -163,6 +185,8 @@ struct DiscussionViewModelTests {
 
     @Test("sendMessage surfaces serverError message in assistant bubble")
     func sendHandlesServerError() async {
+        let saved = saveActiveProvider()
+        defer { AIProvider.setActive(saved) }
         let vm = makeVM(error: AIServiceError.serverError(message: "Rate limit exceeded"))
         vm.currentInput = "A question"
         await vm.sendMessage()
@@ -173,6 +197,8 @@ struct DiscussionViewModelTests {
 
     @Test("sendMessage does nothing when input is empty")
     func sendIgnoresEmptyInput() async {
+        let saved = saveActiveProvider()
+        defer { AIProvider.setActive(saved) }
         let vm = makeVM()
         vm.currentInput = "   "
         await vm.sendMessage()
@@ -181,6 +207,8 @@ struct DiscussionViewModelTests {
 
     @Test("sendMessage sets errorMessage when no API key is configured")
     func sendWithoutKey() async {
+        let saved = saveActiveProvider()
+        defer { AIProvider.setActive(saved) }
         let vm = makeVM(hasKey: false)
         vm.currentInput = "Hello"
         await vm.sendMessage()
@@ -190,6 +218,8 @@ struct DiscussionViewModelTests {
 
     @Test("sendMessage clears errorMessage on successful send")
     func sendClearsErrorMessage() async {
+        let saved = saveActiveProvider()
+        defer { AIProvider.setActive(saved) }
         let keychainMock = MockKeychainService()
         let aiMock = MockAIService()
         aiMock.chunks = ["OK"]
@@ -217,6 +247,7 @@ struct DiscussionViewModelTests {
 
     @Test("sendMessage passes correct model and maxTokens to AI service")
     func sendPassesProviderConfig() async {
+        let saved = saveActiveProvider()
         let aiMock = MockAIService()
         aiMock.chunks = ["response"]
         let keychainMock = MockKeychainService()
@@ -233,6 +264,7 @@ struct DiscussionViewModelTests {
         defer {
             UserDefaults.standard.removeObject(forKey: AIProvider.claude.modelDefaultsKey)
             UserDefaults.standard.removeObject(forKey: AIProvider.claude.maxTokensDefaultsKey)
+            AIProvider.setActive(saved)
         }
 
         try! keychainMock.saveAPIKey("sk-test", for: .claude)

@@ -126,6 +126,28 @@ struct GeminiAPIServiceSendMessageTests {
         }
     }
 
+    // MARK: - Server error in SSE stream
+
+    @Test("sendMessage throws serverError when stream contains error event")
+    func serverErrorInStream() async throws {
+        let mock = MockURLSessionBytesProvider()
+        mock.lines = ["data: {\"error\":{\"code\":429,\"message\":\"Quota exceeded\",\"status\":\"RESOURCE_EXHAUSTED\"}}"]
+        let stream = try await makeSendMessage(mock: mock)
+
+        do {
+            _ = try await collectStream(stream)
+            Issue.record("Expected stream to throw serverError")
+        } catch let error as AIServiceError {
+            guard case .serverError(let message) = error else {
+                Issue.record("Expected serverError, got \(error)")
+                return
+            }
+            #expect(message == "Quota exceeded")
+        } catch {
+            Issue.record("Unexpected error type: \(error)")
+        }
+    }
+
     // MARK: - Missing API key
 
     @Test("sendMessage throws missingAPIKey when apiKey is empty")

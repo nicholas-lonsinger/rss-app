@@ -28,15 +28,9 @@ struct GeminiModelService: GeminiModelFetching {
     /// Strips the `models/` prefix from each name so the returned `id` values are
     /// ready to use as the `{model}` path component in the streaming API URL.
     func fetchModels(apiKey: String) async throws -> [GeminiModel] {
-        guard var components = URLComponents(string: Self.listURL) else {
+        guard let url = URL(string: Self.listURL) else {
             Self.logger.fault("Failed to construct Gemini model list URL from '\(Self.listURL, privacy: .public)'")
             assertionFailure("Failed to construct Gemini model list URL")
-            throw AIServiceError.invalidURL
-        }
-        components.queryItems = [URLQueryItem(name: "key", value: apiKey)]
-        guard let url = components.url else {
-            Self.logger.fault("Failed to build Gemini model list URL with API key")
-            assertionFailure("Failed to build Gemini model list URL with API key")
             throw AIServiceError.invalidURL
         }
 
@@ -45,8 +39,10 @@ struct GeminiModelService: GeminiModelFetching {
         request.setValue("application/json", forHTTPHeaderField: "accept")
 
         let (data, response) = try await URLSession.shared.data(for: request)
-        if let httpResponse = response as? HTTPURLResponse,
-           !(200..<300).contains(httpResponse.statusCode) {
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw AIServiceError.httpError(statusCode: 0)
+        }
+        guard (200..<300).contains(httpResponse.statusCode) else {
             Self.logger.error("Gemini model list fetch returned HTTP \(httpResponse.statusCode, privacy: .public)")
             throw AIServiceError.httpError(statusCode: httpResponse.statusCode)
         }

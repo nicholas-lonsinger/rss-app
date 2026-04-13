@@ -56,7 +56,7 @@ struct GeminiAPIService: AIServicing {
                         guard line.hasPrefix("data: ") else { continue }
                         let json = String(line.dropFirst(6))
                         guard json != "[DONE]" else { break }
-                        switch parseSSELine(json) {
+                        switch try parseSSELine(json) {
                         case .text(let chunk):
                             consecutiveDecodeFailures = 0
                             continuation.yield(chunk)
@@ -91,10 +91,13 @@ struct GeminiAPIService: AIServicing {
         request.setValue("application/json", forHTTPHeaderField: "content-type")
 
         let geminiMessages = messages.map { msg in
-            GeminiContent(
-                role: msg.role == .assistant ? "model" : "user",
-                parts: [GeminiPart(text: msg.content)]
-            )
+            // Exhaustive switch so the compiler flags any new ChatMessage.Role cases.
+            let role: String
+            switch msg.role {
+            case .assistant: role = "model"
+            case .user: role = "user"
+            }
+            return GeminiContent(role: role, parts: [GeminiPart(text: msg.content)])
         }
 
         let body = GeminiRequest(
@@ -102,11 +105,13 @@ struct GeminiAPIService: AIServicing {
             systemInstruction: GeminiSystemInstruction(parts: [GeminiPart(text: systemPrompt)]),
             generationConfig: GeminiGenerationConfig(maxOutputTokens: maxTokens)
         )
-        request.httpBody = try JSONEncoder().encode(body)
+        let encoder = JSONEncoder()
+        encoder.keyEncodingStrategy = .convertToSnakeCase
+        request.httpBody = try encoder.encode(body)
         return request
     }
 
-    func parseSSELine(_ json: String) -> SSEParseResult {
+    func parseSSELine(_ json: String) throws -> SSEParseResult {
         guard let data = json.data(using: .utf8) else {
             Self.logger.warning("SSE line could not be encoded to UTF-8 data")
             return .decodeFailed
@@ -120,6 +125,13 @@ struct GeminiAPIService: AIServicing {
             return .decodeFailed
         }
 
+        if let errorObj = response.error {
+            let message = errorObj.message ?? "Unknown server error"
+            let status = errorObj.status ?? "unknown"
+            Self.logger.error("Gemini API stream error (status=\(status, privacy: .public)): \(message, privacy: .public). Raw: \(json, privacy: .private)")
+            throw AIServiceError.serverError(message: message)
+        }
+
         guard let text = response.candidates?.first?.content?.parts?.first?.text,
               !text.isEmpty else {
             return .skipped
@@ -131,42 +143,49 @@ struct GeminiAPIService: AIServicing {
 
 // MARK: - Codable request types
 
-struct GeminiRequest: Encodable {
+private struct GeminiRequest: Encodable {
     let contents: [GeminiContent]
     let systemInstruction: GeminiSystemInstruction
     let generationConfig: GeminiGenerationConfig
 }
 
-struct GeminiContent: Codable {
+private struct GeminiContent: Codable {
     let role: String
     let parts: [GeminiPart]
 }
 
-struct GeminiPart: Codable {
+private struct GeminiPart: Codable {
     let text: String
 }
 
-struct GeminiGenerationConfig: Encodable {
+private struct GeminiGenerationConfig: Encodable {
     let maxOutputTokens: Int
 }
 
-struct GeminiSystemInstruction: Encodable {
+private struct GeminiSystemInstruction: Encodable {
     let parts: [GeminiPart]
 }
 
 // MARK: - Codable response types
 
-struct GeminiStreamResponse: Decodable {
+private struct GeminiStreamResponse: Decodable {
     let candidates: [GeminiCandidate]?
+    let error: GeminiStreamError?
 }
 
-struct GeminiCandidate: Decodable {
+private struct GeminiStreamError: Decodable {
+    let code: Int?
+    let message: String?
+    let status: String?
+}
+
+private struct GeminiCandidate: Decodable {
     let content: GeminiResponseContent?
 }
 
 /// Separate response-side content type so `parts` can be optional
 /// (Gemini may omit the field in some stream events).
-struct GeminiResponseContent: Decodable {
+private struct GeminiResponseContent: Decodable {
     let role: String?
     let parts: [GeminiPart]?
 }

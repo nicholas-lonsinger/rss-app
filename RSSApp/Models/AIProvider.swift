@@ -150,9 +150,13 @@ enum AIProvider: String, CaseIterable, Sendable {
         guard !defaults.bool(forKey: migrationKey) else { return }
         defer { defaults.set(true, forKey: migrationKey) }
 
-        if (try? keychain.hasAPIKey(for: .claude)) == true {
-            setActive(.claude, defaults: defaults)
-            logger.notice("AI provider migration: set active provider to Claude (existing key found)")
+        do {
+            if try keychain.hasAPIKey(for: .claude) {
+                setActive(.claude, defaults: defaults)
+                logger.notice("AI provider migration: set active provider to Claude (existing key found)")
+            }
+        } catch {
+            logger.warning("AI provider migration: Keychain read failed, skipping provider activation: \(error, privacy: .public)")
         }
     }
 }

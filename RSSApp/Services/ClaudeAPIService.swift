@@ -1,8 +1,8 @@
 import Foundation
 import os
 
-/// Abstracts URLSession's `bytes(for:)` so `ClaudeAPIService.sendMessage` can be
-/// tested with controlled SSE line sequences without hitting the network.
+/// Abstracts URLSession's `bytes(for:)` so `ClaudeAPIService` and `GeminiAPIService`
+/// can be tested with controlled SSE line sequences without hitting the network.
 protocol URLSessionBytesProviding: Sendable {
     func bytes(for request: URLRequest, delegate: (any URLSessionTaskDelegate)?) async throws -> (URLSession.AsyncBytes, URLResponse)
 }
@@ -18,13 +18,14 @@ extension URLSession: URLSessionBytesProviding {}
 /// Result of parsing a single SSE data line.
 ///
 /// Distinguishes between successfully extracted text, intentionally skipped
-/// non-delta event types, and actual JSON decode failures so the caller can
-/// count only real failures toward the consecutive-failure threshold.
+/// event types, and actual JSON decode failures so the caller can count only
+/// real failures toward the consecutive-failure threshold. Shared by both
+/// `ClaudeAPIService` and `GeminiAPIService`.
 enum SSEParseResult: Sendable, Equatable {
-    /// Successfully extracted text content from a `content_block_delta` event.
+    /// Successfully extracted text content from a provider-specific response event.
     case text(String)
-    /// The event was a known non-delta type (e.g., `message_start`, `content_block_stop`)
-    /// or a delta with no text field — not a decode failure.
+    /// The event was a known non-text type (e.g., `message_start`, `content_block_stop`
+    /// for Claude; empty-candidates or metadata events for Gemini) — not a decode failure.
     case skipped
     /// The JSON could not be decoded at all, indicating a possible format change.
     case decodeFailed

@@ -39,7 +39,12 @@ struct AISettingsView: View {
             loadAllState()
         }
         .onChange(of: selectedProvider) { _, newProvider in
-            AIProvider.setActive(newProvider)
+            // Only persist the provider switch when the new provider already has a stored key.
+            // Switching the picker to an unconfigured provider should not override the active
+            // provider until the user actually saves a key for it.
+            if keyPresence[newProvider] == true {
+                AIProvider.setActive(newProvider)
+            }
             // Trigger Gemini model fetch when switching to Gemini
             if newProvider == .gemini, geminiModels.isEmpty {
                 fetchGeminiModels()
@@ -267,6 +272,7 @@ struct AISettingsView: View {
 
     private func loadAllState() {
         selectedProvider = AIProvider.active
+        loadError = nil
 
         for provider in AIProvider.allCases {
             loadKeyState(for: provider)
@@ -292,7 +298,6 @@ struct AISettingsView: View {
             } else {
                 keyInputs[provider] = ""
             }
-            loadError = nil
         } catch {
             keyPresence[provider] = false
             loadError = "Unable to read your API key from the Keychain. Please try again later."
@@ -321,6 +326,11 @@ struct AISettingsView: View {
             keyPresence[provider] = true
             isSaved = true
             Self.logger.notice("\(provider.displayName, privacy: .public) API key saved to Keychain")
+            // Now that a key exists, activate the provider if the user had selected it but
+            // persistence was deferred (because no key was stored at picker-change time).
+            if provider == selectedProvider {
+                AIProvider.setActive(provider)
+            }
 
             // Trigger Gemini model fetch after saving a Gemini key
             if provider == .gemini {
@@ -390,9 +400,15 @@ struct AISettingsView: View {
     // MARK: - Gemini model fetching
 
     private func fetchGeminiModels() {
-        guard let key = (try? keychainService.loadAPIKey(for: .gemini)) ?? nil,
-              !key.isEmpty else {
-            Self.logger.debug("Skipping Gemini model fetch: no API key stored")
+        let key: String
+        do {
+            guard let loaded = try keychainService.loadAPIKey(for: .gemini), !loaded.isEmpty else {
+                Self.logger.debug("Skipping Gemini model fetch: no API key stored")
+                return
+            }
+            key = loaded
+        } catch {
+            Self.logger.warning("Skipping Gemini model fetch: Keychain read failed: \(error, privacy: .public)")
             return
         }
 
@@ -419,6 +435,7 @@ struct AISettingsView: View {
                 // Fall back to a single known-good model so the UI remains usable
                 geminiModels = [GeminiModel(id: AIProvider.gemini.defaultModel, displayName: "Gemini 2.5 Flash")]
                 selectedGeminiModel = AIProvider.gemini.currentModel()
+                loadError = "Unable to fetch Gemini model list. Check your API key and try again."
             }
         }
     }
