@@ -288,12 +288,12 @@ struct FeedIconService: FeedIconResolving {
         }
         return await Task.detached(priority: .userInitiated) { () -> UIImage? in
             guard let image = UIImage(contentsOfFile: fileURL.path(percentEncoded: false)) else {
-                Self.logger.warning("Cached icon file unreadable for feed \(feedID.uuidString, privacy: .public) at \(fileURL.path, privacy: .public) — deleting")
+                Self.logger.info("Cached icon file unreadable for feed \(feedID.uuidString, privacy: .public) at \(fileURL.path, privacy: .public) — deleting")
                 self.deleteCachedIcon(for: feedID)
                 return nil
             }
             guard Self.hasVisibleContent(image) else {
-                Self.logger.warning("Cached icon for feed \(feedID.uuidString, privacy: .public) has no visible content — deleting")
+                Self.logger.info("Cached icon for feed \(feedID.uuidString, privacy: .public) has no visible content — deleting")
                 self.deleteCachedIcon(for: feedID)
                 return nil
             }
@@ -1032,19 +1032,19 @@ struct FeedIconService: FeedIconResolving {
             guard let httpResponse = response as? HTTPURLResponse,
                   (200...299).contains(httpResponse.statusCode) else {
                 let code = (response as? HTTPURLResponse)?.statusCode ?? -1
-                Self.logger.warning("downloadAndAnalyze: HTTP \(code, privacy: .public) for \(url.absoluteString, privacy: .public)")
+                Self.logger.info("downloadAndAnalyze: HTTP \(code, privacy: .public) for \(url.absoluteString, privacy: .public)")
                 return nil
             }
 
             guard let image = UIImage(data: data) ?? Self.decodeICO(data) else {
-                Self.logger.warning("downloadAndAnalyze: not a valid image from \(url.absoluteString, privacy: .public)")
+                Self.logger.info("downloadAndAnalyze: not a valid image from \(url.absoluteString, privacy: .public)")
                 return nil
             }
 
             let normalized = normalizeImage(image)
             let stats = Self.analyzeIconPixels(normalized, feedID: feedID)
             guard stats.isVisible else {
-                Self.logger.warning("downloadAndAnalyze: image has no visible content from \(url.absoluteString, privacy: .public)")
+                Self.logger.info("downloadAndAnalyze: image has no visible content from \(url.absoluteString, privacy: .public)")
                 return nil
             }
 
@@ -1056,7 +1056,7 @@ struct FeedIconService: FeedIconResolving {
             Self.logger.debug("downloadAndAnalyze: download cancelled for \(url.absoluteString, privacy: .public)")
             return nil
         } catch {
-            Self.logger.warning("downloadAndAnalyze: download failed for \(url.absoluteString, privacy: .public): \(error, privacy: .public)")
+            Self.logger.info("downloadAndAnalyze: download failed for \(url.absoluteString, privacy: .public): \(error, privacy: .public)")
             return nil
         }
     }
