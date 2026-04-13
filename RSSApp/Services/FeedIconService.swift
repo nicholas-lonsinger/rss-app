@@ -353,6 +353,7 @@ struct FeedIconService: FeedIconResolving {
         }
 
         guard !downloadedCandidates.isEmpty else {
+            guard !Task.isCancelled else { return nil }
             let missCount = await missTracker.recordMiss(for: feedID)
             if missCount == FeedIconMissTracker.missThreshold {
                 Self.logger.warning(
@@ -406,6 +407,7 @@ struct FeedIconService: FeedIconResolving {
             }
         }
 
+        guard !Task.isCancelled else { return nil }
         let missCount = await missTracker.recordMiss(for: feedID)
         if missCount == FeedIconMissTracker.missThreshold {
             Self.logger.warning(
