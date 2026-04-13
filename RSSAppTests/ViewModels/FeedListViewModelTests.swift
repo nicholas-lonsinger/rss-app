@@ -718,9 +718,11 @@ struct FeedListViewModelTests {
         let viewModel = Self.makeViewModel(persistence: mockPersistence, opmlService: mockOPML)
         viewModel.importOPML(from: Data())
 
+        // Two unique URLs in the file → two feeds added. The second appearance of
+        // Feed A is not a pre-existing duplicate, so it is not counted as skipped.
         #expect(viewModel.feeds.count == 2)
         #expect(viewModel.opmlImportResult?.addedCount == 2)
-        #expect(viewModel.opmlImportResult?.skippedCount == 1)
+        #expect(viewModel.opmlImportResult?.skippedCount == 0)
     }
 
     @Test("importOPML continues past persistence failures and reports partial progress")
@@ -1058,15 +1060,87 @@ struct FeedListViewModelTests {
         let viewModel = Self.makeViewModel(persistence: mockPersistence, opmlService: mockOPML)
         viewModel.importOPML(from: Data())
 
-        // Feed added once, skipped on second appearance.
+        // Feed added once; the second appearance is standard multi-group OPML structure,
+        // not a duplicate — skippedCount must be 0.
         #expect(viewModel.opmlImportResult?.addedCount == 1)
-        #expect(viewModel.opmlImportResult?.skippedCount == 1)
+        #expect(viewModel.opmlImportResult?.skippedCount == 0)
         #expect(viewModel.opmlImportResult?.groupsCreatedCount == 2)
 
         // Feed should be in both groups.
         #expect(mockPersistence.memberships.count == 2)
         let groupNames = Set(mockPersistence.memberships.compactMap { $0.group?.name })
         #expect(groupNames == ["Tech", "Favorites"])
+    }
+
+    @Test("importOPML does not count multi-group feed as duplicate — blank-slate import")
+    @MainActor
+    func importOPMLMultiGroupBlankSlateNoDuplicate() {
+        // Reproduces the exact scenario from the issue: one new feed listed under
+        // two groups in OPML, imported onto a blank subscription list. The import
+        // summary must show 1 added, 0 skipped, 2 new groups — not the previously
+        // misleading "1 new feed added, 1 duplicate skipped, 2 new groups created".
+        let mockPersistence = MockFeedPersistenceService()
+        let mockOPML = MockOPMLService()
+        mockOPML.entriesToReturn = [
+            TestFixtures.makeOPMLFeedEntry(
+                title: "My Feed",
+                feedURL: URL(string: "https://example.com/feed")!,
+                groupName: "Tech"
+            ),
+            TestFixtures.makeOPMLFeedEntry(
+                title: "My Feed",
+                feedURL: URL(string: "https://example.com/feed")!,
+                groupName: "Favorites"
+            ),
+        ]
+
+        let viewModel = Self.makeViewModel(persistence: mockPersistence, opmlService: mockOPML)
+        viewModel.importOPML(from: Data())
+
+        #expect(viewModel.opmlImportResult?.addedCount == 1)
+        #expect(viewModel.opmlImportResult?.skippedCount == 0)
+        #expect(viewModel.opmlImportResult?.groupsCreatedCount == 2)
+        // Feed must be assigned to both groups.
+        #expect(mockPersistence.memberships.count == 2)
+    }
+
+    @Test("importOPML counts pre-existing feed as skipped exactly once when it appears under two groups")
+    @MainActor
+    func importOPMLPreExistingFeedInTwoGroupsCountsOnce() {
+        // A feed that is already subscribed before import and appears under two
+        // groups in the OPML file must count as exactly 1 skipped — not 2.
+        let existingFeed = TestFixtures.makePersistentFeed(
+            title: "Pre-existing Feed",
+            feedURL: URL(string: "https://existing.com/feed")!
+        )
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [existingFeed]
+
+        let mockOPML = MockOPMLService()
+        mockOPML.entriesToReturn = [
+            TestFixtures.makeOPMLFeedEntry(
+                title: "Pre-existing Feed",
+                feedURL: URL(string: "https://existing.com/feed")!,
+                groupName: "Group A"
+            ),
+            TestFixtures.makeOPMLFeedEntry(
+                title: "Pre-existing Feed",
+                feedURL: URL(string: "https://existing.com/feed")!,
+                groupName: "Group B"
+            ),
+        ]
+
+        let viewModel = Self.makeViewModel(persistence: mockPersistence, opmlService: mockOPML)
+        viewModel.loadFeeds()
+        viewModel.importOPML(from: Data())
+
+        // Pre-existing feed must be counted as skipped exactly once, even though
+        // it appears under two groups in the OPML file.
+        #expect(viewModel.opmlImportResult?.addedCount == 0)
+        #expect(viewModel.opmlImportResult?.skippedCount == 1)
+        // Both group assignments must still proceed even though the feed is skipped.
+        #expect(viewModel.opmlImportResult?.groupsCreatedCount == 2)
+        #expect(mockPersistence.memberships.count == 2)
     }
 
     @Test("importOPML continues past group creation failure and still adds feed")

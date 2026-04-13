@@ -200,6 +200,16 @@ final class FeedListViewModel {
         // existing feeds.
         var nextFeedSortOrder = (feedsByURL.values.map(\.sortOrder).max() ?? -1) + 1
 
+        // Snapshot of feed URLs that existed before this import began. Used below
+        // to distinguish true pre-existing duplicates (count once as skipped) from
+        // multi-group OPML appearances of a feed added earlier in this same import
+        // (standard OPML structure — not reported as duplicates).
+        let preImportURLs = Set(feedsByURL.keys)
+        // Tracks which pre-existing URLs have already been counted as skipped so
+        // each pre-existing duplicate is reported at most once, regardless of how
+        // many groups it appears under in the OPML file.
+        var skippedURLs: Set<URL> = []
+
         // Track which group names were created vs. reused during this import
         // to avoid double-counting when multiple entries reference the same group.
         var createdGroupNames: Set<String> = []
@@ -211,8 +221,19 @@ final class FeedListViewModel {
 
             if let existingFeed = feedsByURL[entry.feedURL] {
                 feed = existingFeed
-                skippedCount += 1
-                Self.logger.debug("Skipped duplicate: \(entry.feedURL.absoluteString, privacy: .public)")
+                // Only count as skipped if this URL was already in the user's
+                // subscription list before the import started. A feed added
+                // earlier in this same import appearing under another group is
+                // normal multi-group OPML structure and must not be reported as
+                // a duplicate. Also deduplicate: count each pre-existing URL at
+                // most once even if it appears under multiple groups in the file.
+                if preImportURLs.contains(entry.feedURL), !skippedURLs.contains(entry.feedURL) {
+                    skippedCount += 1
+                    skippedURLs.insert(entry.feedURL)
+                    Self.logger.debug("Skipped duplicate: \(entry.feedURL.absoluteString, privacy: .public)")
+                } else if !preImportURLs.contains(entry.feedURL) {
+                    Self.logger.debug("Multi-group entry (not a duplicate): \(entry.feedURL.absoluteString, privacy: .public)")
+                }
             } else {
                 let newFeed = PersistentFeed(
                     title: entry.title,
