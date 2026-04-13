@@ -668,6 +668,7 @@ final class FeedRefreshService {
                         iconURL: feed.iconURL,
                         backgroundStyle: backgroundStyle
                     )
+                    try persistence.save()
                 } catch {
                     Self.logger.error("Failed to back-fill icon classification for '\(feed.title, privacy: .public)': \(error, privacy: .public)")
                 }
@@ -683,6 +684,7 @@ final class FeedRefreshService {
         )
         do {
             try persistence.applyIconResolution(resolved, to: feed)
+            try persistence.save()
         } catch {
             // RATIONALE: No error surfaced to the caller. This runs inside a fire-and-forget
             // Task spawned by performRefresh(), so mutating the caller's errorMessage would

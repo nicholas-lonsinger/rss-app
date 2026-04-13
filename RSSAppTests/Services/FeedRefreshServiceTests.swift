@@ -430,6 +430,70 @@ struct FeedRefreshServiceTests {
         #expect(feed.iconBackgroundStyleRaw == "light")
     }
 
+    @Test("refreshAllFeeds saves after persisting resolved icon")
+    @MainActor
+    func savesAfterIconResolution() async {
+        let url = URL(string: "https://example.com/feed")!
+        let feed = TestFixtures.makePersistentFeed(feedURL: url)
+
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+        let mockFetching = MockFeedFetchingService()
+        mockFetching.feedsByURL = [url: TestFixtures.makeFeed()]
+        let mockIconService = MockFeedIconService()
+        mockIconService.resolveAndCacheResult = (
+            url: URL(string: "https://example.com/icon.png")!,
+            backgroundStyle: .light
+        )
+
+        let service = Self.makeService(
+            persistence: mockPersistence,
+            feedFetching: mockFetching,
+            feedIconService: mockIconService
+        )
+
+        let saveCountBefore = mockPersistence.saveCallCount
+        await service.refreshAllFeeds()
+        for _ in 0..<10 { await Task.yield() }
+
+        // The fire-and-forget icon task must call save() so the
+        // backgroundStyle actually reaches the database.
+        #expect(mockPersistence.saveCallCount > saveCountBefore)
+        #expect(feed.iconBackgroundStyleRaw == "light")
+    }
+
+    @Test("refreshAllFeeds saves after back-filling icon classification")
+    @MainActor
+    func savesAfterIconBackFill() async {
+        let url = URL(string: "https://example.com/feed")!
+        let feed = TestFixtures.makePersistentFeed(feedURL: url)
+        // Simulate a feed with a cached icon but no classification yet
+        feed.iconBackgroundStyleRaw = nil
+
+        let mockPersistence = MockFeedPersistenceService()
+        mockPersistence.feeds = [feed]
+        let mockFetching = MockFeedFetchingService()
+        mockFetching.feedsByURL = [url: TestFixtures.makeFeed()]
+        let mockIconService = MockFeedIconService()
+        mockIconService.cachedFileURL = URL(fileURLWithPath: "/tmp/icon.png")
+        mockIconService.classifyCachedIconResult = .light
+
+        let service = Self.makeService(
+            persistence: mockPersistence,
+            feedFetching: mockFetching,
+            feedIconService: mockIconService
+        )
+
+        let saveCountBefore = mockPersistence.saveCallCount
+        await service.refreshAllFeeds()
+        for _ in 0..<10 { await Task.yield() }
+
+        #expect(mockIconService.classifyCachedIconCallCount == 1)
+        #expect(feed.iconBackgroundStyleRaw == "light")
+        // The back-fill must call save() so the classification persists.
+        #expect(mockPersistence.saveCallCount > saveCountBefore)
+    }
+
     @Test("refreshAllFeeds skips icon resolution when icon already cached")
     @MainActor
     func skipsIconResolutionWhenCached() async {
