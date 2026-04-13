@@ -153,8 +153,8 @@ final class AllArticlesSource: ArticleListSource {
         // so the user sees content even if the network is slow or offline.
         homeViewModel.loadAllArticles()
         // Throttled network refresh. `HomeViewModel.shouldRefreshOnEntry`
-        // reads the process-wide `FeedRefreshService.lastRefreshCompletedAt`
-        // timestamp and returns `false` when the most recent refresh is
+        // reads the last-refresh timestamp from the injected UserDefaults
+        // instance and returns `false` when the most recent refresh is
         // within `entryRefreshInterval` — so rapid navigation across sibling
         // cross-feed views (or a BG refresh that ran moments ago) doesn't
         // stack redundant refreshes on every entry. Pull-to-refresh goes
