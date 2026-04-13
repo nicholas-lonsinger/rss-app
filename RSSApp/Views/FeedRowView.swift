@@ -13,7 +13,10 @@ struct FeedRowView: View {
                 feedImageURL: feed.feedImageURL,
                 iconURL: feed.iconURL,
                 iconBackgroundStyle: feed.iconBackgroundStyle,
-                iconService: iconService
+                iconService: iconService,
+                onBackgroundStyleResolved: { style in
+                    feed.iconBackgroundStyle = style
+                }
             )
 
             VStack(alignment: .leading, spacing: 4) {
