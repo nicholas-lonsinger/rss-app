@@ -136,6 +136,8 @@ actor FeedIconMissTracker {
 /// (after cache invalidation, icon deletion, etc.) resolve fresh.
 actor FeedIconResolutionCoordinator {
 
+    static let shared = FeedIconResolutionCoordinator()
+
     private static let logger = Logger(category: "FeedIconResolutionCoordinator")
 
     private var inFlight: [UUID: Task<(url: URL, backgroundStyle: FeedIconBackgroundStyle)?, Never>] = [:]
@@ -143,6 +145,15 @@ actor FeedIconResolutionCoordinator {
     /// If a resolution for `feedID` is already in progress, awaits and returns
     /// its result. Otherwise starts `work` and shares the result with all
     /// concurrent callers for the same `feedID`.
+    ///
+    /// When multiple callers arrive concurrently, only the first caller's `work`
+    /// closure is executed; subsequent callers' `work` closures are never called —
+    /// they receive the result from the first caller's closure instead.
+    ///
+    /// This works because `await task.value` suspends the actor, allowing
+    /// subsequent callers to enter `coalesce` and find the existing in-flight
+    /// entry before the first task completes. Callers that arrive after the task
+    /// finishes (and the entry is removed) start a fresh resolution.
     func coalesce(
         feedID: UUID,
         work: @Sendable @escaping () async -> (url: URL, backgroundStyle: FeedIconBackgroundStyle)?
@@ -206,7 +217,7 @@ struct FeedIconService: FeedIconResolving {
     init(
         cacheDirectoryOverride: URL? = nil,
         missTracker: FeedIconMissTracker = .shared,
-        resolutionCoordinator: FeedIconResolutionCoordinator = FeedIconResolutionCoordinator()
+        resolutionCoordinator: FeedIconResolutionCoordinator = .shared
     ) {
         self.cacheDirectoryOverride = cacheDirectoryOverride
         self.missTracker = missTracker
