@@ -45,6 +45,7 @@ struct EditFeedView: View {
                                             .foregroundStyle(.tint)
                                     }
                                 }
+                                .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
                         }
