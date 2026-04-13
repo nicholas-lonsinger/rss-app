@@ -111,7 +111,10 @@ struct ArticleRowView: View {
                     iconURL: feed.iconURL,
                     iconBackgroundStyle: feed.iconBackgroundStyle,
                     iconService: iconService,
-                    style: .inline
+                    style: .inline,
+                    onBackgroundStyleResolved: { style in
+                        feed.iconBackgroundStyle = style
+                    }
                 )
                 Text(feed.title)
             }

@@ -32,12 +32,15 @@ struct FeedIconView: View {
     let iconBackgroundStyle: FeedIconBackgroundStyle?
     let iconService: FeedIconResolving
     var style: Style = .standard
+    /// Called after successful on-view icon resolution so the caller can
+    /// persist the background style to the model. Both the refresh path and
+    /// the on-view path write to the same store; the view reads only from
+    /// `iconBackgroundStyle` (the model parameter), eliminating the ephemeral
+    /// `@State` bridge that caused backgrounds to revert to black on
+    /// scroll-back (issue #411).
+    var onBackgroundStyleResolved: ((FeedIconBackgroundStyle) -> Void)? = nil
 
     @State private var iconImage: UIImage?
-    /// Background style resolved during on-view icon resolution. Takes
-    /// precedence over the model's `iconBackgroundStyle` (which may still
-    /// be `nil` until the next refresh cycle persists it).
-    @State private var resolvedBackgroundStyle: FeedIconBackgroundStyle?
 
     private static let logger = Logger(category: "FeedIconView")
 
@@ -64,19 +67,12 @@ struct FeedIconView: View {
         }
     }
 
-    /// The effective background classification, preferring a locally resolved
-    /// style (from on-view icon resolution) over the model's persisted value.
-    /// Falls back to `.none` when neither source has a classification yet.
-    private var effectiveBackgroundStyle: FeedIconBackgroundStyle? {
-        resolvedBackgroundStyle ?? iconBackgroundStyle
-    }
-
     /// The tile color that best contrasts against a loaded icon (issue #342).
     /// Only applied when `iconImage` is non-nil; the placeholder always
     /// uses a white tile (see `body`). `nil` → legacy black for feeds
     /// that predate the classifier.
     private var backgroundColor: Color {
-        switch effectiveBackgroundStyle {
+        switch iconBackgroundStyle {
         case .light: return .white
         case .dark, .none: return .black
         }
@@ -160,11 +156,6 @@ struct FeedIconView: View {
             return
         }
 
-        // Apply the classified background style immediately so the tile
-        // color is correct without waiting for the next refresh cycle to
-        // persist it to SwiftData.
-        resolvedBackgroundStyle = resolved.backgroundStyle
-
         // Successfully resolved — clear any prior backoff and reload from cache.
         ImageLoadBackoffTracker.feedIcons.clearFailure(for: backoffKey)
         Self.logger.notice("Resolved icon on-view for feed \(feedID.uuidString, privacy: .public)")
@@ -173,5 +164,12 @@ struct FeedIconView: View {
             Self.logger.warning("Icon resolved for feed \(feedID.uuidString, privacy: .public) but failed post-cache validation")
         }
         iconImage = validated
+
+        // Persist the background style to the model so it survives view
+        // destruction across scroll cycles. The refresh path persists via
+        // applyIconResolution(); this is the on-view equivalent. Image is
+        // set first so the view is fully populated before the model update
+        // triggers a re-render.
+        onBackgroundStyleResolved?(resolved.backgroundStyle)
     }
 }
