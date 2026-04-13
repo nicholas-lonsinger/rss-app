@@ -127,6 +127,54 @@ actor FeedIconMissTracker {
     }
 }
 
+// MARK: - Resolution Coordinator
+
+/// Coalesces concurrent `resolveAndCacheIcon` requests for the same feed.
+/// The first caller for a given `feedID` creates the actual resolution task;
+/// subsequent callers await the same task instead of starting redundant network
+/// requests. The entry is removed once the task completes, so future requests
+/// (after cache invalidation, icon deletion, etc.) resolve fresh.
+actor FeedIconResolutionCoordinator {
+
+    static let shared = FeedIconResolutionCoordinator()
+
+    private static let logger = Logger(category: "FeedIconResolutionCoordinator")
+
+    private var inFlight: [UUID: Task<(url: URL, backgroundStyle: FeedIconBackgroundStyle)?, Never>] = [:]
+
+    /// If a resolution for `feedID` is already in progress, awaits and returns
+    /// its result. Otherwise starts `work` and shares the result with all
+    /// concurrent callers for the same `feedID`.
+    ///
+    /// When multiple callers arrive concurrently, only the first caller's `work`
+    /// closure is executed; subsequent callers' `work` closures are never called —
+    /// they receive the result from the first caller's closure instead.
+    ///
+    /// This works because `await task.value` suspends the actor, allowing
+    /// subsequent callers to enter `coalesce` and find the existing in-flight
+    /// entry before the first task completes. Callers that arrive after the task
+    /// finishes (and the entry is removed) start a fresh resolution.
+    func coalesce(
+        feedID: UUID,
+        work: @Sendable @escaping () async -> (url: URL, backgroundStyle: FeedIconBackgroundStyle)?
+    ) async -> (url: URL, backgroundStyle: FeedIconBackgroundStyle)? {
+        if let existing = inFlight[feedID] {
+            Self.logger.debug(
+                "Coalescing icon resolution for feed \(feedID.uuidString, privacy: .public) — awaiting in-flight task"
+            )
+            return await existing.value
+        }
+
+        let task = Task<(url: URL, backgroundStyle: FeedIconBackgroundStyle)?, Never> {
+            await work()
+        }
+        inFlight[feedID] = task
+        let result = await task.value
+        inFlight.removeValue(forKey: feedID)
+        return result
+    }
+}
+
 // MARK: - Implementation
 
 struct FeedIconService: FeedIconResolving {
@@ -159,9 +207,21 @@ struct FeedIconService: FeedIconResolving {
     /// instance; tests inject a dedicated instance for isolation.
     private let missTracker: FeedIconMissTracker
 
-    init(cacheDirectoryOverride: URL? = nil, missTracker: FeedIconMissTracker = .shared) {
+    /// Coalesces concurrent `resolveAndCacheIcon` requests for the same feed so
+    /// multiple concurrent callers (e.g. several `FeedIconView`s for the same feed)
+    /// share one in-flight network request instead of each starting their own.
+    /// Defaults to a shared app-wide instance; tests inject a dedicated instance
+    /// for isolation.
+    private let resolutionCoordinator: FeedIconResolutionCoordinator
+
+    init(
+        cacheDirectoryOverride: URL? = nil,
+        missTracker: FeedIconMissTracker = .shared,
+        resolutionCoordinator: FeedIconResolutionCoordinator = .shared
+    ) {
         self.cacheDirectoryOverride = cacheDirectoryOverride
         self.missTracker = missTracker
+        self.resolutionCoordinator = resolutionCoordinator
     }
 
     // MARK: - FeedIconResolving
@@ -220,6 +280,16 @@ struct FeedIconService: FeedIconResolving {
     }
 
     func resolveAndCacheIcon(feedSiteURL: URL?, feedImageURL: URL?, feedID: UUID) async -> (url: URL, backgroundStyle: FeedIconBackgroundStyle)? {
+        await resolutionCoordinator.coalesce(feedID: feedID) { [self] in
+            await self.performResolveAndCacheIcon(
+                feedSiteURL: feedSiteURL,
+                feedImageURL: feedImageURL,
+                feedID: feedID
+            )
+        }
+    }
+
+    private func performResolveAndCacheIcon(feedSiteURL: URL?, feedImageURL: URL?, feedID: UUID) async -> (url: URL, backgroundStyle: FeedIconBackgroundStyle)? {
         Self.logger.debug("resolveAndCacheIcon() for feed \(feedID.uuidString, privacy: .public)")
 
         // Fetch site HTML to discover link icons
