@@ -17,7 +17,8 @@ struct FeedRefreshServiceTests {
         thumbnailPrefetcher: ThumbnailPrefetching? = nil,
         articleRetention: ArticleRetaining = MockArticleRetentionService(),
         thumbnailService: ArticleThumbnailCaching = MockArticleThumbnailService(),
-        networkMonitor: NetworkMonitoring = MockNetworkMonitorService()
+        networkMonitor: NetworkMonitoring = MockNetworkMonitorService(),
+        userDefaults: UserDefaults = UserDefaults(suiteName: "FeedRefreshServiceTests-\(UUID().uuidString)")!
     ) -> FeedRefreshService {
         FeedRefreshService(
             persistence: persistence,
@@ -26,7 +27,8 @@ struct FeedRefreshServiceTests {
             thumbnailPrefetcher: thumbnailPrefetcher ?? MockThumbnailPrefetchService(),
             articleRetention: articleRetention,
             thumbnailService: thumbnailService,
-            networkMonitor: networkMonitor
+            networkMonitor: networkMonitor,
+            userDefaults: userDefaults
         )
     }
 
