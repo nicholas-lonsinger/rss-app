@@ -604,6 +604,9 @@ struct FeedIconService: FeedIconResolving {
                 ogImageURL: ogImageURL,
                 redirectedHost: redirectedHost
             )
+        } catch is CancellationError {
+            Self.logger.debug("resolveFromHTML cancelled for \(siteURL.absoluteString, privacy: .public)")
+            return nil
         } catch {
             Self.logger.warning("Failed to fetch site HTML from \(siteURL.absoluteString, privacy: .public): \(error, privacy: .public)")
             return nil
