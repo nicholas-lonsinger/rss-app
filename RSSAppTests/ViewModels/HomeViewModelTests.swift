@@ -37,7 +37,7 @@ struct HomeViewModelTests {
         readArticle.feed = feed
         mockPersistence.articlesByFeedID[feed.id] = [unreadArticle, readArticle]
 
-        let viewModel = HomeViewModel(persistence: mockPersistence)
+        let viewModel = HomeViewModel(persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         viewModel.loadUnreadCount()
 
         #expect(viewModel.unreadCount == 1)
@@ -55,7 +55,7 @@ struct HomeViewModelTests {
         article.feed = feed
         mockPersistence.articlesByFeedID[feed.id] = [article]
 
-        let viewModel = HomeViewModel(persistence: mockPersistence)
+        let viewModel = HomeViewModel(persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         viewModel.loadUnreadCount()
         #expect(viewModel.unreadCount == 1)
         #expect(viewModel.errorMessage == nil)
@@ -73,7 +73,7 @@ struct HomeViewModelTests {
     func loadUnreadCountEmpty() {
         let mockPersistence = MockFeedPersistenceService()
 
-        let viewModel = HomeViewModel(persistence: mockPersistence)
+        let viewModel = HomeViewModel(persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         viewModel.loadUnreadCount()
 
         #expect(viewModel.unreadCount == 0)
@@ -87,7 +87,7 @@ struct HomeViewModelTests {
     func loadAllArticlesEmpty() {
         let mockPersistence = MockFeedPersistenceService()
 
-        let viewModel = HomeViewModel(persistence: mockPersistence)
+        let viewModel = HomeViewModel(persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         viewModel.loadAllArticles()
 
         #expect(viewModel.allArticlesList.isEmpty)
@@ -100,7 +100,7 @@ struct HomeViewModelTests {
     func loadUnreadArticlesEmpty() {
         let mockPersistence = MockFeedPersistenceService()
 
-        let viewModel = HomeViewModel(persistence: mockPersistence)
+        let viewModel = HomeViewModel(persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         viewModel.loadUnreadArticles()
 
         #expect(viewModel.unreadArticlesList.isEmpty)
@@ -128,7 +128,7 @@ struct HomeViewModelTests {
         }
         mockPersistence.articlesByFeedID[feed.id] = articles
 
-        let viewModel = HomeViewModel(persistence: mockPersistence)
+        let viewModel = HomeViewModel(persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         viewModel.loadAllArticles()
 
         #expect(viewModel.allArticlesList.count == 3)
@@ -155,7 +155,7 @@ struct HomeViewModelTests {
         }
         mockPersistence.articlesByFeedID[feed.id] = articles
 
-        let viewModel = HomeViewModel(persistence: mockPersistence)
+        let viewModel = HomeViewModel(persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         viewModel.loadAllArticles()
 
         #expect(viewModel.allArticlesList.count == HomeViewModel.pageSize)
@@ -172,7 +172,7 @@ struct HomeViewModelTests {
     func loadMoreAllArticlesNoOp() {
         let mockPersistence = MockFeedPersistenceService()
 
-        let viewModel = HomeViewModel(persistence: mockPersistence)
+        let viewModel = HomeViewModel(persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         viewModel.loadAllArticles()
         #expect(viewModel.hasMoreAllArticles == false)
 
@@ -187,7 +187,7 @@ struct HomeViewModelTests {
         let mockPersistence = MockFeedPersistenceService()
         mockPersistence.errorToThrow = NSError(domain: "test", code: 1)
 
-        let viewModel = HomeViewModel(persistence: mockPersistence)
+        let viewModel = HomeViewModel(persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         viewModel.loadAllArticles()
 
         #expect(viewModel.allArticlesList.isEmpty)
@@ -211,7 +211,7 @@ struct HomeViewModelTests {
         read.feed = feed
         mockPersistence.articlesByFeedID[feed.id] = [unread1, unread2, read]
 
-        let viewModel = HomeViewModel(persistence: mockPersistence)
+        let viewModel = HomeViewModel(persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         viewModel.loadUnreadArticles()
 
         #expect(viewModel.unreadArticlesList.count == 2)
@@ -237,7 +237,7 @@ struct HomeViewModelTests {
         }
         mockPersistence.articlesByFeedID[feed.id] = articles
 
-        let viewModel = HomeViewModel(persistence: mockPersistence)
+        let viewModel = HomeViewModel(persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         viewModel.loadUnreadArticles()
 
         #expect(viewModel.unreadArticlesList.count == HomeViewModel.pageSize)
@@ -254,7 +254,7 @@ struct HomeViewModelTests {
     func loadMoreUnreadArticlesNoOp() {
         let mockPersistence = MockFeedPersistenceService()
 
-        let viewModel = HomeViewModel(persistence: mockPersistence)
+        let viewModel = HomeViewModel(persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         viewModel.loadUnreadArticles()
         #expect(viewModel.hasMoreUnreadArticles == false)
 
@@ -268,7 +268,7 @@ struct HomeViewModelTests {
         let mockPersistence = MockFeedPersistenceService()
         mockPersistence.errorToThrow = NSError(domain: "test", code: 1)
 
-        let viewModel = HomeViewModel(persistence: mockPersistence)
+        let viewModel = HomeViewModel(persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         viewModel.loadUnreadArticles()
 
         #expect(viewModel.unreadArticlesList.isEmpty)
@@ -288,7 +288,7 @@ struct HomeViewModelTests {
         article.feed = feed
         mockPersistence.articlesByFeedID[feed.id] = [article]
 
-        let viewModel = HomeViewModel(persistence: mockPersistence)
+        let viewModel = HomeViewModel(persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         viewModel.loadAllArticles()
         #expect(viewModel.allArticlesList.count == 1)
 
@@ -308,7 +308,7 @@ struct HomeViewModelTests {
         article.feed = feed
         mockPersistence.articlesByFeedID[feed.id] = [article]
 
-        let viewModel = HomeViewModel(persistence: mockPersistence)
+        let viewModel = HomeViewModel(persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         viewModel.loadUnreadArticles()
         #expect(viewModel.unreadArticlesList.count == 1)
 
@@ -328,7 +328,7 @@ struct HomeViewModelTests {
         article.feed = feed
         mockPersistence.articlesByFeedID[feed.id] = [article]
 
-        let viewModel = HomeViewModel(persistence: mockPersistence)
+        let viewModel = HomeViewModel(persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         viewModel.loadAllArticles()
         #expect(viewModel.allArticlesList.count == 1)
 
@@ -350,7 +350,7 @@ struct HomeViewModelTests {
         article.feed = feed
         mockPersistence.articlesByFeedID[feed.id] = [article]
 
-        let viewModel = HomeViewModel(persistence: mockPersistence)
+        let viewModel = HomeViewModel(persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         viewModel.loadUnreadArticles()
         #expect(viewModel.unreadArticlesList.count == 1)
 
@@ -366,7 +366,7 @@ struct HomeViewModelTests {
         let mockPersistence = MockFeedPersistenceService()
         mockPersistence.errorToThrow = NSError(domain: "test", code: 1)
 
-        let viewModel = HomeViewModel(persistence: mockPersistence)
+        let viewModel = HomeViewModel(persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         viewModel.loadAllArticles()
 
         // hasMore preserved so the user can retry
@@ -394,7 +394,7 @@ struct HomeViewModelTests {
         article2.feed = feed
         mockPersistence.articlesByFeedID[feed.id] = [article1, article2]
 
-        let viewModel = HomeViewModel(persistence: mockPersistence)
+        let viewModel = HomeViewModel(persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         return (viewModel, mockPersistence, article1, article2, feed)
     }
 
@@ -440,7 +440,7 @@ struct HomeViewModelTests {
         article2.feed = feed
         mockPersistence.articlesByFeedID[feed.id] = [article1, article2]
 
-        let viewModel = HomeViewModel(persistence: mockPersistence)
+        let viewModel = HomeViewModel(persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         viewModel.loadAllArticles()
 
         let idsBefore = viewModel.allArticlesList.map(\.articleID)
@@ -529,7 +529,7 @@ struct HomeViewModelTests {
         article1.feed = feed
         mockPersistence.articlesByFeedID[feed.id] = [article1]
 
-        let viewModel = HomeViewModel(persistence: mockPersistence)
+        let viewModel = HomeViewModel(persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         viewModel.loadAllArticles()
         #expect(viewModel.allArticlesList.count == 1)
 
@@ -613,7 +613,7 @@ struct HomeViewModelTests {
         article3.feed = feed
         mockPersistence.articlesByFeedID[feed.id] = [article1, article2, article3]
 
-        let viewModel = HomeViewModel(persistence: mockPersistence)
+        let viewModel = HomeViewModel(persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         viewModel.loadUnreadArticles()
         let expectedOrder = ["u1", "u2", "u3"]
         #expect(viewModel.unreadArticlesList.map(\.articleID) == expectedOrder)
@@ -675,7 +675,7 @@ struct HomeViewModelTests {
         article.feed = feed
         mockPersistence.articlesByFeedID[feed.id] = [article]
 
-        let viewModel = HomeViewModel(persistence: mockPersistence)
+        let viewModel = HomeViewModel(persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         viewModel.loadUnreadCount()
         #expect(viewModel.unreadCount == 1)
 
@@ -696,7 +696,7 @@ struct HomeViewModelTests {
         article.feed = feed
         mockPersistence.articlesByFeedID[feed.id] = [article]
 
-        let viewModel = HomeViewModel(persistence: mockPersistence)
+        let viewModel = HomeViewModel(persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         let result = viewModel.markAsRead(article)
 
         #expect(result == true)
@@ -717,7 +717,7 @@ struct HomeViewModelTests {
         article2.feed = feed
         mockPersistence.articlesByFeedID[feed.id] = [article, article2]
 
-        let viewModel = HomeViewModel(persistence: mockPersistence)
+        let viewModel = HomeViewModel(persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         viewModel.loadUnreadCount()
         #expect(viewModel.unreadCount == 2)
 
@@ -742,7 +742,7 @@ struct HomeViewModelTests {
         article.feed = feed
         mockPersistence.articlesByFeedID[feed.id] = [article]
 
-        let viewModel = HomeViewModel(persistence: mockPersistence)
+        let viewModel = HomeViewModel(persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         viewModel.toggleReadStatus(article)
 
         #expect(article.isRead == true)
@@ -759,7 +759,7 @@ struct HomeViewModelTests {
         article.feed = feed
         mockPersistence.articlesByFeedID[feed.id] = [article]
 
-        let viewModel = HomeViewModel(persistence: mockPersistence)
+        let viewModel = HomeViewModel(persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         viewModel.toggleReadStatus(article)
 
         #expect(article.isRead == false)
@@ -778,7 +778,7 @@ struct HomeViewModelTests {
         article2.feed = feed
         mockPersistence.articlesByFeedID[feed.id] = [article, article2]
 
-        let viewModel = HomeViewModel(persistence: mockPersistence)
+        let viewModel = HomeViewModel(persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         viewModel.loadUnreadCount()
         #expect(viewModel.unreadCount == 2)
 
@@ -800,6 +800,7 @@ struct HomeViewModelTests {
         let refreshCallCount = CallCounter()
         let viewModel = HomeViewModel(
             persistence: mockPersistence,
+            userDefaults: UserDefaults(suiteName: UUID().uuidString)!,
             refreshFeeds: {
                 await refreshCallCount.increment()
                 return nil
@@ -816,7 +817,7 @@ struct HomeViewModelTests {
     @MainActor
     func refreshAllFeedsNoOpWithoutClosure() async {
         let mockPersistence = MockFeedPersistenceService()
-        let viewModel = HomeViewModel(persistence: mockPersistence)
+        let viewModel = HomeViewModel(persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
 
         await viewModel.refreshAllFeeds()
 
@@ -832,6 +833,7 @@ struct HomeViewModelTests {
 
         let viewModel = HomeViewModel(
             persistence: mockPersistence,
+            userDefaults: UserDefaults(suiteName: UUID().uuidString)!,
             refreshFeeds: { return nil }
         )
 
@@ -846,6 +848,7 @@ struct HomeViewModelTests {
         let mockPersistence = MockFeedPersistenceService()
         let viewModel = HomeViewModel(
             persistence: mockPersistence,
+            userDefaults: UserDefaults(suiteName: UUID().uuidString)!,
             refreshFeeds: { return "2 of 5 feed(s) could not be updated." }
         )
 
@@ -863,6 +866,7 @@ struct HomeViewModelTests {
 
         let viewModel = HomeViewModel(
             persistence: mockPersistence,
+            userDefaults: UserDefaults(suiteName: UUID().uuidString)!,
             refreshFeeds: {
                 return await failToggle.shouldFail ? "Error" : nil
             }
@@ -889,6 +893,7 @@ struct HomeViewModelTests {
 
         let viewModel = HomeViewModel(
             persistence: mockPersistence,
+            userDefaults: UserDefaults(suiteName: UUID().uuidString)!,
             refreshFeeds: {
                 await refreshCallCount.increment()
                 // Only the first call waits; subsequent calls should be
@@ -930,6 +935,7 @@ struct HomeViewModelTests {
 
         let viewModel = HomeViewModel(
             persistence: mockPersistence,
+            userDefaults: UserDefaults(suiteName: UUID().uuidString)!,
             refreshFeeds: { return nil }
         )
 
@@ -952,7 +958,7 @@ struct HomeViewModelTests {
         let mockPersistence = MockFeedPersistenceService()
         mockPersistence.errorToThrow = NSError(domain: "test", code: 1)
 
-        let viewModel = HomeViewModel(persistence: mockPersistence)
+        let viewModel = HomeViewModel(persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         viewModel.loadUnreadCount()
         #expect(viewModel.errorMessage != nil)
 
@@ -1078,7 +1084,7 @@ struct HomeViewModelTests {
     @MainActor
     func shouldRefreshOnEntryNeverRefreshed() {
         UserDefaults.standard.removeObject(forKey: FeedRefreshService.lastRefreshCompletedKey)
-        let viewModel = HomeViewModel(persistence: MockFeedPersistenceService())
+        let viewModel = HomeViewModel(persistence: MockFeedPersistenceService(), userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         #expect(viewModel.shouldRefreshOnEntry == true)
     }
 
@@ -1091,7 +1097,7 @@ struct HomeViewModelTests {
         )
         defer { UserDefaults.standard.removeObject(forKey: FeedRefreshService.lastRefreshCompletedKey) }
 
-        let viewModel = HomeViewModel(persistence: MockFeedPersistenceService())
+        let viewModel = HomeViewModel(persistence: MockFeedPersistenceService(), userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         #expect(viewModel.shouldRefreshOnEntry == false)
     }
 
@@ -1105,7 +1111,7 @@ struct HomeViewModelTests {
         )
         defer { UserDefaults.standard.removeObject(forKey: FeedRefreshService.lastRefreshCompletedKey) }
 
-        let viewModel = HomeViewModel(persistence: MockFeedPersistenceService())
+        let viewModel = HomeViewModel(persistence: MockFeedPersistenceService(), userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         #expect(viewModel.shouldRefreshOnEntry == true)
     }
 
@@ -1133,7 +1139,7 @@ struct HomeViewModelTests {
         notSavedUnread.feed = feed
         mockPersistence.articlesByFeedID[feed.id] = [savedUnread, notSavedUnread]
 
-        let viewModel = HomeViewModel(persistence: mockPersistence)
+        let viewModel = HomeViewModel(persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         viewModel.loadUnreadCount()
         #expect(viewModel.unreadCount == 2)
 
@@ -1188,7 +1194,7 @@ struct HomeViewModelTests {
         let mockPersistence = MockFeedPersistenceService()
         mockPersistence.errorToThrow = NSError(domain: "test", code: 1)
 
-        let viewModel = HomeViewModel(persistence: mockPersistence)
+        let viewModel = HomeViewModel(persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         viewModel.markAllAsRead()
 
         #expect(viewModel.errorMessage != nil)
@@ -1292,7 +1298,7 @@ struct HomeViewModelTests {
         unsaved.feed = feed
         mockPersistence.articlesByFeedID[feed.id] = [saved1, saved2, unsaved]
 
-        let viewModel = HomeViewModel(persistence: mockPersistence)
+        let viewModel = HomeViewModel(persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         viewModel.loadSavedArticles()
 
         #expect(viewModel.savedArticlesList.count == 2)
@@ -1305,7 +1311,7 @@ struct HomeViewModelTests {
     func loadSavedArticlesEmpty() {
         let mockPersistence = MockFeedPersistenceService()
 
-        let viewModel = HomeViewModel(persistence: mockPersistence)
+        let viewModel = HomeViewModel(persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         viewModel.loadSavedArticles()
 
         #expect(viewModel.savedArticlesList.isEmpty)
@@ -1319,7 +1325,7 @@ struct HomeViewModelTests {
         let mockPersistence = MockFeedPersistenceService()
         mockPersistence.errorToThrow = NSError(domain: "test", code: 1)
 
-        let viewModel = HomeViewModel(persistence: mockPersistence)
+        let viewModel = HomeViewModel(persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         viewModel.loadSavedArticles()
 
         #expect(viewModel.savedArticlesList.isEmpty)
@@ -1348,7 +1354,7 @@ struct HomeViewModelTests {
         }
         mockPersistence.articlesByFeedID[feed.id] = articles
 
-        let viewModel = HomeViewModel(persistence: mockPersistence)
+        let viewModel = HomeViewModel(persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         viewModel.loadSavedArticles()
 
         #expect(viewModel.savedArticlesList.count == HomeViewModel.pageSize)
@@ -1365,7 +1371,7 @@ struct HomeViewModelTests {
     func loadMoreSavedArticlesNoOp() {
         let mockPersistence = MockFeedPersistenceService()
 
-        let viewModel = HomeViewModel(persistence: mockPersistence)
+        let viewModel = HomeViewModel(persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         viewModel.loadSavedArticles()
         #expect(viewModel.hasMoreSavedArticles == false)
 
@@ -1388,7 +1394,7 @@ struct HomeViewModelTests {
         article.feed = feed
         mockPersistence.articlesByFeedID[feed.id] = [article]
 
-        let viewModel = HomeViewModel(persistence: mockPersistence)
+        let viewModel = HomeViewModel(persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         viewModel.loadSavedArticles()
         #expect(viewModel.savedArticlesList.count == 1)
 
@@ -1414,7 +1420,7 @@ struct HomeViewModelTests {
         article.feed = feed
         mockPersistence.articlesByFeedID[feed.id] = [article]
 
-        let viewModel = HomeViewModel(persistence: mockPersistence)
+        let viewModel = HomeViewModel(persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         viewModel.loadSavedArticles()
         #expect(viewModel.savedArticlesList.count == 1)
 
@@ -1434,7 +1440,7 @@ struct HomeViewModelTests {
         article.feed = feed
         mockPersistence.articlesByFeedID[feed.id] = [article]
 
-        let viewModel = HomeViewModel(persistence: mockPersistence)
+        let viewModel = HomeViewModel(persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         viewModel.toggleSaved(article)
 
         #expect(article.isSaved)
@@ -1455,7 +1461,7 @@ struct HomeViewModelTests {
         article.feed = feed
         mockPersistence.articlesByFeedID[feed.id] = [article]
 
-        let viewModel = HomeViewModel(persistence: mockPersistence)
+        let viewModel = HomeViewModel(persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         viewModel.toggleSaved(article)
 
         #expect(!article.isSaved)
@@ -1468,7 +1474,7 @@ struct HomeViewModelTests {
         mockPersistence.errorToThrow = NSError(domain: "test", code: 1)
 
         let article = TestFixtures.makePersistentArticle(articleID: "a1")
-        let viewModel = HomeViewModel(persistence: mockPersistence)
+        let viewModel = HomeViewModel(persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         viewModel.toggleSaved(article)
 
         #expect(viewModel.errorMessage != nil)
@@ -1495,7 +1501,7 @@ struct HomeViewModelTests {
         }
         mockPersistence.articlesByFeedID[feed.id] = articles
 
-        let viewModel = HomeViewModel(persistence: mockPersistence)
+        let viewModel = HomeViewModel(persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         viewModel.loadAllArticles()
 
         #expect(viewModel.allArticlesList.count == HomeViewModel.pageSize)
@@ -1518,7 +1524,7 @@ struct HomeViewModelTests {
         article.feed = feed
         mockPersistence.articlesByFeedID[feed.id] = [article]
 
-        let viewModel = HomeViewModel(persistence: mockPersistence)
+        let viewModel = HomeViewModel(persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         viewModel.loadAllArticles()
 
         #expect(viewModel.allArticlesList.count == 1)
@@ -1549,7 +1555,7 @@ struct HomeViewModelTests {
         }
         mockPersistence.articlesByFeedID[feed.id] = articles
 
-        let viewModel = HomeViewModel(persistence: mockPersistence)
+        let viewModel = HomeViewModel(persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         viewModel.loadAllArticles()
 
         #expect(viewModel.hasMoreAllArticles == true)
@@ -1584,7 +1590,7 @@ struct HomeViewModelTests {
         }
         mockPersistence.articlesByFeedID[feed.id] = articles
 
-        let viewModel = HomeViewModel(persistence: mockPersistence)
+        let viewModel = HomeViewModel(persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         viewModel.loadUnreadArticles()
 
         #expect(viewModel.unreadArticlesList.count == HomeViewModel.pageSize)
@@ -1607,7 +1613,7 @@ struct HomeViewModelTests {
         article.feed = feed
         mockPersistence.articlesByFeedID[feed.id] = [article]
 
-        let viewModel = HomeViewModel(persistence: mockPersistence)
+        let viewModel = HomeViewModel(persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         viewModel.loadUnreadArticles()
 
         #expect(viewModel.unreadArticlesList.count == 1)
@@ -1638,7 +1644,7 @@ struct HomeViewModelTests {
         }
         mockPersistence.articlesByFeedID[feed.id] = articles
 
-        let viewModel = HomeViewModel(persistence: mockPersistence)
+        let viewModel = HomeViewModel(persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         viewModel.loadUnreadArticles()
 
         #expect(viewModel.hasMoreUnreadArticles == true)
@@ -1672,7 +1678,7 @@ struct HomeViewModelTests {
         }
         mockPersistence.articlesByFeedID[feed.id] = articles
 
-        let viewModel = HomeViewModel(persistence: mockPersistence)
+        let viewModel = HomeViewModel(persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         viewModel.loadSavedArticles()
 
         #expect(viewModel.savedArticlesList.count == HomeViewModel.pageSize)
@@ -1699,7 +1705,7 @@ struct HomeViewModelTests {
         article.feed = feed
         mockPersistence.articlesByFeedID[feed.id] = [article]
 
-        let viewModel = HomeViewModel(persistence: mockPersistence)
+        let viewModel = HomeViewModel(persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         viewModel.loadSavedArticles()
 
         #expect(viewModel.savedArticlesList.count == 1)
@@ -1730,7 +1736,7 @@ struct HomeViewModelTests {
         }
         mockPersistence.articlesByFeedID[feed.id] = articles
 
-        let viewModel = HomeViewModel(persistence: mockPersistence)
+        let viewModel = HomeViewModel(persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         viewModel.loadSavedArticles()
 
         #expect(viewModel.hasMoreSavedArticles == true)
@@ -1765,7 +1771,7 @@ struct HomeViewModelTests {
         }
         mockPersistence.articlesByFeedID[feed.id] = articles
 
-        let viewModel = HomeViewModel(persistence: mockPersistence)
+        let viewModel = HomeViewModel(persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         viewModel.loadAllArticles()
 
         #expect(viewModel.hasMoreAllArticles == true)
@@ -1998,7 +2004,7 @@ struct HomeViewModelTests {
         }
         mockPersistence.articlesByFeedID[feed.id] = articles
 
-        let viewModel = HomeViewModel(persistence: mockPersistence)
+        let viewModel = HomeViewModel(persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         viewModel.loadSavedArticles()
 
         #expect(viewModel.savedArticlesList.count == HomeViewModel.pageSize)
@@ -2021,7 +2027,7 @@ struct HomeViewModelTests {
         let mockPersistence = MockFeedPersistenceService()
         mockPersistence.feeds = [feed]
 
-        let viewModel = HomeViewModel(persistence: mockPersistence)
+        let viewModel = HomeViewModel(persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         viewModel.loadUnreadCount()
 
         #expect(viewModel.hasFeedsWithLongRunningFailure == false)
@@ -2038,7 +2044,7 @@ struct HomeViewModelTests {
         let mockPersistence = MockFeedPersistenceService()
         mockPersistence.feeds = [feed]
 
-        let viewModel = HomeViewModel(persistence: mockPersistence)
+        let viewModel = HomeViewModel(persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         viewModel.loadUnreadCount()
 
         #expect(viewModel.hasFeedsWithLongRunningFailure == false)
@@ -2057,7 +2063,7 @@ struct HomeViewModelTests {
         let mockPersistence = MockFeedPersistenceService()
         mockPersistence.feeds = [healthyFeed, brokenFeed]
 
-        let viewModel = HomeViewModel(persistence: mockPersistence)
+        let viewModel = HomeViewModel(persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         viewModel.loadUnreadCount()
 
         #expect(viewModel.hasFeedsWithLongRunningFailure == true)

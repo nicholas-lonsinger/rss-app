@@ -17,7 +17,7 @@ struct FeedViewModelTests {
         let mockPersistence = MockFeedPersistenceService()
         mockPersistence.feeds = [feed]
 
-        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence)
+        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         await viewModel.loadFeed()
 
         #expect(viewModel.articles.count == 2)
@@ -33,7 +33,7 @@ struct FeedViewModelTests {
         mock.errorToThrow = FeedFetchingError.invalidResponse(statusCode: 500)
         let mockPersistence = MockFeedPersistenceService()
 
-        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence)
+        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         await viewModel.loadFeed()
 
         #expect(viewModel.articles.isEmpty)
@@ -49,7 +49,7 @@ struct FeedViewModelTests {
         mock.feedToReturn = TestFixtures.makeFeed()
         let mockPersistence = MockFeedPersistenceService()
 
-        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence)
+        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         #expect(viewModel.isLoading == false)
 
         await viewModel.loadFeed()
@@ -63,7 +63,8 @@ struct FeedViewModelTests {
         let viewModel = FeedViewModel(
             feed: feed,
             feedFetching: MockFeedFetchingService(),
-            persistence: MockFeedPersistenceService()
+            persistence: MockFeedPersistenceService(),
+            userDefaults: UserDefaults(suiteName: UUID().uuidString)!
         )
         #expect(viewModel.feedTitle == "My Feed")
     }
@@ -76,7 +77,7 @@ struct FeedViewModelTests {
         mock.feedToReturn = TestFixtures.makeFeed(title: "Electrek")
         let mockPersistence = MockFeedPersistenceService()
 
-        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence)
+        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         await viewModel.loadFeed()
 
         #expect(viewModel.feedTitle == "Electrek")
@@ -90,7 +91,7 @@ struct FeedViewModelTests {
         mock.errorToThrow = FeedFetchingError.invalidResponse(statusCode: 500)
         let mockPersistence = MockFeedPersistenceService()
 
-        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence)
+        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         await viewModel.loadFeed()
 
         #expect(viewModel.feedTitle == "Original")
@@ -113,7 +114,7 @@ struct FeedViewModelTests {
         let mock = MockFeedFetchingService()
         mock.errorToThrow = FeedFetchingError.invalidResponse(statusCode: 500)
 
-        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence)
+        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         await viewModel.loadFeed()
 
         // Should show cached articles, NOT show error
@@ -130,7 +131,7 @@ struct FeedViewModelTests {
         let mock = MockFeedFetchingService()
         mock.errorToThrow = FeedFetchingError.invalidResponse(statusCode: 500)
 
-        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence)
+        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         await viewModel.loadFeed()
 
         #expect(viewModel.articles.isEmpty)
@@ -158,7 +159,7 @@ struct FeedViewModelTests {
         }
         mock.feedToReturn = TestFixtures.makeFeed(articles: articles)
 
-        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence)
+        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         await viewModel.loadFeed()
 
         // After loadFeed, should have first page
@@ -185,7 +186,7 @@ struct FeedViewModelTests {
             TestFixtures.makeArticle(id: "1", title: "Article 1"),
         ])
 
-        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence)
+        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         await viewModel.loadFeed()
 
         #expect(viewModel.articles.count == 1)
@@ -215,7 +216,7 @@ struct FeedViewModelTests {
         }
         mock.feedToReturn = TestFixtures.makeFeed(articles: articles)
 
-        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence)
+        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         await viewModel.loadFeed()
 
         #expect(viewModel.hasMoreArticles == true)
@@ -245,7 +246,7 @@ struct FeedViewModelTests {
         let mock = MockFeedFetchingService()
         mock.errorToThrow = FeedFetchingError.invalidResponse(statusCode: 500)
 
-        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence)
+        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         await viewModel.loadFeed()
 
         #expect(viewModel.articles.count == 1)
@@ -261,7 +262,7 @@ struct FeedViewModelTests {
         let article = TestFixtures.makePersistentArticle(isRead: false)
         let mockPersistence = MockFeedPersistenceService()
 
-        let viewModel = FeedViewModel(feed: feed, feedFetching: MockFeedFetchingService(), persistence: mockPersistence)
+        let viewModel = FeedViewModel(feed: feed, feedFetching: MockFeedFetchingService(), persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         viewModel.markAsRead(article)
 
         #expect(article.isRead == true)
@@ -274,7 +275,7 @@ struct FeedViewModelTests {
         let article = TestFixtures.makePersistentArticle(isRead: true)
         let mockPersistence = MockFeedPersistenceService()
 
-        let viewModel = FeedViewModel(feed: feed, feedFetching: MockFeedFetchingService(), persistence: mockPersistence)
+        let viewModel = FeedViewModel(feed: feed, feedFetching: MockFeedFetchingService(), persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         viewModel.markAsRead(article)
 
         #expect(article.isRead == true)
@@ -288,7 +289,7 @@ struct FeedViewModelTests {
         let article = TestFixtures.makePersistentArticle(isRead: false)
         let mockPersistence = MockFeedPersistenceService()
 
-        let viewModel = FeedViewModel(feed: feed, feedFetching: MockFeedFetchingService(), persistence: mockPersistence)
+        let viewModel = FeedViewModel(feed: feed, feedFetching: MockFeedFetchingService(), persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         viewModel.toggleReadStatus(article)
 
         #expect(article.isRead == true)
@@ -301,7 +302,7 @@ struct FeedViewModelTests {
         let article = TestFixtures.makePersistentArticle(isRead: true)
         let mockPersistence = MockFeedPersistenceService()
 
-        let viewModel = FeedViewModel(feed: feed, feedFetching: MockFeedFetchingService(), persistence: mockPersistence)
+        let viewModel = FeedViewModel(feed: feed, feedFetching: MockFeedFetchingService(), persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         viewModel.toggleReadStatus(article)
 
         #expect(article.isRead == false)
@@ -455,7 +456,7 @@ struct FeedViewModelTests {
         mock.errorToThrow = FeedFetchingError.invalidResponse(statusCode: 500)
         let mockPersistence = MockFeedPersistenceService()
 
-        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence)
+        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         await viewModel.loadFeed()
         #expect(viewModel.errorMessage != nil)
 
@@ -483,7 +484,7 @@ struct FeedViewModelTests {
             TestFixtures.makeArticle(id: "1", title: "First"),
             TestFixtures.makeArticle(id: "2", title: "Second"),
         ])
-        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence)
+        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         await viewModel.loadFeed()
         #expect(viewModel.articles.count == 2)
 
@@ -504,7 +505,7 @@ struct FeedViewModelTests {
         let mockPersistence = MockFeedPersistenceService()
         mockPersistence.errorToThrow = NSError(domain: "test", code: 1)
 
-        let viewModel = FeedViewModel(feed: feed, feedFetching: MockFeedFetchingService(), persistence: mockPersistence)
+        let viewModel = FeedViewModel(feed: feed, feedFetching: MockFeedFetchingService(), persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         viewModel.markAsRead(article)
 
         #expect(viewModel.errorMessage != nil)
@@ -606,7 +607,7 @@ struct FeedViewModelTests {
 
         mock.feedToReturn = TestFixtures.makeFeed()
 
-        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence)
+        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         await viewModel.loadFeed()
         let articlesBefore = viewModel.articles
 
@@ -652,7 +653,7 @@ struct FeedViewModelTests {
         let mockPersistence = MockFeedPersistenceService()
         mockPersistence.errorToThrow = NSError(domain: "test", code: 1)
 
-        let viewModel = FeedViewModel(feed: feed, feedFetching: MockFeedFetchingService(), persistence: mockPersistence)
+        let viewModel = FeedViewModel(feed: feed, feedFetching: MockFeedFetchingService(), persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         viewModel.markAllAsRead()
 
         #expect(viewModel.errorMessage != nil)
@@ -825,7 +826,7 @@ struct FeedViewModelTests {
         article.feed = feed
         mockPersistence.articlesByFeedID[feed.id] = [article]
 
-        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence)
+        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         viewModel.toggleSaved(article)
 
         #expect(article.isSaved)
@@ -849,7 +850,7 @@ struct FeedViewModelTests {
         article.feed = feed
         mockPersistence.articlesByFeedID[feed.id] = [article]
 
-        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence)
+        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         viewModel.toggleSaved(article)
 
         #expect(!article.isSaved)
@@ -865,7 +866,7 @@ struct FeedViewModelTests {
         mockPersistence.errorToThrow = NSError(domain: "test", code: 1)
 
         let article = TestFixtures.makePersistentArticle(articleID: "a1")
-        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence)
+        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         viewModel.toggleSaved(article)
 
         #expect(viewModel.errorMessage != nil)
@@ -892,7 +893,7 @@ struct FeedViewModelTests {
         }
         mock.feedToReturn = TestFixtures.makeFeed(articles: articles)
 
-        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence)
+        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         await viewModel.loadFeed()
 
         #expect(viewModel.articles.count == FeedViewModel.pageSize)
@@ -916,7 +917,7 @@ struct FeedViewModelTests {
             TestFixtures.makeArticle(id: "1", title: "Only Article"),
         ])
 
-        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence)
+        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         await viewModel.loadFeed()
 
         #expect(viewModel.articles.count == 1)
@@ -947,7 +948,7 @@ struct FeedViewModelTests {
         }
         mock.feedToReturn = TestFixtures.makeFeed(articles: articles)
 
-        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence)
+        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         await viewModel.loadFeed()
 
         #expect(viewModel.hasMoreArticles == true)
@@ -990,7 +991,7 @@ struct FeedViewModelTests {
         }
         mock.feedToReturn = TestFixtures.makeFeed(articles: articles)
 
-        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence)
+        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         await viewModel.loadFeed()
 
         #expect(viewModel.articles.count == FeedViewModel.pageSize)
@@ -1136,7 +1137,7 @@ struct FeedViewModelTests {
         }
         mock.feedToReturn = TestFixtures.makeFeed(articles: articles)
 
-        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence)
+        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence, userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         await viewModel.loadFeed()
 
         #expect(viewModel.hasMoreArticles == true)
