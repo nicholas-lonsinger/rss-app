@@ -245,7 +245,8 @@ final class AddFeedViewModel {
             title: rssFeed.title,
             feedURL: url,
             feedDescription: rssFeed.feedDescription,
-            sortOrder: nextSortOrder
+            sortOrder: nextSortOrder,
+            feedImageURL: rssFeed.imageURL
         )
         do {
             try persistence.addFeed(newFeed)

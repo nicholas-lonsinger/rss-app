@@ -60,10 +60,11 @@ final class MockFeedPersistenceService: FeedPersisting {
         articlesByFeedID.removeValue(forKey: feed.id)
     }
 
-    func updateFeedMetadata(_ feed: PersistentFeed, title: String, description: String) throws {
+    func updateFeedMetadata(_ feed: PersistentFeed, title: String, description: String, feedImageURL: URL?) throws {
         if let error = updateFeedMetadataError ?? errorToThrow { throw error }
         feed.title = title
         feed.feedDescription = description
+        feed.feedImageURL = feedImageURL
         feed.lastRefreshDate = Date()
         feed.lastFetchError = nil
         feed.lastFetchErrorDate = nil

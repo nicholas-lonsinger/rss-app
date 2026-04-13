@@ -241,7 +241,7 @@ final class EditFeedViewModel {
     private func persistEditedFeed(_ rssFeed: RSSFeed, url: URL) -> Bool {
         do {
             try persistence.updateFeedURL(feed, newURL: url)
-            try persistence.updateFeedMetadata(feed, title: rssFeed.title, description: rssFeed.feedDescription)
+            try persistence.updateFeedMetadata(feed, title: rssFeed.title, description: rssFeed.feedDescription, feedImageURL: rssFeed.imageURL)
         } catch {
             errorMessage = "Unable to save changes. Please try again."
             Self.logger.error("Failed to persist edited feed: \(error, privacy: .public)")

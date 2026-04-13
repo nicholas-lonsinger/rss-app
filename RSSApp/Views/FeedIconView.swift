@@ -19,6 +19,10 @@ struct FeedIconView: View {
     /// display already-cached icons (none today — kept for safety) may pass
     /// `nil`, but on-view resolution will be skipped.
     let feedURL: URL?
+    /// The image URL declared in the feed's XML (`<image><url>` in RSS,
+    /// `<logo>` / `<icon>` in Atom). Passed to icon resolution as a
+    /// `.feedXML` candidate. `nil` when the feed XML declares no image.
+    let feedImageURL: URL?
     /// Drives `.task(id:)` so the icon load re-runs after the feed's icon URL is
     /// resolved and cached. The value itself isn't used for rendering.
     let iconURL: URL?
@@ -127,6 +131,7 @@ struct FeedIconView: View {
 
         let backoffKey = feedID.uuidString
         guard !ImageLoadBackoffTracker.feedIcons.shouldSuppress(backoffKey) else {
+            Self.logger.debug("On-view icon resolution suppressed by backoff for feed \(feedID.uuidString, privacy: .public)")
             return
         }
 
@@ -138,14 +143,14 @@ struct FeedIconView: View {
 
         // Both resolution inputs are nil — skip the service call to avoid
         // triggering backoff escalation for a permanently unresolvable condition.
-        guard feedSiteURL != nil || iconURL != nil else {
-            Self.logger.debug("No site URL or icon URL available for feed \(feedID.uuidString, privacy: .public) — skipping on-view resolution")
+        guard feedSiteURL != nil || feedImageURL != nil else {
+            Self.logger.debug("No site URL or feed image URL available for feed \(feedID.uuidString, privacy: .public) — skipping on-view resolution")
             return
         }
 
         let resolved = await iconService.resolveAndCacheIcon(
             feedSiteURL: feedSiteURL,
-            feedImageURL: iconURL,
+            feedImageURL: feedImageURL,
             feedID: feedID
         )
 

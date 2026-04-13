@@ -38,7 +38,7 @@ protocol FeedPersisting: Sendable {
     func allFeeds() throws -> [PersistentFeed]
     func addFeed(_ feed: PersistentFeed) throws
     func deleteFeed(_ feed: PersistentFeed) throws
-    func updateFeedMetadata(_ feed: PersistentFeed, title: String, description: String) throws
+    func updateFeedMetadata(_ feed: PersistentFeed, title: String, description: String, feedImageURL: URL?) throws
     func updateFeedError(_ feed: PersistentFeed, error: String?) throws
     func updateFeedURL(_ feed: PersistentFeed, newURL: URL) throws
     func updateFeedCacheHeaders(_ feed: PersistentFeed, etag: String?, lastModified: String?) throws
@@ -245,9 +245,10 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
         Self.logger.notice("Deleted feed '\(title, privacy: .public)'")
     }
 
-    func updateFeedMetadata(_ feed: PersistentFeed, title: String, description: String) throws {
+    func updateFeedMetadata(_ feed: PersistentFeed, title: String, description: String, feedImageURL: URL?) throws {
         feed.title = title
         feed.feedDescription = description
+        feed.feedImageURL = feedImageURL
         feed.lastRefreshDate = Date()
         feed.lastFetchError = nil
         feed.lastFetchErrorDate = nil

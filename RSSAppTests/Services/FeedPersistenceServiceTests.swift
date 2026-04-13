@@ -62,10 +62,12 @@ struct FeedPersistenceServiceTests {
         )
 
         try service.addFeed(feed)
-        try service.updateFeedMetadata(feed, title: "New Title", description: "New Desc")
+        let imageURL = URL(string: "https://example.com/icon.png")!
+        try service.updateFeedMetadata(feed, title: "New Title", description: "New Desc", feedImageURL: imageURL)
 
         #expect(feed.title == "New Title")
         #expect(feed.feedDescription == "New Desc")
+        #expect(feed.feedImageURL == imageURL)
         #expect(feed.lastRefreshDate != nil)
         #expect(feed.lastFetchError == nil)
         #expect(feed.lastFetchErrorDate == nil)
