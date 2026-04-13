@@ -7,7 +7,7 @@ final class FeedViewModel {
 
     private static let logger = Logger(category: "FeedViewModel")
 
-    /// UserDefaults key for the global sort order preference.
+    /// UserDefaults key for the app-wide sort order preference.
     static let sortAscendingKey = "articleSortAscending"
 
     /// Number of articles to fetch per page.
@@ -29,12 +29,17 @@ final class FeedViewModel {
         }
     }
 
-    /// Current sort order — reads from the global UserDefaults preference.
+    // RATIONALE: sortAscending is a computed property backed by UserDefaults, so @Observable
+    // does not track it automatically. UI correctness is preserved because the setter calls
+    // reloadArticles(), which mutates the tracked `articles` array and drives SwiftUI updates.
+    // A Toggle bound to this property works fine: the setter fires on user interaction, and
+    // the resulting articles mutation triggers the necessary re-render.
+    /// Current sort order — reads from the injected UserDefaults instance.
     var sortAscending: Bool {
-        get { UserDefaults.standard.bool(forKey: Self.sortAscendingKey) }
+        get { userDefaults.bool(forKey: Self.sortAscendingKey) }
         set {
-            guard UserDefaults.standard.bool(forKey: Self.sortAscendingKey) != newValue else { return }
-            UserDefaults.standard.set(newValue, forKey: Self.sortAscendingKey)
+            guard userDefaults.bool(forKey: Self.sortAscendingKey) != newValue else { return }
+            userDefaults.set(newValue, forKey: Self.sortAscendingKey)
             Self.logger.debug("sortAscending changed to \(newValue, privacy: .public)")
             reloadArticles()
         }
@@ -42,16 +47,19 @@ final class FeedViewModel {
 
     private let feedFetching: FeedFetching
     private let persistence: FeedPersisting
+    private let userDefaults: UserDefaults
     let feed: PersistentFeed
 
     init(
         feed: PersistentFeed,
         feedFetching: FeedFetching = FeedFetchingService(),
-        persistence: FeedPersisting
+        persistence: FeedPersisting,
+        userDefaults: UserDefaults = .standard
     ) {
         self.feed = feed
         self.feedFetching = feedFetching
         self.persistence = persistence
+        self.userDefaults = userDefaults
         self.feedTitle = feed.title
     }
 

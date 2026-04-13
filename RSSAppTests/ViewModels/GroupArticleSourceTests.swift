@@ -41,7 +41,10 @@ struct GroupArticleSourceTests {
             mock.articlesByFeedID[feed.id] = articles
         }
 
-        let homeVM = HomeViewModel(persistence: mock)
+        // Use an isolated UserDefaults suite so sort state changes in one test
+        // do not bleed into other tests running in parallel on different suites.
+        let defaults = UserDefaults(suiteName: UUID().uuidString)!
+        let homeVM = HomeViewModel(persistence: mock, userDefaults: defaults)
         let source = GroupArticleSource(group: group, persistence: mock, homeViewModel: homeVM)
         return (source, mock, group)
     }

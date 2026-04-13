@@ -310,7 +310,8 @@ struct FeedViewModelTests {
     // MARK: - Stable List Snapshot
 
     /// Creates a loaded FeedViewModel with two articles for snapshot tests.
-    /// Cleans up UserDefaults before setup. Caller must clean up after test.
+    /// Uses a fresh isolated UserDefaults suite so sort state does not bleed
+    /// across tests running in parallel.
     @MainActor
     private static func makeSnapshotFixture() async -> (
         viewModel: FeedViewModel,
@@ -332,8 +333,8 @@ struct FeedViewModelTests {
 
         mock.feedToReturn = TestFixtures.makeFeed()
 
-        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
-        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence)
+        let defaults = UserDefaults(suiteName: UUID().uuidString)!
+        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence, userDefaults: defaults)
         await viewModel.loadFeed()
 
         return (viewModel, mockPersistence, article1, article2, feed)
@@ -350,8 +351,6 @@ struct FeedViewModelTests {
 
         #expect(article1.isRead == true)
         #expect(viewModel.articles.map(\.articleID) == idsBefore)
-
-        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
     }
 
     @Test("markAsRead does not change article list")
@@ -365,8 +364,6 @@ struct FeedViewModelTests {
 
         #expect(article1.isRead == true)
         #expect(viewModel.articles.map(\.articleID) == idsBefore)
-
-        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
     }
 
     /// Regression test for #209 (per-feed surface). When the user opens an article
@@ -406,8 +403,8 @@ struct FeedViewModelTests {
 
         mock.feedToReturn = TestFixtures.makeFeed()
 
-        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
-        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence)
+        let defaults = UserDefaults(suiteName: UUID().uuidString)!
+        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence, userDefaults: defaults)
         viewModel.showUnreadOnly = true
         await viewModel.loadFeed()
 
@@ -433,8 +430,6 @@ struct FeedViewModelTests {
         // Explicit reload (pull-to-refresh, sort/filter toggle, tab change) drops them.
         viewModel.reloadArticles()
         #expect(viewModel.articles.isEmpty)
-
-        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
     }
 
     @Test("reloadArticles refreshes list from persistence")
@@ -450,8 +445,6 @@ struct FeedViewModelTests {
 
         viewModel.reloadArticles()
         #expect(viewModel.articles.count == 3)
-
-        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
     }
 
     @Test("loadFeed clears error on successful retry")
@@ -522,9 +515,9 @@ struct FeedViewModelTests {
     @Test("sortAscending defaults to false (newest first)")
     @MainActor
     func sortAscendingDefault() {
-        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
+        let defaults = UserDefaults(suiteName: UUID().uuidString)!
         let feed = TestFixtures.makePersistentFeed()
-        let viewModel = FeedViewModel(feed: feed, feedFetching: MockFeedFetchingService(), persistence: MockFeedPersistenceService())
+        let viewModel = FeedViewModel(feed: feed, feedFetching: MockFeedFetchingService(), persistence: MockFeedPersistenceService(), userDefaults: defaults)
 
         #expect(viewModel.sortAscending == false)
     }
@@ -532,7 +525,7 @@ struct FeedViewModelTests {
     @Test("sortAscending toggle persists and reloads articles")
     @MainActor
     func sortAscendingToggleReloads() async {
-        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
+        let defaults = UserDefaults(suiteName: UUID().uuidString)!
         let feed = TestFixtures.makePersistentFeed(feedURL: URL(string: "https://example.com/feed")!)
         let mock = MockFeedFetchingService()
         let mockPersistence = MockFeedPersistenceService()
@@ -552,7 +545,7 @@ struct FeedViewModelTests {
 
         mock.feedToReturn = TestFixtures.makeFeed()
 
-        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence)
+        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence, userDefaults: defaults)
         await viewModel.loadFeed()
 
         // Default: newest first — article2 should be first
@@ -562,9 +555,6 @@ struct FeedViewModelTests {
         viewModel.sortAscending = true
 
         #expect(viewModel.articles.first?.articleID == "a1")
-
-        // Clean up
-        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
     }
 
     // MARK: - Read Filter
@@ -585,8 +575,8 @@ struct FeedViewModelTests {
 
         mock.feedToReturn = TestFixtures.makeFeed()
 
-        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
-        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence)
+        let defaults = UserDefaults(suiteName: UUID().uuidString)!
+        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence, userDefaults: defaults)
         await viewModel.loadFeed()
 
         #expect(viewModel.articles.count == 2)
@@ -600,9 +590,6 @@ struct FeedViewModelTests {
         viewModel.showUnreadOnly = false
 
         #expect(viewModel.articles.count == 2)
-
-        // Clean up
-        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
     }
 
     @Test("showUnreadOnly does not reload when set to same value")
@@ -647,8 +634,8 @@ struct FeedViewModelTests {
 
         mock.feedToReturn = TestFixtures.makeFeed()
 
-        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
-        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence)
+        let defaults = UserDefaults(suiteName: UUID().uuidString)!
+        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence, userDefaults: defaults)
         await viewModel.loadFeed()
 
         viewModel.markAllAsRead()
@@ -656,9 +643,6 @@ struct FeedViewModelTests {
         #expect(article1.isRead == true)
         #expect(article2.isRead == true)
         #expect(viewModel.errorMessage == nil)
-
-        // Clean up
-        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
     }
 
     @Test("markAllAsRead sets errorMessage on persistence failure")
@@ -690,8 +674,8 @@ struct FeedViewModelTests {
 
         mock.feedToReturn = TestFixtures.makeFeed()
 
-        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
-        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence)
+        let defaults = UserDefaults(suiteName: UUID().uuidString)!
+        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence, userDefaults: defaults)
         viewModel.showUnreadOnly = true
         await viewModel.loadFeed()
         #expect(viewModel.articles.count == 2)
@@ -704,9 +688,6 @@ struct FeedViewModelTests {
         // scroll position and currently-focused row are lost mid-action.
         #expect(viewModel.articles.count == 2)
         #expect(viewModel.articles.allSatisfy { $0.isRead })
-
-        // Clean up
-        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
     }
 
     // MARK: - Reload Error Paths
@@ -725,8 +706,8 @@ struct FeedViewModelTests {
 
         mock.feedToReturn = TestFixtures.makeFeed()
 
-        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
-        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence)
+        let defaults = UserDefaults(suiteName: UUID().uuidString)!
+        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence, userDefaults: defaults)
         await viewModel.loadFeed()
         #expect(viewModel.articles.count == 1)
 
@@ -736,9 +717,6 @@ struct FeedViewModelTests {
 
         #expect(viewModel.errorMessage == "Unable to reload articles.")
         #expect(viewModel.articles.count == 1, "Previous article list should be preserved on error")
-
-        // Clean up
-        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
     }
 
     @Test("reloadArticles sets errorMessage when persistence fails during sort toggle")
@@ -755,8 +733,8 @@ struct FeedViewModelTests {
 
         mock.feedToReturn = TestFixtures.makeFeed()
 
-        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
-        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence)
+        let defaults = UserDefaults(suiteName: UUID().uuidString)!
+        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence, userDefaults: defaults)
         await viewModel.loadFeed()
         #expect(viewModel.articles.count == 1)
 
@@ -766,9 +744,6 @@ struct FeedViewModelTests {
 
         #expect(viewModel.errorMessage == "Unable to reload articles.")
         #expect(viewModel.articles.count == 1, "Previous article list should be preserved on error")
-
-        // Clean up
-        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
     }
 
     @Test("reloadArticles direct call preserves list on persistence error")
@@ -782,8 +757,6 @@ struct FeedViewModelTests {
 
         #expect(viewModel.errorMessage == "Unable to reload articles.")
         #expect(viewModel.articles.count == 2, "Previous article list should be preserved on error")
-
-        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
     }
 
     // MARK: - Pagination with Unread Filter
@@ -818,8 +791,8 @@ struct FeedViewModelTests {
 
         mock.feedToReturn = TestFixtures.makeFeed()
 
-        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
-        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence)
+        let defaults = UserDefaults(suiteName: UUID().uuidString)!
+        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence, userDefaults: defaults)
         viewModel.showUnreadOnly = true
         await viewModel.loadFeed()
 
@@ -836,9 +809,6 @@ struct FeedViewModelTests {
         #expect(viewModel.hasMoreArticles == false)
         // Still no read article
         #expect(!viewModel.articles.contains { $0.articleID == "read1" })
-
-        // Clean up
-        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
     }
 
     // MARK: - Toggle Saved
@@ -1057,7 +1027,7 @@ struct FeedViewModelTests {
     @Test("reloadArticles preserves articleID prefix when network response overlaps cache")
     @MainActor
     func reloadArticlesPreservesArticleIDPrefix() async {
-        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
+        let defaults = UserDefaults(suiteName: UUID().uuidString)!
         let feed = TestFixtures.makePersistentFeed(feedURL: URL(string: "https://example.com/feed")!)
         let mock = MockFeedFetchingService()
         let mockPersistence = MockFeedPersistenceService()
@@ -1092,7 +1062,7 @@ struct FeedViewModelTests {
         }
         mock.feedToReturn = TestFixtures.makeFeed(articles: networkArticles)
 
-        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence)
+        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence, userDefaults: defaults)
         await viewModel.loadFeed()
 
         #expect(viewModel.articles.count == FeedViewModel.pageSize)
@@ -1103,8 +1073,6 @@ struct FeedViewModelTests {
 
         let prefixAfter = Array(viewModel.articles.prefix(FeedViewModel.pageSize)).map(\.articleID)
         #expect(prefixAfter == prefixBefore, "reloadArticles must preserve articleID identity for the previously loaded prefix")
-
-        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
     }
 
     /// Regression guard for #235. Companion to `reloadArticlesPreservesArticleIDPrefix`:
@@ -1115,7 +1083,7 @@ struct FeedViewModelTests {
     @Test("loadMoreAndReport preserves articleID for previously loaded prefix")
     @MainActor
     func loadMoreAndReportPreservesArticleIDPrefix() async {
-        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
+        let defaults = UserDefaults(suiteName: UUID().uuidString)!
         let feed = TestFixtures.makePersistentFeed(feedURL: URL(string: "https://example.com/feed")!)
         let mock = MockFeedFetchingService()
         let mockPersistence = MockFeedPersistenceService()
@@ -1135,7 +1103,7 @@ struct FeedViewModelTests {
         }
         mock.feedToReturn = TestFixtures.makeFeed(articles: articles)
 
-        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence)
+        let viewModel = FeedViewModel(feed: feed, feedFetching: mock, persistence: mockPersistence, userDefaults: defaults)
         await viewModel.loadFeed()
 
         #expect(viewModel.articles.count == FeedViewModel.pageSize)
@@ -1147,8 +1115,6 @@ struct FeedViewModelTests {
 
         let prefixAfter = Array(viewModel.articles.prefix(FeedViewModel.pageSize)).map(\.articleID)
         #expect(prefixAfter == prefixBefore, "loadMoreAndReport must preserve articleID identity for the previously loaded prefix")
-
-        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
     }
 
     @Test("loadMoreArticles succeeds on retry after transient error")
