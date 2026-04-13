@@ -546,9 +546,12 @@ struct FeedIconService: FeedIconResolving {
             var foundClosingTag = false
             for try await byte in bytes {
                 collected.append(byte)
-                tailBuffer[tailIndex % closingTag.count] = byte | 0x20 // ASCII-lowercase letters; safe for </head> match
+                let lowerByte = byte | 0x20 // ASCII-lowercase letters; safe for </head> match
+                tailBuffer[tailIndex % closingTag.count] = lowerByte
                 tailIndex += 1
-                if tailIndex >= closingTag.count {
+                // Only check for a full match when the current byte could be '>'
+                // (the final character of </head>), skipping the inner loop for ~99% of bytes.
+                if lowerByte == 0x3E && tailIndex >= closingTag.count {
                     var match = true
                     for j in 0..<closingTag.count {
                         if tailBuffer[(tailIndex - closingTag.count + j) % closingTag.count] != closingTag[j] {
