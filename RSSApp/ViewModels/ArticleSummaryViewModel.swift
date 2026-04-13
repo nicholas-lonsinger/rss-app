@@ -30,6 +30,15 @@ final class ArticleSummaryViewModel {
     /// and lets the user trigger `refreshContent()` to re-extract.
     private(set) var isContentStale: Bool = false
 
+    /// `true` while `refreshContent()` is running. The view disables the
+    /// Refresh button for the duration to prevent concurrent refresh races.
+    private(set) var isRefreshing: Bool = false
+
+    /// Set to `true` when a `refreshContent()` call fails so the banner can
+    /// show transient "Refresh failed" feedback. Cleared at the start of the
+    /// next `refreshContent()` call so the user can retry without dismissing.
+    private(set) var refreshFailed: Bool = false
+
     private let article: Article
     private let extractor: any ArticleExtracting
     private let persistentArticle: PersistentArticle?
@@ -99,39 +108,50 @@ final class ArticleSummaryViewModel {
 
     /// User-triggered re-extraction when `isContentStale` is `true` (issue #398).
     ///
-    /// Shows the stale body immediately (no spinner) and lets the user opt in to
-    /// seeing the fresh version. On success the cached `PersistentArticleContent`
-    /// row is updated in-place by `cacheContent()`, which also sets
-    /// `extractedDate = Date()`, making `PersistentArticle.isContentStale` return
-    /// `false` on subsequent reads. On failure the stale content remains visible
-    /// and the banner stays so the user can retry.
+    /// Keeps the stale body visible (no spinner) while extracting in the background,
+    /// then replaces it on success. Sets `isRefreshing = true` for the duration so
+    /// the view can disable the Refresh button and prevent concurrent calls. Sets
+    /// `refreshFailed = true` on failure so the banner can show transient feedback;
+    /// that flag is cleared at the start of the next call so the user can retry.
+    /// On success the cached `PersistentArticleContent` row is updated in-place by
+    /// `cacheContent()`, which also sets `extractedDate = Date()`, making
+    /// `PersistentArticle.isContentStale` return `false` on subsequent reads. On
+    /// failure the stale content remains visible and the banner stays so the user can
+    /// retry.
     func refreshContent() async {
-        // Snapshot the current state so we can restore it if extraction fails.
-        // `extractArticle()` sets `state = .extracting` as a side effect; we must
-        // not leave the view in `.extracting` if the re-extraction ultimately fails.
-        let stateBeforeRefresh = state
+        guard !isRefreshing else { return }
+        isRefreshing = true
+        refreshFailed = false
+        defer { isRefreshing = false }
+
         do {
-            let fresh = try await extractArticle()
+            // Pass suppressStateUpdate: true so `extractArticle()` skips the
+            // `state = .extracting` transition — the stale body must stay visible
+            // during the background re-extraction rather than flashing a spinner.
+            let fresh = try await extractArticle(suppressStateUpdate: true)
+            extractedContent = fresh
             state = .ready(fresh)
             isContentStale = false
         } catch is CancellationError {
             Self.logger.debug("Content refresh cancelled")
-            state = stateBeforeRefresh
         } catch {
             Self.logger.warning("Content refresh failed for '\(self.article.title, privacy: .public)': \(error, privacy: .public)")
-            // Restore the previous .ready(staleContent) state so the user continues
-            // to see the stale body rather than a loading spinner or error screen.
-            state = stateBeforeRefresh
+            // The previous .ready(staleContent) state is unchanged — no restore needed
+            // because suppressStateUpdate: true prevented any state transition.
+            refreshFailed = true
         }
     }
 
     // MARK: - Private
 
-    private func extractArticle() async throws -> ArticleContent {
+    /// - Parameter suppressStateUpdate: When `true`, skips the `state = .extracting`
+    ///   transition so callers that want to keep the current content visible (e.g.
+    ///   `refreshContent()`) do not flash a full-screen spinner mid-read.
+    private func extractArticle(suppressStateUpdate: Bool = false) async throws -> ArticleContent {
         guard let url = article.link else {
             throw ArticleExtractionError.missingArticleURL
         }
-        state = .extracting
+        if !suppressStateUpdate { state = .extracting }
         Self.logger.debug("Extracting article: '\(self.article.title, privacy: .public)'")
         let content = try await extractor.extract(from: url, fallbackHTML: article.articleDescription)
         extractedContent = content

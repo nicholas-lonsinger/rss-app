@@ -107,23 +107,34 @@ struct ArticleSummaryView: View {
 
     // MARK: - Stale Content Banner
 
-    /// Shown above article body when the cached content pre-dates the publisher's
-    /// most recent revision (issue #398). Non-intrusive: never auto-replaces
-    /// content while the user is reading. The Refresh button triggers
-    /// `viewModel.refreshContent()` as an explicit opt-in action.
+    /// Shown above the article body when the cached article body pre-dates the
+    /// publisher's most recent revision (issue #398). Non-intrusive: never
+    /// auto-replaces content while the user is reading. The Refresh button triggers
+    /// `viewModel.refreshContent()` as an explicit opt-in action. The button is
+    /// disabled while a refresh is in progress to prevent concurrent refresh races.
+    /// A "Refresh failed" label appears transiently when the last refresh attempt
+    /// did not succeed, cleared automatically when the user taps Refresh again.
     private var staleContentBanner: some View {
         HStack(spacing: 8) {
             Image(systemName: "arrow.trianglehead.2.clockwise")
                 .foregroundStyle(.orange)
-            Text("A newer version of this article is available.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("A newer version of this article is available.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                if viewModel.refreshFailed {
+                    Text("Refresh failed. Tap to try again.")
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+            }
             Spacer()
             Button("Refresh") {
                 Task { await viewModel.refreshContent() }
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
+            .disabled(viewModel.isRefreshing)
         }
         .padding(10)
         .background(
@@ -131,6 +142,10 @@ struct ArticleSummaryView: View {
                 .fill(Color.orange.opacity(0.1))
         )
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("A newer version of this article is available. Tap Refresh to load it.")
+        .accessibilityLabel(
+            viewModel.refreshFailed
+                ? "A newer version of this article is available. Refresh failed. Tap to try again."
+                : "A newer version of this article is available. Tap Refresh to load it."
+        )
     }
 }

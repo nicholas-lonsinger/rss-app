@@ -25,8 +25,8 @@ final class PersistentArticle {
     var updatedDate: Date?
     /// Set to `true` by `FeedPersistenceService.upsertArticles` when a re-fetch
     /// detects a strictly newer Atom `<updated>` (or namespaced equivalent) on an
-    /// existing row, alongside the cache invalidation, `isRead` reset, and `sortDate`
-    /// bump that mark the article as resurfaced (issue #74). Cleared on every read
+    /// existing row, alongside the `isRead` reset and `sortDate` bump that mark the
+    /// article as resurfaced (issue #74). Cleared on every read
     /// transition: `markArticleRead(_:isRead: true)`, `markAllArticlesRead(for:)`,
     /// and `markAllArticlesRead()` all set the flag back to `false` so the orange
     /// "Updated" badge in the row view disappears the moment the user opens the
@@ -131,9 +131,10 @@ final class PersistentArticle {
     // a stale-but-untouched article, and the user has explicitly opted into surfacing
     // updated articles at the top of newest-first lists (issue #74) so they can find
     // the new content. The bump uses `clampedSortDate(publishedDate: now, now: now)`
-    // — i.e., set to the current wall clock — and is paired with `wasUpdated = true`,
-    // `isRead = false`, and a cache invalidation in the same transaction so the row
-    // resurfaces as unread with fresh content. Any *other* code path that touches
+    // — i.e., set to the current wall clock — and is paired with `wasUpdated = true`
+    // and `isRead = false` in the same transaction so the row resurfaces as unread
+    // (cached content is preserved and lazily replaced on user request — issue #398).
+    // Any *other* code path that touches
     // `sortDate` on an already-persisted article (e.g., a tempting "fix" that resorts
     // by recomputing from a mutated `publishedDate`) must justify the drift in writing,
     // because reshuffling articles for non-update reasons is a UX regression and breaks
