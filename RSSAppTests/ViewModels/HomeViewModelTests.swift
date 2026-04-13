@@ -460,9 +460,8 @@ struct HomeViewModelTests {
 
         // Isolate from any ambient sort preference. The saved list now honors
         // the global sort toggle (sorted by sortDate with the stored direction)
-        // so leaving the pref unset from a previous test would flip ordering.
-        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
-        defer { UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey) }
+        // so leaving the pref set from a previous test would flip ordering.
+        let defaults = UserDefaults(suiteName: UUID().uuidString)!
 
         // Three saved articles, one already read, two unread. publishedDate is
         // used as the authoritative sort key under the new ordering (sortDate
@@ -494,7 +493,7 @@ struct HomeViewModelTests {
         saved3.feed = feed
         mockPersistence.articlesByFeedID[feed.id] = [saved1, saved2, saved3]
 
-        let viewModel = HomeViewModel(persistence: mockPersistence)
+        let viewModel = HomeViewModel(persistence: mockPersistence, userDefaults: defaults)
         viewModel.loadSavedArticles()
         let expectedOrder = ["s1", "s2", "s3"]
         #expect(viewModel.savedArticlesList.map(\.articleID) == expectedOrder)
@@ -964,27 +963,25 @@ struct HomeViewModelTests {
 
     // MARK: - Sort Order
 
-    @Test("sortAscending reads from UserDefaults via shared key")
+    @Test("sortAscending reads and writes through the injected UserDefaults instance")
     @MainActor
     func sortAscendingReadsSharedKey() {
-        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
+        let defaults = UserDefaults(suiteName: UUID().uuidString)!
         let mockPersistence = MockFeedPersistenceService()
-        let viewModel = HomeViewModel(persistence: mockPersistence)
+        let viewModel = HomeViewModel(persistence: mockPersistence, userDefaults: defaults)
 
         #expect(viewModel.sortAscending == false)
 
         viewModel.sortAscending = true
         #expect(viewModel.sortAscending == true)
-        #expect(UserDefaults.standard.bool(forKey: FeedViewModel.sortAscendingKey) == true)
-
-        // Clean up
-        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
+        #expect(defaults.bool(forKey: FeedViewModel.sortAscendingKey) == true)
     }
 
     @Test("loadAllArticles respects ascending sort order")
     @MainActor
     func loadAllArticlesAscending() {
-        UserDefaults.standard.set(true, forKey: FeedViewModel.sortAscendingKey)
+        let defaults = UserDefaults(suiteName: UUID().uuidString)!
+        defaults.set(true, forKey: FeedViewModel.sortAscendingKey)
         let feed = TestFixtures.makePersistentFeed()
         let mockPersistence = MockFeedPersistenceService()
         mockPersistence.feeds = [feed]
@@ -1001,21 +998,19 @@ struct HomeViewModelTests {
         article2.feed = feed
         mockPersistence.articlesByFeedID[feed.id] = [article1, article2]
 
-        let viewModel = HomeViewModel(persistence: mockPersistence)
+        let viewModel = HomeViewModel(persistence: mockPersistence, userDefaults: defaults)
         viewModel.loadAllArticles()
 
         // Ascending: oldest first
         #expect(viewModel.allArticlesList.first?.articleID == "a1")
         #expect(viewModel.allArticlesList.last?.articleID == "a2")
-
-        // Clean up
-        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
     }
 
     @Test("loadUnreadArticles respects ascending sort order")
     @MainActor
     func loadUnreadArticlesAscending() {
-        UserDefaults.standard.set(true, forKey: FeedViewModel.sortAscendingKey)
+        let defaults = UserDefaults(suiteName: UUID().uuidString)!
+        defaults.set(true, forKey: FeedViewModel.sortAscendingKey)
         let feed = TestFixtures.makePersistentFeed()
         let mockPersistence = MockFeedPersistenceService()
         mockPersistence.feeds = [feed]
@@ -1034,21 +1029,19 @@ struct HomeViewModelTests {
         article2.feed = feed
         mockPersistence.articlesByFeedID[feed.id] = [article1, article2]
 
-        let viewModel = HomeViewModel(persistence: mockPersistence)
+        let viewModel = HomeViewModel(persistence: mockPersistence, userDefaults: defaults)
         viewModel.loadUnreadArticles()
 
         // Ascending: oldest first
         #expect(viewModel.unreadArticlesList.first?.articleID == "u1")
         #expect(viewModel.unreadArticlesList.last?.articleID == "u2")
-
-        // Clean up
-        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
     }
 
     @Test("loadSavedArticles respects ascending sort order")
     @MainActor
     func loadSavedArticlesAscending() {
-        UserDefaults.standard.set(true, forKey: FeedViewModel.sortAscendingKey)
+        let defaults = UserDefaults(suiteName: UUID().uuidString)!
+        defaults.set(true, forKey: FeedViewModel.sortAscendingKey)
         let feed = TestFixtures.makePersistentFeed()
         let mockPersistence = MockFeedPersistenceService()
         mockPersistence.feeds = [feed]
@@ -1069,7 +1062,7 @@ struct HomeViewModelTests {
         article2.feed = feed
         mockPersistence.articlesByFeedID[feed.id] = [article1, article2]
 
-        let viewModel = HomeViewModel(persistence: mockPersistence)
+        let viewModel = HomeViewModel(persistence: mockPersistence, userDefaults: defaults)
         viewModel.loadSavedArticles()
 
         // Ascending: oldest sortDate first. savedDate is deliberately inverted
@@ -1077,9 +1070,6 @@ struct HomeViewModelTests {
         // (derived from publishedDate), not savedDate.
         #expect(viewModel.savedArticlesList.first?.articleID == "s1")
         #expect(viewModel.savedArticlesList.last?.articleID == "s2")
-
-        // Clean up
-        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
     }
 
     // MARK: - shouldRefreshOnEntry throttle
@@ -1171,8 +1161,8 @@ struct HomeViewModelTests {
         article2.feed = feed
         mockPersistence.articlesByFeedID[feed.id] = [article1, article2]
 
-        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
-        let viewModel = HomeViewModel(persistence: mockPersistence)
+        let defaults = UserDefaults(suiteName: UUID().uuidString)!
+        let viewModel = HomeViewModel(persistence: mockPersistence, userDefaults: defaults)
         viewModel.loadUnreadCount()
         #expect(viewModel.unreadCount == 2)
 
@@ -1190,9 +1180,6 @@ struct HomeViewModelTests {
         #expect(viewModel.unreadArticlesList.count == 2)
         #expect(viewModel.unreadArticlesList.allSatisfy { $0.isRead })
         #expect(viewModel.errorMessage == nil)
-
-        // Clean up
-        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
     }
 
     @Test("markAllAsRead sets errorMessage on persistence failure")
@@ -1218,8 +1205,8 @@ struct HomeViewModelTests {
         article.feed = feed
         mockPersistence.articlesByFeedID[feed.id] = [article]
 
-        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
-        let viewModel = HomeViewModel(persistence: mockPersistence)
+        let defaults = UserDefaults(suiteName: UUID().uuidString)!
+        let viewModel = HomeViewModel(persistence: mockPersistence, userDefaults: defaults)
         viewModel.loadUnreadArticles()
         #expect(viewModel.unreadArticlesList.count == 1)
 
@@ -1229,9 +1216,6 @@ struct HomeViewModelTests {
         // visible with isRead == true; the user can refresh to re-query.
         #expect(viewModel.unreadArticlesList.count == 1)
         #expect(viewModel.unreadArticlesList.first?.isRead == true)
-
-        // Clean up
-        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
     }
 
     @Test("markAllAsRead updates isRead on allArticlesList items without reloading")
@@ -1247,8 +1231,8 @@ struct HomeViewModelTests {
         article2.feed = feed
         mockPersistence.articlesByFeedID[feed.id] = [article1, article2]
 
-        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
-        let viewModel = HomeViewModel(persistence: mockPersistence)
+        let defaults = UserDefaults(suiteName: UUID().uuidString)!
+        let viewModel = HomeViewModel(persistence: mockPersistence, userDefaults: defaults)
         viewModel.loadAllArticles()
         #expect(viewModel.allArticlesList.count == 2)
 
@@ -1259,17 +1243,14 @@ struct HomeViewModelTests {
         // in place by the persistence layer's bulk mark-read operation.
         #expect(viewModel.allArticlesList.count == 2)
         #expect(viewModel.allArticlesList.allSatisfy { $0.isRead })
-
-        // Clean up
-        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
     }
 
     @Test("sortAscending setter is no-op when set to same value")
     @MainActor
     func sortAscendingSameValueNoOp() {
-        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
+        let defaults = UserDefaults(suiteName: UUID().uuidString)!
         let mockPersistence = MockFeedPersistenceService()
-        let viewModel = HomeViewModel(persistence: mockPersistence)
+        let viewModel = HomeViewModel(persistence: mockPersistence, userDefaults: defaults)
 
         #expect(viewModel.sortAscending == false)
 
@@ -1284,9 +1265,6 @@ struct HomeViewModelTests {
 
         viewModel.sortAscending = true
         #expect(viewModel.sortAscending == true)
-
-        // Clean up
-        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
     }
 
     // MARK: - Paginated Saved Articles
@@ -1822,7 +1800,7 @@ struct HomeViewModelTests {
     @Test("loadAllArticles preserves articleID prefix on reload")
     @MainActor
     func loadAllArticlesPreservesArticleIDPrefixOnReload() {
-        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
+        let defaults = UserDefaults(suiteName: UUID().uuidString)!
         let feed = TestFixtures.makePersistentFeed()
         let mockPersistence = MockFeedPersistenceService()
         mockPersistence.feeds = [feed]
@@ -1840,7 +1818,7 @@ struct HomeViewModelTests {
         }
         mockPersistence.articlesByFeedID[feed.id] = articles
 
-        let viewModel = HomeViewModel(persistence: mockPersistence)
+        let viewModel = HomeViewModel(persistence: mockPersistence, userDefaults: defaults)
         viewModel.loadAllArticles()
 
         #expect(viewModel.allArticlesList.count == HomeViewModel.pageSize)
@@ -1850,8 +1828,6 @@ struct HomeViewModelTests {
 
         let prefixAfter = Array(viewModel.allArticlesList.prefix(HomeViewModel.pageSize)).map(\.articleID)
         #expect(prefixAfter == prefixBefore, "loadAllArticles must preserve articleID identity for the previously loaded prefix")
-
-        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
     }
 
     /// Regression guard for #256. Companion to `loadAllArticlesPreservesArticleIDPrefixOnReload`:
@@ -1860,7 +1836,7 @@ struct HomeViewModelTests {
     @Test("loadMoreAllArticlesAndReport preserves articleID for previously loaded prefix")
     @MainActor
     func loadMoreAllArticlesAndReportPreservesArticleIDPrefix() {
-        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
+        let defaults = UserDefaults(suiteName: UUID().uuidString)!
         let feed = TestFixtures.makePersistentFeed()
         let mockPersistence = MockFeedPersistenceService()
         mockPersistence.feeds = [feed]
@@ -1876,7 +1852,7 @@ struct HomeViewModelTests {
         }
         mockPersistence.articlesByFeedID[feed.id] = articles
 
-        let viewModel = HomeViewModel(persistence: mockPersistence)
+        let viewModel = HomeViewModel(persistence: mockPersistence, userDefaults: defaults)
         viewModel.loadAllArticles()
 
         #expect(viewModel.allArticlesList.count == HomeViewModel.pageSize)
@@ -1888,8 +1864,6 @@ struct HomeViewModelTests {
 
         let prefixAfter = Array(viewModel.allArticlesList.prefix(HomeViewModel.pageSize)).map(\.articleID)
         #expect(prefixAfter == prefixBefore, "loadMoreAllArticlesAndReport must preserve articleID identity for the previously loaded prefix")
-
-        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
     }
 
     /// Regression guard for #256. Mirrors the all-articles variant for the unread pathway.
@@ -1898,7 +1872,7 @@ struct HomeViewModelTests {
     @Test("loadUnreadArticles preserves articleID prefix on reload")
     @MainActor
     func loadUnreadArticlesPreservesArticleIDPrefixOnReload() {
-        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
+        let defaults = UserDefaults(suiteName: UUID().uuidString)!
         let feed = TestFixtures.makePersistentFeed()
         let mockPersistence = MockFeedPersistenceService()
         mockPersistence.feeds = [feed]
@@ -1915,7 +1889,7 @@ struct HomeViewModelTests {
         }
         mockPersistence.articlesByFeedID[feed.id] = articles
 
-        let viewModel = HomeViewModel(persistence: mockPersistence)
+        let viewModel = HomeViewModel(persistence: mockPersistence, userDefaults: defaults)
         viewModel.loadUnreadArticles()
 
         #expect(viewModel.unreadArticlesList.count == HomeViewModel.pageSize)
@@ -1926,7 +1900,6 @@ struct HomeViewModelTests {
         let prefixAfter = Array(viewModel.unreadArticlesList.prefix(HomeViewModel.pageSize)).map(\.articleID)
         #expect(prefixAfter == prefixBefore, "loadUnreadArticles must preserve articleID identity for the previously loaded prefix")
 
-        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
     }
 
     /// Regression guard for #256. Companion to `loadUnreadArticlesPreservesArticleIDPrefixOnReload`:
@@ -1935,7 +1908,7 @@ struct HomeViewModelTests {
     @Test("loadMoreUnreadArticlesAndReport preserves articleID for previously loaded prefix")
     @MainActor
     func loadMoreUnreadArticlesAndReportPreservesArticleIDPrefix() {
-        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
+        let defaults = UserDefaults(suiteName: UUID().uuidString)!
         let feed = TestFixtures.makePersistentFeed()
         let mockPersistence = MockFeedPersistenceService()
         mockPersistence.feeds = [feed]
@@ -1952,7 +1925,7 @@ struct HomeViewModelTests {
         }
         mockPersistence.articlesByFeedID[feed.id] = articles
 
-        let viewModel = HomeViewModel(persistence: mockPersistence)
+        let viewModel = HomeViewModel(persistence: mockPersistence, userDefaults: defaults)
         viewModel.loadUnreadArticles()
 
         #expect(viewModel.unreadArticlesList.count == HomeViewModel.pageSize)
@@ -1964,8 +1937,6 @@ struct HomeViewModelTests {
 
         let prefixAfter = Array(viewModel.unreadArticlesList.prefix(HomeViewModel.pageSize)).map(\.articleID)
         #expect(prefixAfter == prefixBefore, "loadMoreUnreadArticlesAndReport must preserve articleID identity for the previously loaded prefix")
-
-        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
     }
 
     /// Regression guard for #256. Mirrors the all-articles variant for the saved-articles pathway.
@@ -1974,8 +1945,7 @@ struct HomeViewModelTests {
     @Test("loadSavedArticles preserves articleID prefix on reload")
     @MainActor
     func loadSavedArticlesPreservesArticleIDPrefixOnReload() {
-        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
-        defer { UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey) }
+        let defaults = UserDefaults(suiteName: UUID().uuidString)!
         let feed = TestFixtures.makePersistentFeed()
         let mockPersistence = MockFeedPersistenceService()
         mockPersistence.feeds = [feed]
@@ -1993,7 +1963,7 @@ struct HomeViewModelTests {
         }
         mockPersistence.articlesByFeedID[feed.id] = articles
 
-        let viewModel = HomeViewModel(persistence: mockPersistence)
+        let viewModel = HomeViewModel(persistence: mockPersistence, userDefaults: defaults)
         viewModel.loadSavedArticles()
 
         #expect(viewModel.savedArticlesList.count == HomeViewModel.pageSize)

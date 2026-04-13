@@ -166,9 +166,7 @@ struct ArticleListSourceTests {
     @Test("SavedArticlesSource.toggleSaved keeps the article in the list")
     @MainActor
     func savedArticlesSourceToggleSavedKeepsArticle() {
-        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
-        defer { UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey) }
-
+        let defaults = UserDefaults(suiteName: UUID().uuidString)!
         let feed = TestFixtures.makePersistentFeed()
         let mockPersistence = MockFeedPersistenceService()
         mockPersistence.feeds = [feed]
@@ -182,7 +180,7 @@ struct ArticleListSourceTests {
         saved.feed = feed
         mockPersistence.articlesByFeedID[feed.id] = [saved]
 
-        let viewModel = HomeViewModel(persistence: mockPersistence)
+        let viewModel = HomeViewModel(persistence: mockPersistence, userDefaults: defaults)
         let source = SavedArticlesSource(homeViewModel: viewModel)
 
         viewModel.loadSavedArticles()
@@ -205,9 +203,7 @@ struct ArticleListSourceTests {
     @Test("UnreadArticlesSource.markAllAsRead preserves the list snapshot")
     @MainActor
     func unreadArticlesSourceMarkAllAsReadPreservesSnapshot() {
-        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
-        defer { UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey) }
-
+        let defaults = UserDefaults(suiteName: UUID().uuidString)!
         let feed = TestFixtures.makePersistentFeed()
         let mockPersistence = MockFeedPersistenceService()
         mockPersistence.feeds = [feed]
@@ -226,7 +222,7 @@ struct ArticleListSourceTests {
         article2.feed = feed
         mockPersistence.articlesByFeedID[feed.id] = [article1, article2]
 
-        let viewModel = HomeViewModel(persistence: mockPersistence)
+        let viewModel = HomeViewModel(persistence: mockPersistence, userDefaults: defaults)
         let source = UnreadArticlesSource(homeViewModel: viewModel)
 
         viewModel.loadUnreadArticles()
@@ -354,8 +350,7 @@ struct ArticleListSourceTests {
     @Test("SavedArticlesSource.markAllAsRead only marks saved articles as read")
     @MainActor
     func savedArticlesSourceMarkAllAsReadScoped() {
-        UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey)
-        defer { UserDefaults.standard.removeObject(forKey: FeedViewModel.sortAscendingKey) }
+        let defaults = UserDefaults(suiteName: UUID().uuidString)!
 
         let feed = TestFixtures.makePersistentFeed()
         let mockPersistence = MockFeedPersistenceService()
@@ -378,7 +373,7 @@ struct ArticleListSourceTests {
         unsavedUnread.feed = feed
         mockPersistence.articlesByFeedID[feed.id] = [saved, unsavedUnread]
 
-        let viewModel = HomeViewModel(persistence: mockPersistence)
+        let viewModel = HomeViewModel(persistence: mockPersistence, userDefaults: defaults)
         let source = SavedArticlesSource(homeViewModel: viewModel)
 
         viewModel.loadSavedArticles()

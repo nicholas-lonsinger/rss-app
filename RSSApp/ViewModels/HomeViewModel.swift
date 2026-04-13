@@ -75,18 +75,19 @@ final class HomeViewModel {
     // to reload their own specific list. Callers toggle the property then call the
     // appropriate reload method (loadAllArticles, loadUnreadArticles, or
     // loadSavedArticles) for their view.
-    /// Current sort order — reads from the global UserDefaults preference.
+    /// Current sort order — reads from the injected UserDefaults instance.
     var sortAscending: Bool {
-        get { UserDefaults.standard.bool(forKey: FeedViewModel.sortAscendingKey) }
+        get { userDefaults.bool(forKey: FeedViewModel.sortAscendingKey) }
         set {
-            guard UserDefaults.standard.bool(forKey: FeedViewModel.sortAscendingKey) != newValue else { return }
-            UserDefaults.standard.set(newValue, forKey: FeedViewModel.sortAscendingKey)
+            guard userDefaults.bool(forKey: FeedViewModel.sortAscendingKey) != newValue else { return }
+            userDefaults.set(newValue, forKey: FeedViewModel.sortAscendingKey)
             Self.logger.debug("sortAscending changed to \(newValue, privacy: .public)")
         }
     }
 
     private let persistence: FeedPersisting
     private let badgeService: AppBadgeUpdating
+    private let userDefaults: UserDefaults
 
     /// Async closure that performs the actual network feed refresh.
     /// Returns an error message string on failure, or nil on success.
@@ -96,10 +97,12 @@ final class HomeViewModel {
     init(
         persistence: FeedPersisting,
         badgeService: AppBadgeUpdating = AppBadgeService(),
+        userDefaults: UserDefaults = .standard,
         refreshFeeds: (@Sendable () async -> String?)? = nil
     ) {
         self.persistence = persistence
         self.badgeService = badgeService
+        self.userDefaults = userDefaults
         self.refreshFeeds = refreshFeeds
     }
 
