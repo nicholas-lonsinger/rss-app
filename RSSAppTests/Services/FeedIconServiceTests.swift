@@ -72,16 +72,16 @@ struct FeedIconServiceTests {
 
     // MARK: - assembleCandidates (priority ordering)
 
-    @Test("og:image appears before link icons in candidates")
+    @Test("og:image appears before link icons in candidates (no platform redirect)")
     func assembleCandidatesOgImageBeforeLinkIcons() {
         let siteURL = URL(string: "https://myblog.example.com")!
         let ogImage = URL(string: "https://cdn.example.com/blog-logo.png")!
-        let linkIcon = URL(string: "https://medium.com/favicon.png")!
+        let linkIcon = URL(string: "https://myblog.example.com/favicon.png")!
         let htmlResult = FeedIconService.HTMLIconResult(
             linkIcons: [linkIcon],
             appleTouchIconURLs: [],
             ogImageURL: ogImage,
-            redirectedHost: "medium.com"
+            redirectedHost: nil
         )
 
         let candidates = FeedIconService.assembleCandidates(
@@ -97,6 +97,33 @@ struct FeedIconServiceTests {
             return
         }
         #expect(ogIndex < linkIndex)
+    }
+
+    @Test("Platform redirect skips HTML icons (og:image, link icons, apple-touch-icons)")
+    func assembleCandidatesPlatformRedirectSkipsHTMLIcons() {
+        let siteURL = URL(string: "https://myblog.example.com")!
+        let ogImage = URL(string: "https://medium.com/og-generic.png")!
+        let appleTouchIcon = URL(string: "https://medium.com/apple-touch.png")!
+        let linkIcon = URL(string: "https://medium.com/favicon.png")!
+        let htmlResult = FeedIconService.HTMLIconResult(
+            linkIcons: [appleTouchIcon, linkIcon],
+            appleTouchIconURLs: [appleTouchIcon],
+            ogImageURL: ogImage,
+            redirectedHost: "medium.com"
+        )
+
+        let candidates = FeedIconService.assembleCandidates(
+            feedSiteURL: siteURL,
+            feedImageURL: nil,
+            htmlResult: htmlResult
+        )
+
+        // Platform-redirect HTML icons are skipped; only the two favicon.ico fallbacks remain
+        #expect(!candidates.contains(ogImage), "Platform og:image should be excluded")
+        #expect(!candidates.contains(appleTouchIcon), "Platform apple-touch-icon should be excluded")
+        #expect(!candidates.contains(linkIcon), "Platform link icon should be excluded")
+        #expect(candidates.contains(URL(string: "https://myblog.example.com/favicon.ico")!))
+        #expect(candidates.contains(URL(string: "https://medium.com/favicon.ico")!))
     }
 
     @Test("Feed image URL appears before og:image in candidates")
@@ -172,8 +199,39 @@ struct FeedIconServiceTests {
         #expect(candidates[0] == URL(string: "https://example.com/favicon.ico")!)
     }
 
-    @Test("Full priority order with all sources present")
+    @Test("Full priority order with all sources present (no platform redirect)")
     func assembleCandidatesFullPriorityOrder() {
+        let feedImage = URL(string: "https://myblog.example.com/rss-logo.png")!
+        let siteURL = URL(string: "https://myblog.example.com")!
+        let ogImage = URL(string: "https://myblog.example.com/og-cover.jpg")!
+        let appleTouchIcon = URL(string: "https://myblog.example.com/apple-touch.png")!
+        let linkIcon = URL(string: "https://myblog.example.com/favicon.png")!
+        let htmlResult = FeedIconService.HTMLIconResult(
+            linkIcons: [appleTouchIcon, linkIcon],
+            appleTouchIconURLs: [appleTouchIcon],
+            ogImageURL: ogImage,
+            redirectedHost: nil
+        )
+
+        let candidates = FeedIconService.assembleCandidates(
+            feedSiteURL: siteURL,
+            feedImageURL: feedImage,
+            htmlResult: htmlResult
+        )
+
+        let originalFavicon = URL(string: "https://myblog.example.com/favicon.ico")!
+
+        // Verify all 5 candidates present in correct priority order
+        #expect(candidates.count == 5)
+        #expect(candidates[0] == feedImage)           // Priority 1
+        #expect(candidates[1] == ogImage)             // Priority 2
+        #expect(candidates[2] == appleTouchIcon)      // Priority 3a
+        #expect(candidates[3] == linkIcon)            // Priority 3b
+        #expect(candidates[4] == originalFavicon)     // Priority 4
+    }
+
+    @Test("Full priority order with platform redirect: only feed image and favicons")
+    func assembleCandidatesFullPriorityOrderWithPlatformRedirect() {
         let feedImage = URL(string: "https://myblog.example.com/rss-logo.png")!
         let siteURL = URL(string: "https://myblog.example.com")!
         let ogImage = URL(string: "https://cdn.medium.com/blog-cover.jpg")!
@@ -195,14 +253,12 @@ struct FeedIconServiceTests {
         let originalFavicon = URL(string: "https://myblog.example.com/favicon.ico")!
         let redirectedFavicon = URL(string: "https://medium.com/favicon.ico")!
 
-        // Verify all 6 candidates present in correct priority order
-        #expect(candidates.count == 6)
+        // Platform redirect: HTML icons (og:image, apple-touch-icon, link icon) are skipped.
+        // Only feed XML image and favicon fallbacks remain.
+        #expect(candidates.count == 3)
         #expect(candidates[0] == feedImage)           // Priority 1
-        #expect(candidates[1] == ogImage)             // Priority 2
-        #expect(candidates[2] == appleTouchIcon)      // Priority 3a
-        #expect(candidates[3] == linkIcon)            // Priority 3b
-        #expect(candidates[4] == originalFavicon)     // Priority 4
-        #expect(candidates[5] == redirectedFavicon)   // Priority 5
+        #expect(candidates[1] == originalFavicon)     // Priority 4
+        #expect(candidates[2] == redirectedFavicon)   // Priority 5
     }
 
     @Test("assembleCandidates returns empty when no inputs provided")
@@ -272,6 +328,30 @@ struct FeedIconServiceTests {
 
         let candidate = candidates.first { $0.url == appleTouchIcon }
         #expect(candidate?.type == .appleTouchIcon)
+    }
+
+    @Test("Cross-domain apple-touch-icon is downgraded to .linkIcon type")
+    func assembleTypedCandidatesCrossDomainAppleTouchIconDowngraded() {
+        // Scenario: netflixtechblog.com served via CNAME by Medium — the apple-touch-icon
+        // URL points to Medium's CDN (miro.medium.com), not the publication's own domain.
+        // It should be treated as .linkIcon (lower type bonus) so the publication-specific
+        // og:image can win over the platform's generic icon.
+        let appleTouchIcon = URL(string: "https://miro.medium.com/max/192/1*abc.png")!
+        let htmlResult = FeedIconService.HTMLIconResult(
+            linkIcons: [appleTouchIcon],
+            appleTouchIconURLs: [appleTouchIcon],
+            ogImageURL: nil,
+            redirectedHost: nil
+        )
+
+        let candidates = FeedIconService.assembleTypedCandidates(
+            feedSiteURL: URL(string: "https://netflixtechblog.com")!,
+            feedImageURL: nil,
+            htmlResult: htmlResult
+        )
+
+        let candidate = candidates.first { $0.url == appleTouchIcon }
+        #expect(candidate?.type == .linkIcon, "Cross-domain apple-touch-icon should be downgraded to .linkIcon")
     }
 
     @Test("Link icon candidates not in appleTouchIconURLs are assigned .linkIcon type")

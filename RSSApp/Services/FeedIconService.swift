@@ -433,27 +433,59 @@ struct FeedIconService: FeedIconResolving {
             candidates.append(IconCandidate(url: normalizeIconURL(feedImageURL), type: .feedXML))
         }
 
-        if let htmlResult {
-            // Priority 2: og:image from homepage — often blog-specific branding, which
-            // survives platform redirects (Medium, Substack, Ghost) better than link icons
-            if let ogImageURL = htmlResult.ogImageURL {
-                candidates.append(IconCandidate(url: ogImageURL, type: .ogImage))
-            }
+        let siteHost = feedSiteURL?.host(percentEncoded: false)
 
-            // Priority 3: HTML link icons (apple-touch-icon first, then rel="icon")
-            // HTMLUtilities.extractIconURLs already orders apple-touch-icons before rel="icon".
-            // We determine the candidate type by checking whether the URL also appears in the
-            // apple-touch-icon URL set produced by extractIconURLs' priority partition.
-            let appleTouchIconURLs = Set(htmlResult.appleTouchIconURLs)
-            for linkURL in htmlResult.linkIcons {
-                let candidateType: IconCandidateType = appleTouchIconURLs.contains(linkURL) ? .appleTouchIcon : .linkIcon
-                candidates.append(IconCandidate(url: linkURL, type: candidateType))
+        if let htmlResult {
+            // When the site URL redirected to a different platform domain (e.g.,
+            // bothsidesofthetable.com → medium.com), the HTML icons extracted from
+            // the redirect destination belong to the platform (Medium's "M" logo,
+            // Medium's generic og:image), not the publication. Skip them entirely —
+            // the feed XML image and the original-host /favicon.ico (Priority 4)
+            // are better sources for platform-hosted blogs.
+            let platformRedirectDetected = htmlResult.redirectedHost != nil
+
+            if !platformRedirectDetected {
+                // Priority 2: og:image from homepage.
+                // When the site URL is served at its own domain (including CNAME-based
+                // platform hosting like Medium custom domains), the og:image is
+                // publication-specific branding and is worth trying as a candidate.
+                if let ogImageURL = htmlResult.ogImageURL {
+                    candidates.append(IconCandidate(url: ogImageURL, type: .ogImage))
+                }
+
+                // Priority 3: HTML link icons (apple-touch-icon first, then rel="icon").
+                // HTMLUtilities.extractIconURLs already orders apple-touch-icons before rel="icon".
+                // We determine the candidate type by checking whether the URL also appears in the
+                // apple-touch-icon URL set produced by extractIconURLs' priority partition.
+                //
+                // Cross-domain apple-touch-icons (e.g., Medium CDN URLs served from
+                // miro.medium.com for a netflixtechblog.com publication) are downgraded to
+                // .linkIcon type — they carry the platform's branding, not the blog's,
+                // and the reduced type bonus lets a publication-specific og:image win.
+                let appleTouchIconURLs = Set(htmlResult.appleTouchIconURLs)
+                for linkURL in htmlResult.linkIcons {
+                    let iconIsFromSameHost = siteHost == nil || linkURL.host(percentEncoded: false) == siteHost
+                    let isAppleTouchIcon = appleTouchIconURLs.contains(linkURL)
+                    let candidateType: IconCandidateType
+                    if isAppleTouchIcon && iconIsFromSameHost {
+                        candidateType = .appleTouchIcon
+                    } else if isAppleTouchIcon {
+                        // Cross-domain apple-touch-icon: likely a platform CDN icon (Medium, Substack, etc.)
+                        // that does not represent the blog's branding — use the lower linkIcon bonus.
+                        candidateType = .linkIcon
+                    } else {
+                        candidateType = .linkIcon
+                    }
+                    candidates.append(IconCandidate(url: linkURL, type: candidateType))
+                }
             }
         }
 
-        // Priority 4: /favicon.ico fallback from the original site host
+        // Priority 4: /favicon.ico fallback from the original site host.
+        // For platform-redirected blogs this is a first-resort rather than a fallback:
+        // it probes the original domain directly, bypassing the platform redirect.
         if let siteURL = feedSiteURL,
-           let host = siteURL.host(percentEncoded: false),
+           let host = siteHost,
            !host.isEmpty,
            let faviconURL = URL(string: "\(siteURL.scheme ?? "https")://\(host)/favicon.ico") {
             candidates.append(IconCandidate(url: faviconURL, type: .faviconICO))
@@ -465,7 +497,7 @@ struct FeedIconService: FeedIconResolving {
         // but kept as a defensive safety net in case the struct's construction logic changes.
         if let redirectedHost = htmlResult?.redirectedHost,
            let siteURL = feedSiteURL,
-           redirectedHost != siteURL.host(percentEncoded: false),
+           redirectedHost != siteHost,
            let faviconURL = URL(string: "\(siteURL.scheme ?? "https")://\(redirectedHost)/favicon.ico") {
             candidates.append(IconCandidate(url: faviconURL, type: .faviconICO))
         }
