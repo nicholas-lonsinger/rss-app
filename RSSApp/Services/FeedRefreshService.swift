@@ -28,16 +28,6 @@ final class FeedRefreshService {
     /// entry refreshes even when the previous refresh came from a `BGTask`.
     static let lastRefreshCompletedKey = "feedRefresh.lastCompletedAt"
 
-    /// Wall-clock timestamp of the most recent `.completed` refresh outcome,
-    /// across any caller in the process. `nil` when no refresh has ever
-    /// completed on this install. Read by `HomeViewModel.shouldRefreshOnEntry`
-    /// to decide whether a cross-feed list entry should trigger a fresh
-    /// network refresh or rely on the most recent cached snapshot.
-    static var lastRefreshCompletedAt: Date? {
-        let ts = UserDefaults.standard.double(forKey: lastRefreshCompletedKey)
-        return ts > 0 ? Date(timeIntervalSince1970: ts) : nil
-    }
-
     // MARK: - Dependencies
 
     private let persistence: FeedPersisting
@@ -47,6 +37,7 @@ final class FeedRefreshService {
     private let articleRetention: ArticleRetaining
     private let thumbnailService: ArticleThumbnailCaching
     private let networkMonitor: NetworkMonitoring
+    private let userDefaults: UserDefaults
 
     /// Background thumbnail prefetch task kicked off at the end of a refresh.
     /// Retained so `awaitPendingWork()` can drain it on behalf of a background
@@ -90,7 +81,8 @@ final class FeedRefreshService {
         thumbnailPrefetcher: ThumbnailPrefetching? = nil,
         articleRetention: ArticleRetaining = ArticleRetentionService(),
         thumbnailService: ArticleThumbnailCaching = ArticleThumbnailService(),
-        networkMonitor: NetworkMonitoring? = nil
+        networkMonitor: NetworkMonitoring? = nil,
+        userDefaults: UserDefaults = .standard
     ) {
         self.persistence = persistence
         self.feedFetching = feedFetching
@@ -103,6 +95,7 @@ final class FeedRefreshService {
         self.articleRetention = articleRetention
         self.thumbnailService = thumbnailService
         self.networkMonitor = resolvedMonitor
+        self.userDefaults = userDefaults
 
         // Observe the WiFi-only setting change notification so that toggling
         // the setting while a prefetch batch is in flight promptly cancels any
@@ -262,7 +255,7 @@ final class FeedRefreshService {
         // and `.cancelled` intentionally leave the timestamp alone so the
         // throttle doesn't swallow those paths on the next entry.
         if case .completed = outcome {
-            UserDefaults.standard.set(
+            userDefaults.set(
                 Date().timeIntervalSince1970,
                 forKey: Self.lastRefreshCompletedKey
             )

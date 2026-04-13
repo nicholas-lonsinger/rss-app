@@ -15,25 +15,25 @@ final class HomeViewModel {
     /// Articles` in rapid succession should see cached data on the second
     /// entry rather than stacking redundant refreshes. Pull-to-refresh is
     /// never throttled — it's an explicit user action that bypasses the gate.
-    /// Background refresh updates the same timestamp via
-    /// `FeedRefreshService.lastRefreshCompletedAt`, so the throttle honors BG
-    /// work as well as foreground work.
+    /// Background refresh updates the same timestamp via the injected
+    /// `UserDefaults` instance (key: `FeedRefreshService.lastRefreshCompletedKey`),
+    /// so the throttle honors BG work as well as foreground work.
     static let entryRefreshInterval: TimeInterval = 5 * 60
 
     /// Whether a fresh on-entry network refresh should be triggered. Reads the
-    /// process-wide `FeedRefreshService.lastRefreshCompletedAt` timestamp
-    /// (shared with the BG refresh path) and compares it against
-    /// `entryRefreshInterval`. Returns `true` when no refresh has ever
-    /// completed on this install, or when the most recent completion is
-    /// older than the interval. Used by `AllArticlesSource`,
-    /// `UnreadArticlesSource`, and `GroupArticleSource` to gate the
-    /// `refreshAllFeeds()` call in their `initialLoad()`;
-    /// `SavedArticlesSource` does not consult it at all because saved
-    /// articles never benefit from a feed refresh.
+    /// last-refresh timestamp from the injected `UserDefaults` instance using
+    /// `FeedRefreshService.lastRefreshCompletedKey` (shared with the BG refresh
+    /// path) and compares it against `entryRefreshInterval`. Returns `true`
+    /// when no refresh has ever completed on this install, or when the most
+    /// recent completion is older than the interval. Used by
+    /// `AllArticlesSource`, `UnreadArticlesSource`, and `GroupArticleSource`
+    /// to gate the `refreshAllFeeds()` call in their `initialLoad()`;
+    /// `SavedArticlesSource` does not consult it at all because saved articles
+    /// never benefit from a feed refresh.
     var shouldRefreshOnEntry: Bool {
-        guard let last = FeedRefreshService.lastRefreshCompletedAt else {
-            return true
-        }
+        let ts = userDefaults.double(forKey: FeedRefreshService.lastRefreshCompletedKey)
+        guard ts > 0 else { return true }
+        let last = Date(timeIntervalSince1970: ts)
         return Date().timeIntervalSince(last) > Self.entryRefreshInterval
     }
 

@@ -1083,35 +1083,38 @@ struct HomeViewModelTests {
     @Test("shouldRefreshOnEntry returns true when no refresh has ever completed")
     @MainActor
     func shouldRefreshOnEntryNeverRefreshed() {
-        UserDefaults.standard.removeObject(forKey: FeedRefreshService.lastRefreshCompletedKey)
-        let viewModel = HomeViewModel(persistence: MockFeedPersistenceService(), userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
+        let defaults = UserDefaults(suiteName: "test.shouldRefreshOnEntry.neverRefreshed")!
+        defaults.removePersistentDomain(forName: "test.shouldRefreshOnEntry.neverRefreshed")
+        let viewModel = HomeViewModel(persistence: MockFeedPersistenceService(), userDefaults: defaults)
         #expect(viewModel.shouldRefreshOnEntry == true)
     }
 
     @Test("shouldRefreshOnEntry returns false when refresh is within throttle window")
     @MainActor
     func shouldRefreshOnEntryWithinWindow() {
-        UserDefaults.standard.set(
+        let defaults = UserDefaults(suiteName: "test.shouldRefreshOnEntry.withinWindow")!
+        defaults.removePersistentDomain(forName: "test.shouldRefreshOnEntry.withinWindow")
+        defaults.set(
             Date().timeIntervalSince1970,
             forKey: FeedRefreshService.lastRefreshCompletedKey
         )
-        defer { UserDefaults.standard.removeObject(forKey: FeedRefreshService.lastRefreshCompletedKey) }
 
-        let viewModel = HomeViewModel(persistence: MockFeedPersistenceService(), userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
+        let viewModel = HomeViewModel(persistence: MockFeedPersistenceService(), userDefaults: defaults)
         #expect(viewModel.shouldRefreshOnEntry == false)
     }
 
     @Test("shouldRefreshOnEntry returns true when refresh is older than throttle window")
     @MainActor
     func shouldRefreshOnEntryOutsideWindow() {
+        let defaults = UserDefaults(suiteName: "test.shouldRefreshOnEntry.outsideWindow")!
+        defaults.removePersistentDomain(forName: "test.shouldRefreshOnEntry.outsideWindow")
         let sixMinutesAgo = Date().addingTimeInterval(-(6 * 60))
-        UserDefaults.standard.set(
+        defaults.set(
             sixMinutesAgo.timeIntervalSince1970,
             forKey: FeedRefreshService.lastRefreshCompletedKey
         )
-        defer { UserDefaults.standard.removeObject(forKey: FeedRefreshService.lastRefreshCompletedKey) }
 
-        let viewModel = HomeViewModel(persistence: MockFeedPersistenceService(), userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
+        let viewModel = HomeViewModel(persistence: MockFeedPersistenceService(), userDefaults: defaults)
         #expect(viewModel.shouldRefreshOnEntry == true)
     }
 

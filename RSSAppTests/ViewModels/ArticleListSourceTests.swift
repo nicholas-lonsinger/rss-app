@@ -98,9 +98,10 @@ struct ArticleListSourceTests {
     @Test("AllArticlesSource.initialLoad triggers refresh closure on first entry")
     @MainActor
     func allArticlesSourceInitialLoadTriggersRefresh() async {
-        // Clear any ambient throttle timestamp from other tests so this
+        // Use an isolated UserDefaults suite with no throttle timestamp so this
         // asserts the "first entry" path unambiguously.
-        UserDefaults.standard.removeObject(forKey: FeedRefreshService.lastRefreshCompletedKey)
+        let defaults = UserDefaults(suiteName: "test.allArticles.initialLoad.triggers")!
+        defaults.removePersistentDomain(forName: "test.allArticles.initialLoad.triggers")
 
         let probe = RefreshProbe()
         let mockPersistence = MockFeedPersistenceService()
@@ -113,6 +114,7 @@ struct ArticleListSourceTests {
 
         let viewModel = HomeViewModel(
             persistence: mockPersistence,
+            userDefaults: defaults,
             refreshFeeds: {
                 await probe.recordCall()
                 return nil
@@ -129,7 +131,8 @@ struct ArticleListSourceTests {
     @Test("UnreadArticlesSource.initialLoad triggers refresh closure on first entry")
     @MainActor
     func unreadArticlesSourceInitialLoadTriggersRefresh() async {
-        UserDefaults.standard.removeObject(forKey: FeedRefreshService.lastRefreshCompletedKey)
+        let defaults = UserDefaults(suiteName: "test.unreadArticles.initialLoad.triggers")!
+        defaults.removePersistentDomain(forName: "test.unreadArticles.initialLoad.triggers")
 
         let probe = RefreshProbe()
         let mockPersistence = MockFeedPersistenceService()
@@ -142,6 +145,7 @@ struct ArticleListSourceTests {
 
         let viewModel = HomeViewModel(
             persistence: mockPersistence,
+            userDefaults: defaults,
             refreshFeeds: {
                 await probe.recordCall()
                 return nil
@@ -238,17 +242,17 @@ struct ArticleListSourceTests {
 
     /// Follow-up to cross-feed refresh: rapid navigation across sibling cross-feed lists (or
     /// re-entry within the throttle window) must NOT stack redundant network
-    /// refreshes. Seeds the shared `FeedRefreshService.lastRefreshCompletedKey`
-    /// UserDefaults entry to "just now" and then asserts `initialLoad()` does
-    /// not call the refresh closure.
+    /// refreshes. Seeds the injected UserDefaults suite with a "just now"
+    /// timestamp and then asserts `initialLoad()` does not call the refresh closure.
     @Test("AllArticlesSource.initialLoad skips refresh when within throttle window")
     @MainActor
     func allArticlesSourceInitialLoadThrottled() async {
-        UserDefaults.standard.set(
+        let defaults = UserDefaults(suiteName: "test.allArticles.initialLoad.throttled")!
+        defaults.removePersistentDomain(forName: "test.allArticles.initialLoad.throttled")
+        defaults.set(
             Date().timeIntervalSince1970,
             forKey: FeedRefreshService.lastRefreshCompletedKey
         )
-        defer { UserDefaults.standard.removeObject(forKey: FeedRefreshService.lastRefreshCompletedKey) }
 
         let probe = RefreshProbe()
         let mockPersistence = MockFeedPersistenceService()
@@ -260,6 +264,7 @@ struct ArticleListSourceTests {
 
         let viewModel = HomeViewModel(
             persistence: mockPersistence,
+            userDefaults: defaults,
             refreshFeeds: {
                 await probe.recordCall()
                 return nil
@@ -281,9 +286,10 @@ struct ArticleListSourceTests {
     @Test("AllArticlesSource.initialLoad refreshes when throttle window has elapsed")
     @MainActor
     func allArticlesSourceInitialLoadRefreshesWhenStale() async {
+        let defaults = UserDefaults(suiteName: "test.allArticles.initialLoad.stale")!
+        defaults.removePersistentDomain(forName: "test.allArticles.initialLoad.stale")
         let tenMinutesAgo = Date().addingTimeInterval(-600).timeIntervalSince1970
-        UserDefaults.standard.set(tenMinutesAgo, forKey: FeedRefreshService.lastRefreshCompletedKey)
-        defer { UserDefaults.standard.removeObject(forKey: FeedRefreshService.lastRefreshCompletedKey) }
+        defaults.set(tenMinutesAgo, forKey: FeedRefreshService.lastRefreshCompletedKey)
 
         let probe = RefreshProbe()
         let mockPersistence = MockFeedPersistenceService()
@@ -292,6 +298,7 @@ struct ArticleListSourceTests {
 
         let viewModel = HomeViewModel(
             persistence: mockPersistence,
+            userDefaults: defaults,
             refreshFeeds: {
                 await probe.recordCall()
                 return nil
@@ -312,8 +319,10 @@ struct ArticleListSourceTests {
     @Test("SavedArticlesSource.initialLoad never triggers network refresh")
     @MainActor
     func savedArticlesSourceInitialLoadNeverRefreshes() async {
-        // Clear any ambient throttle state so this is the unambiguous case.
-        UserDefaults.standard.removeObject(forKey: FeedRefreshService.lastRefreshCompletedKey)
+        // Use an isolated UserDefaults suite with no throttle state so this
+        // is the unambiguous case.
+        let defaults = UserDefaults(suiteName: "test.savedArticles.initialLoad.neverRefreshes")!
+        defaults.removePersistentDomain(forName: "test.savedArticles.initialLoad.neverRefreshes")
 
         let probe = RefreshProbe()
         let mockPersistence = MockFeedPersistenceService()
@@ -326,6 +335,7 @@ struct ArticleListSourceTests {
 
         let viewModel = HomeViewModel(
             persistence: mockPersistence,
+            userDefaults: defaults,
             refreshFeeds: {
                 await probe.recordCall()
                 return nil
