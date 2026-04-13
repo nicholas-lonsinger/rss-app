@@ -172,7 +172,7 @@ struct FeedIconView: View {
         Self.logger.notice("Resolved icon on-view for feed \(feedID.uuidString, privacy: .public)")
         let validated = await iconService.loadValidatedIcon(for: feedID)
         if validated == nil {
-            Self.logger.warning("Icon resolved for feed \(feedID.uuidString, privacy: .public) but failed post-cache validation")
+            Self.logger.info("Icon resolved for feed \(feedID.uuidString, privacy: .public) but failed post-cache validation")
         }
         iconImage = validated
 
