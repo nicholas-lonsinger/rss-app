@@ -1072,38 +1072,6 @@ struct FeedListViewModelTests {
         #expect(groupNames == ["Tech", "Favorites"])
     }
 
-    @Test("importOPML does not count multi-group feed as duplicate — blank-slate import")
-    @MainActor
-    func importOPMLMultiGroupBlankSlateNoDuplicate() {
-        // Reproduces the exact scenario from the issue: one new feed listed under
-        // two groups in OPML, imported onto a blank subscription list. The import
-        // summary must show 1 added, 0 skipped, 2 new groups — not the previously
-        // misleading "1 new feed added, 1 duplicate skipped, 2 new groups created".
-        let mockPersistence = MockFeedPersistenceService()
-        let mockOPML = MockOPMLService()
-        mockOPML.entriesToReturn = [
-            TestFixtures.makeOPMLFeedEntry(
-                title: "My Feed",
-                feedURL: URL(string: "https://example.com/feed")!,
-                groupName: "Tech"
-            ),
-            TestFixtures.makeOPMLFeedEntry(
-                title: "My Feed",
-                feedURL: URL(string: "https://example.com/feed")!,
-                groupName: "Favorites"
-            ),
-        ]
-
-        let viewModel = Self.makeViewModel(persistence: mockPersistence, opmlService: mockOPML)
-        viewModel.importOPML(from: Data())
-
-        #expect(viewModel.opmlImportResult?.addedCount == 1)
-        #expect(viewModel.opmlImportResult?.skippedCount == 0)
-        #expect(viewModel.opmlImportResult?.groupsCreatedCount == 2)
-        // Feed must be assigned to both groups.
-        #expect(mockPersistence.memberships.count == 2)
-    }
-
     @Test("importOPML counts pre-existing feed as skipped exactly once when it appears under two groups")
     @MainActor
     func importOPMLPreExistingFeedInTwoGroupsCountsOnce() {

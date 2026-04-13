@@ -225,14 +225,15 @@ final class FeedListViewModel {
                 // subscription list before the import started. A feed added
                 // earlier in this same import appearing under another group is
                 // normal multi-group OPML structure and must not be reported as
-                // a duplicate. Also deduplicate: count each pre-existing URL at
-                // most once even if it appears under multiple groups in the file.
+                // a duplicate.
                 if preImportURLs.contains(entry.feedURL), !skippedURLs.contains(entry.feedURL) {
                     skippedCount += 1
                     skippedURLs.insert(entry.feedURL)
                     Self.logger.debug("Skipped duplicate: \(entry.feedURL.absoluteString, privacy: .public)")
                 } else if !preImportURLs.contains(entry.feedURL) {
                     Self.logger.debug("Multi-group entry (not a duplicate): \(entry.feedURL.absoluteString, privacy: .public)")
+                } else {
+                    Self.logger.debug("Pre-existing duplicate already counted, skipping: \(entry.feedURL.absoluteString, privacy: .public)")
                 }
             } else {
                 let newFeed = PersistentFeed(
