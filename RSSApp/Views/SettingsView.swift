@@ -80,9 +80,9 @@ struct SettingsView: View {
             }
 
             NavigationLink {
-                APIKeySettingsView()
+                AISettingsView()
             } label: {
-                Label("API Key", systemImage: "key")
+                Label("AI", systemImage: "sparkles")
             }
 
             NavigationLink {

@@ -9,13 +9,6 @@ import Testing
 @Suite("ClaudeAPIService — sendMessage integration")
 struct ClaudeAPIServiceSendMessageTests {
 
-    private func makeTestDefaults() -> UserDefaults {
-        let suiteName = "com.rssapp.test.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suiteName)!
-        defaults.removePersistentDomain(forName: suiteName)
-        return defaults
-    }
-
     /// Helper: collects all yielded chunks from the stream, or throws if the stream errors.
     private func collectStream(_ stream: AsyncThrowingStream<String, Error>) async throws -> [String] {
         var chunks: [String] = []
@@ -45,21 +38,26 @@ struct ClaudeAPIServiceSendMessageTests {
         "not valid json"
     }
 
+    private func makeSendMessage(mock: MockURLSessionBytesProvider) async throws -> AsyncThrowingStream<String, Error> {
+        let service = ClaudeAPIService(session: mock)
+        return try await service.sendMessage(
+            systemPrompt: "test",
+            messages: [ChatMessage(role: .user, content: "hi")],
+            model: "claude-haiku-4-5-20251001",
+            maxTokens: 4096,
+            apiKey: "sk-test"
+        )
+    }
+
     // MARK: - Threshold reached: consecutive .decodeFailed triggers error
 
     @Test("sendMessage throws excessiveDecodeFailures after 5 consecutive decode failures")
     func consecutiveDecodeFailuresReachThreshold() async throws {
         let mock = MockURLSessionBytesProvider()
         mock.lines = sseLines(Array(repeating: decodeFailedJSON, count: 5))
-        let service = ClaudeAPIService(defaults: makeTestDefaults(), session: mock)
+        let stream = try await makeSendMessage(mock: mock)
 
-        let stream = try await service.sendMessage(
-            systemPrompt: "test",
-            messages: [ChatMessage(role: .user, content: "hi")],
-            apiKey: "sk-test"
-        )
-
-        await #expect(throws: ClaudeAPIError.self) {
+        await #expect(throws: AIServiceError.self) {
             _ = try await collectStream(stream)
         }
     }
@@ -68,18 +66,12 @@ struct ClaudeAPIServiceSendMessageTests {
     func excessiveDecodeFailuresCount() async throws {
         let mock = MockURLSessionBytesProvider()
         mock.lines = sseLines(Array(repeating: decodeFailedJSON, count: 5))
-        let service = ClaudeAPIService(defaults: makeTestDefaults(), session: mock)
-
-        let stream = try await service.sendMessage(
-            systemPrompt: "test",
-            messages: [ChatMessage(role: .user, content: "hi")],
-            apiKey: "sk-test"
-        )
+        let stream = try await makeSendMessage(mock: mock)
 
         do {
             _ = try await collectStream(stream)
             Issue.record("Expected stream to throw")
-        } catch let error as ClaudeAPIError {
+        } catch let error as AIServiceError {
             guard case .excessiveDecodeFailures(let count) = error else {
                 Issue.record("Expected excessiveDecodeFailures, got \(error)")
                 return
@@ -95,13 +87,7 @@ struct ClaudeAPIServiceSendMessageTests {
         let mock = MockURLSessionBytesProvider()
         // 4 failures (below threshold of 5), then stream ends normally
         mock.lines = sseLines(Array(repeating: decodeFailedJSON, count: 4))
-        let service = ClaudeAPIService(defaults: makeTestDefaults(), session: mock)
-
-        let stream = try await service.sendMessage(
-            systemPrompt: "test",
-            messages: [ChatMessage(role: .user, content: "hi")],
-            apiKey: "sk-test"
-        )
+        let stream = try await makeSendMessage(mock: mock)
 
         let chunks = try await collectStream(stream)
         #expect(chunks.isEmpty)
@@ -118,13 +104,7 @@ struct ClaudeAPIServiceSendMessageTests {
         lines.append(textDeltaJSON("reset"))
         lines.append(contentsOf: Array(repeating: decodeFailedJSON, count: 4))
         mock.lines = sseLines(lines)
-        let service = ClaudeAPIService(defaults: makeTestDefaults(), session: mock)
-
-        let stream = try await service.sendMessage(
-            systemPrompt: "test",
-            messages: [ChatMessage(role: .user, content: "hi")],
-            apiKey: "sk-test"
-        )
+        let stream = try await makeSendMessage(mock: mock)
 
         let chunks = try await collectStream(stream)
         #expect(chunks == ["reset"])
@@ -139,18 +119,12 @@ struct ClaudeAPIServiceSendMessageTests {
         lines.append(textDeltaJSON("reset"))
         lines.append(contentsOf: Array(repeating: decodeFailedJSON, count: 5))
         mock.lines = sseLines(lines)
-        let service = ClaudeAPIService(defaults: makeTestDefaults(), session: mock)
-
-        let stream = try await service.sendMessage(
-            systemPrompt: "test",
-            messages: [ChatMessage(role: .user, content: "hi")],
-            apiKey: "sk-test"
-        )
+        let stream = try await makeSendMessage(mock: mock)
 
         do {
             _ = try await collectStream(stream)
             Issue.record("Expected stream to throw")
-        } catch let error as ClaudeAPIError {
+        } catch let error as AIServiceError {
             guard case .excessiveDecodeFailures(let count) = error else {
                 Issue.record("Expected excessiveDecodeFailures, got \(error)")
                 return
@@ -174,13 +148,7 @@ struct ClaudeAPIServiceSendMessageTests {
         lines.append(skippedJSON)
         // Still only 4 consecutive failures — skipped events don't reset or increment
         mock.lines = sseLines(lines)
-        let service = ClaudeAPIService(defaults: makeTestDefaults(), session: mock)
-
-        let stream = try await service.sendMessage(
-            systemPrompt: "test",
-            messages: [ChatMessage(role: .user, content: "hi")],
-            apiKey: "sk-test"
-        )
+        let stream = try await makeSendMessage(mock: mock)
 
         // Should complete without error since only 4 consecutive failures occurred
         let chunks = try await collectStream(stream)
@@ -196,15 +164,9 @@ struct ClaudeAPIServiceSendMessageTests {
         lines.append(skippedJSON)
         lines.append(contentsOf: Array(repeating: decodeFailedJSON, count: 2))
         mock.lines = sseLines(lines)
-        let service = ClaudeAPIService(defaults: makeTestDefaults(), session: mock)
+        let stream = try await makeSendMessage(mock: mock)
 
-        let stream = try await service.sendMessage(
-            systemPrompt: "test",
-            messages: [ChatMessage(role: .user, content: "hi")],
-            apiKey: "sk-test"
-        )
-
-        await #expect(throws: ClaudeAPIError.self) {
+        await #expect(throws: AIServiceError.self) {
             _ = try await collectStream(stream)
         }
     }
@@ -223,13 +185,7 @@ struct ClaudeAPIServiceSendMessageTests {
         lines.append(skippedJSON)                  // skipped
         lines.append(decodeFailedJSON)              // failure 1
         mock.lines = sseLines(lines)
-        let service = ClaudeAPIService(defaults: makeTestDefaults(), session: mock)
-
-        let stream = try await service.sendMessage(
-            systemPrompt: "test",
-            messages: [ChatMessage(role: .user, content: "hi")],
-            apiKey: "sk-test"
-        )
+        let stream = try await makeSendMessage(mock: mock)
 
         let chunks = try await collectStream(stream)
         #expect(chunks == ["Hello", " world"])
@@ -246,13 +202,7 @@ struct ClaudeAPIServiceSendMessageTests {
             textDeltaJSON(" world"),
             skippedJSON,
         ])
-        let service = ClaudeAPIService(defaults: makeTestDefaults(), session: mock)
-
-        let stream = try await service.sendMessage(
-            systemPrompt: "test",
-            messages: [ChatMessage(role: .user, content: "hi")],
-            apiKey: "sk-test"
-        )
+        let stream = try await makeSendMessage(mock: mock)
 
         let chunks = try await collectStream(stream)
         #expect(chunks == ["Hello", " world"])
@@ -266,13 +216,7 @@ struct ClaudeAPIServiceSendMessageTests {
             "data: [DONE]",
             "data: " + textDeltaJSON("after"),   // should never be reached
         ]
-        let service = ClaudeAPIService(defaults: makeTestDefaults(), session: mock)
-
-        let stream = try await service.sendMessage(
-            systemPrompt: "test",
-            messages: [ChatMessage(role: .user, content: "hi")],
-            apiKey: "sk-test"
-        )
+        let stream = try await makeSendMessage(mock: mock)
 
         let chunks = try await collectStream(stream)
         #expect(chunks == ["before"])
@@ -287,13 +231,7 @@ struct ClaudeAPIServiceSendMessageTests {
             ": comment line",
             "data: " + textDeltaJSON(" too"),
         ]
-        let service = ClaudeAPIService(defaults: makeTestDefaults(), session: mock)
-
-        let stream = try await service.sendMessage(
-            systemPrompt: "test",
-            messages: [ChatMessage(role: .user, content: "hi")],
-            apiKey: "sk-test"
-        )
+        let stream = try await makeSendMessage(mock: mock)
 
         let chunks = try await collectStream(stream)
         #expect(chunks == ["included", " too"])
@@ -306,18 +244,12 @@ struct ClaudeAPIServiceSendMessageTests {
         let mock = MockURLSessionBytesProvider()
         mock.statusCode = 429
         mock.lines = []
-        let service = ClaudeAPIService(defaults: makeTestDefaults(), session: mock)
-
-        let stream = try await service.sendMessage(
-            systemPrompt: "test",
-            messages: [ChatMessage(role: .user, content: "hi")],
-            apiKey: "sk-test"
-        )
+        let stream = try await makeSendMessage(mock: mock)
 
         do {
             _ = try await collectStream(stream)
             Issue.record("Expected stream to throw")
-        } catch let error as ClaudeAPIError {
+        } catch let error as AIServiceError {
             guard case .httpError(let statusCode) = error else {
                 Issue.record("Expected httpError, got \(error)")
                 return
@@ -337,18 +269,12 @@ struct ClaudeAPIServiceSendMessageTests {
             textDeltaJSON("partial"),
             #"{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}"#,
         ])
-        let service = ClaudeAPIService(defaults: makeTestDefaults(), session: mock)
-
-        let stream = try await service.sendMessage(
-            systemPrompt: "test",
-            messages: [ChatMessage(role: .user, content: "hi")],
-            apiKey: "sk-test"
-        )
+        let stream = try await makeSendMessage(mock: mock)
 
         do {
             _ = try await collectStream(stream)
             Issue.record("Expected stream to throw")
-        } catch let error as ClaudeAPIError {
+        } catch let error as AIServiceError {
             guard case .serverError(let message) = error else {
                 Issue.record("Expected serverError, got \(error)")
                 return

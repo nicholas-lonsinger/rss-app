@@ -46,6 +46,7 @@ struct RSSAppApp: App {
             UserDefaultsMigrationService.migrateIfNeeded(
                 modelContext: modelContainer.mainContext
             )
+            AIProvider.migrateIfNeeded(keychain: KeychainService())
         }
 
         // Build the shared persistence + icon service + network monitor +
