@@ -484,7 +484,10 @@ final class MockFeedPersistenceService: FeedPersisting {
 
     // MARK: - Persistence
 
+    var saveCallCount = 0
+
     func save() throws {
         if let error = saveError ?? errorToThrow { throw error }
+        saveCallCount += 1
     }
 }

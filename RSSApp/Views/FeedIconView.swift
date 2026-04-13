@@ -30,6 +30,10 @@ struct FeedIconView: View {
     var style: Style = .standard
 
     @State private var iconImage: UIImage?
+    /// Background style resolved during on-view icon resolution. Takes
+    /// precedence over the model's `iconBackgroundStyle` (which may still
+    /// be `nil` until the next refresh cycle persists it).
+    @State private var resolvedBackgroundStyle: FeedIconBackgroundStyle?
 
     private static let logger = Logger(category: "FeedIconView")
 
@@ -56,27 +60,28 @@ struct FeedIconView: View {
         }
     }
 
-    /// The tile color that best contrasts against the cached icon (issue #342).
-    /// `nil` → legacy black tile for feeds that predate the classifier.
+    /// The effective background classification, preferring a locally resolved
+    /// style (from on-view icon resolution) over the model's persisted value.
+    /// Falls back to `.none` when neither source has a classification yet.
+    private var effectiveBackgroundStyle: FeedIconBackgroundStyle? {
+        resolvedBackgroundStyle ?? iconBackgroundStyle
+    }
+
+    /// The tile color that best contrasts against a loaded icon (issue #342).
+    /// Only applied when `iconImage` is non-nil; the placeholder always
+    /// uses a white tile (see `body`). `nil` → legacy black for feeds
+    /// that predate the classifier.
     private var backgroundColor: Color {
-        switch iconBackgroundStyle {
+        switch effectiveBackgroundStyle {
         case .light: return .white
         case .dark, .none: return .black
         }
     }
 
-    /// The globe placeholder color is paired with the background so it stays
-    /// legible regardless of which tile is rendered. The placeholder never
-    /// sits on an icon — it only shows while loading or when no icon exists
-    /// — so its color is chosen purely against the tile.
-    private var placeholderForegroundColor: Color {
-        backgroundColor == .white ? .black.opacity(0.4) : .white.opacity(0.6)
-    }
-
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: cornerRadius)
-                .fill(backgroundColor)
+                .fill(iconImage != nil ? backgroundColor : .white)
 
             if let iconImage {
                 Image(uiImage: iconImage)
@@ -85,11 +90,12 @@ struct FeedIconView: View {
                     .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
             } else {
                 // Placeholder globe while the icon resolves (or if the feed
-                // has no icon at all). Sized relative to the frame so it
-                // tracks Dynamic Type scaling at both style sizes.
+                // has no icon at all). Always on a white tile so the dark
+                // globe is legible and visually consistent. Sized at 60%
+                // of the icon frame so it scales with Dynamic Type.
                 Image(systemName: "globe")
                     .font(.system(size: iconSize * 0.6))
-                    .foregroundStyle(placeholderForegroundColor)
+                    .foregroundStyle(.black.opacity(0.4))
             }
         }
         .frame(width: iconSize, height: iconSize)
@@ -137,17 +143,22 @@ struct FeedIconView: View {
             return
         }
 
-        let resolvedURL = await iconService.resolveAndCacheIcon(
+        let resolved = await iconService.resolveAndCacheIcon(
             feedSiteURL: feedSiteURL,
             feedImageURL: iconURL,
             feedID: feedID
         )
 
-        guard resolvedURL != nil else {
+        guard let resolved else {
             ImageLoadBackoffTracker.feedIcons.recordFailure(for: backoffKey)
             iconImage = nil
             return
         }
+
+        // Apply the classified background style immediately so the tile
+        // color is correct without waiting for the next refresh cycle to
+        // persist it to SwiftData.
+        resolvedBackgroundStyle = resolved.backgroundStyle
 
         // Successfully resolved — clear any prior backoff and reload from cache.
         ImageLoadBackoffTracker.feedIcons.clearFailure(for: backoffKey)
