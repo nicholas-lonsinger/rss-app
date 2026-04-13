@@ -17,18 +17,18 @@ final class DiscussionViewModel {
 
     private let article: Article
     private let content: ArticleContent
-    private let claudeService: any ClaudeAPIServicing
+    private let aiService: any AIServicing
     private let keychainService: any KeychainServicing
 
     init(
         article: Article,
         content: ArticleContent,
-        claudeService: (any ClaudeAPIServicing)? = nil,
+        aiService: (any AIServicing)? = nil,
         keychainService: (any KeychainServicing)? = nil
     ) {
         self.article = article
         self.content = content
-        self.claudeService = claudeService ?? ClaudeAPIService()
+        self.aiService = aiService ?? AIServiceFactory.service(for: AIProvider.active)
         self.keychainService = keychainService ?? KeychainService()
         updateAPIKeyState()
         Self.logger.debug("Initialized with hasAPIKey=\(self.hasAPIKey, privacy: .public)")
@@ -37,7 +37,7 @@ final class DiscussionViewModel {
     /// Refreshes the cached API key presence from the Keychain.
     ///
     /// Call after the user may have added or removed their API key (e.g., on
-    /// sheet dismiss from API key settings).
+    /// sheet dismiss from AI settings).
     func refreshAPIKeyState() {
         updateAPIKeyState()
     }
@@ -46,9 +46,10 @@ final class DiscussionViewModel {
         let input = currentInput.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !input.isEmpty, !isGenerating else { return }
 
+        let provider = AIProvider.active
         let apiKey: String
         do {
-            guard let key = try keychainService.loadAPIKey(), !key.isEmpty else {
+            guard let key = try keychainService.loadAPIKey(for: provider), !key.isEmpty else {
                 errorMessage = "No API key configured."
                 return
             }
@@ -60,6 +61,9 @@ final class DiscussionViewModel {
             return
         }
 
+        let model = provider.currentModel()
+        let maxTokens = provider.currentMaxTokens()
+
         currentInput = ""
         errorMessage = nil
         messages.append(ChatMessage(role: .user, content: input))
@@ -69,12 +73,14 @@ final class DiscussionViewModel {
         isGenerating = true
         defer { isGenerating = false }
 
-        Self.logger.debug("sendMessage() — \(self.messages.count, privacy: .public) messages total")
+        Self.logger.debug("sendMessage() — \(self.messages.count, privacy: .public) messages total, provider=\(provider.displayName, privacy: .public)")
 
         do {
-            let stream = try await claudeService.sendMessage(
+            let stream = try await aiService.sendMessage(
                 systemPrompt: buildSystemPrompt(),
                 messages: Array(messages.dropLast()),  // exclude the empty assistant placeholder
+                model: model,
+                maxTokens: maxTokens,
                 apiKey: apiKey
             )
             for try await chunk in stream {
@@ -88,7 +94,7 @@ final class DiscussionViewModel {
             // occur mid-conversation and are contextual to the assistant turn, so displaying them
             // inline preserves the conversational flow and lets the user see which response failed.
             messages[assistantIndex].content = "Error: \(error.localizedDescription)"
-            Self.logger.error("Claude API error: \(error, privacy: .public)")
+            Self.logger.error("AI service error: \(error, privacy: .public)")
         }
     }
 
@@ -96,7 +102,7 @@ final class DiscussionViewModel {
 
     private func updateAPIKeyState() {
         do {
-            hasAPIKey = try keychainService.hasAPIKey()
+            hasAPIKey = try keychainService.hasActiveAPIKey()
             keychainError = nil
         } catch {
             hasAPIKey = false

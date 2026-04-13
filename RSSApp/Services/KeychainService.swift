@@ -113,33 +113,61 @@ struct KeychainService: KeychainServicing {
 
 extension KeychainServicing {
 
-    /// The Keychain account identifier for the Anthropic API key.
-    static var apiKeyAccount: String { "anthropic-api-key" }
+    // MARK: Per-provider methods
 
-    /// Whether a non-empty API key is currently stored in the Keychain.
-    ///
-    /// Returns `false` when no key is stored. Throws when the Keychain read
-    /// fails, allowing callers to distinguish "no key" from "error."
-    func hasAPIKey() throws -> Bool {
-        guard let key = try loadAPIKey() else { return false }
+    /// Whether a non-empty API key is stored for the given provider.
+    func hasAPIKey(for provider: AIProvider) throws -> Bool {
+        guard let key = try loadAPIKey(for: provider) else { return false }
         return !key.isEmpty
     }
 
-    /// Loads the stored API key, if any.
-    ///
-    /// Returns `nil` when no key is stored. Throws on Keychain read errors
-    /// or data corruption so callers can show appropriate error messages.
+    /// Loads the stored API key for the given provider, if any.
+    func loadAPIKey(for provider: AIProvider) throws -> String? {
+        try load(for: provider.keychainAccount)
+    }
+
+    /// Saves the given API key for the specified provider.
+    func saveAPIKey(_ value: String, for provider: AIProvider) throws {
+        try save(value, for: provider.keychainAccount)
+    }
+
+    /// Deletes the stored API key for the specified provider.
+    func deleteAPIKey(for provider: AIProvider) throws {
+        try delete(for: provider.keychainAccount)
+    }
+
+    // MARK: Active provider convenience
+
+    /// Whether the currently active provider has a non-empty API key stored.
+    func hasActiveAPIKey() throws -> Bool {
+        try hasAPIKey(for: AIProvider.active)
+    }
+
+    // MARK: Legacy single-provider methods (Claude / Anthropic)
+    //
+    // These delegate to the provider-aware methods using the Claude provider so
+    // any callers that have not yet been updated continue to work unchanged.
+
+    /// The Keychain account identifier for the Anthropic API key.
+    static var apiKeyAccount: String { AIProvider.claude.keychainAccount }
+
+    /// Whether a non-empty Anthropic API key is currently stored in the Keychain.
+    func hasAPIKey() throws -> Bool {
+        try hasAPIKey(for: .claude)
+    }
+
+    /// Loads the stored Anthropic API key, if any.
     func loadAPIKey() throws -> String? {
-        try load(for: Self.apiKeyAccount)
+        try loadAPIKey(for: .claude)
     }
 
-    /// Saves the given API key to the Keychain.
+    /// Saves the given Anthropic API key to the Keychain.
     func saveAPIKey(_ value: String) throws {
-        try save(value, for: Self.apiKeyAccount)
+        try saveAPIKey(value, for: .claude)
     }
 
-    /// Deletes the stored API key from the Keychain.
+    /// Deletes the stored Anthropic API key from the Keychain.
     func deleteAPIKey() throws {
-        try delete(for: Self.apiKeyAccount)
+        try deleteAPIKey(for: .claude)
     }
 }

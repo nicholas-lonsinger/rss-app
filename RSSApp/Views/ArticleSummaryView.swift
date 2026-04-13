@@ -39,7 +39,7 @@ struct ArticleSummaryView: View {
                         } label: {
                             Image(systemName: "bubble.left.and.bubble.right")
                         }
-                        .accessibilityLabel("Discuss with Claude")
+                        .accessibilityLabel("Discuss with AI")
                         .disabled(!viewModel.isReady)
                     }
                 }

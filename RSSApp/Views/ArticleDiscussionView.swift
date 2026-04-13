@@ -41,7 +41,7 @@ struct ArticleDiscussionView: View {
                 viewModel.refreshAPIKeyState()
             }) {
                 NavigationStack {
-                    APIKeySettingsView()
+                    AISettingsView()
                         .toolbar {
                             ToolbarItem(placement: .topBarTrailing) {
                                 Button("Done") { showSettings = false }
@@ -124,9 +124,9 @@ struct ArticleDiscussionView: View {
 
     private var noKeyView: some View {
         ContentUnavailableView {
-            Label("API Key Required", systemImage: "key.slash")
+            Label("AI Provider Required", systemImage: "sparkles.slash")
         } description: {
-            Text("Add your Anthropic API key to start discussing articles with Claude.")
+            Text("Configure an AI provider in Settings to start discussing articles.")
         } actions: {
             Button("Open Settings") { showSettings = true }
                 .buttonStyle(.bordered)
