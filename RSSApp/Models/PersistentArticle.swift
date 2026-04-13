@@ -25,8 +25,8 @@ final class PersistentArticle {
     var updatedDate: Date?
     /// Set to `true` by `FeedPersistenceService.upsertArticles` when a re-fetch
     /// detects a strictly newer Atom `<updated>` (or namespaced equivalent) on an
-    /// existing row, alongside the cache invalidation, `isRead` reset, and `sortDate`
-    /// bump that mark the article as resurfaced (issue #74). Cleared on every read
+    /// existing row, alongside the `isRead` reset and `sortDate` bump that mark the
+    /// article as resurfaced (issue #74). Cleared on every read
     /// transition: `markArticleRead(_:isRead: true)`, `markAllArticlesRead(for:)`,
     /// and `markAllArticlesRead()` all set the flag back to `false` so the orange
     /// "Updated" badge in the row view disappears the moment the user opens the
@@ -131,9 +131,10 @@ final class PersistentArticle {
     // a stale-but-untouched article, and the user has explicitly opted into surfacing
     // updated articles at the top of newest-first lists (issue #74) so they can find
     // the new content. The bump uses `clampedSortDate(publishedDate: now, now: now)`
-    // — i.e., set to the current wall clock — and is paired with `wasUpdated = true`,
-    // `isRead = false`, and a cache invalidation in the same transaction so the row
-    // resurfaces as unread with fresh content. Any *other* code path that touches
+    // — i.e., set to the current wall clock — and is paired with `wasUpdated = true`
+    // and `isRead = false` in the same transaction so the row resurfaces as unread
+    // (cached content is preserved and lazily replaced on user request — issue #398).
+    // Any *other* code path that touches
     // `sortDate` on an already-persisted article (e.g., a tempting "fix" that resorts
     // by recomputing from a mutated `publishedDate`) must justify the drift in writing,
     // because reshuffling articles for non-update reasons is a UX regression and breaks
@@ -146,14 +147,13 @@ final class PersistentArticle {
 
     var feed: PersistentFeed?
 
-    // RATIONALE: `deleteRule: .cascade` is load-bearing for content-update detection in
-    // `FeedPersistenceService.upsertArticles`, which drops `existing.content` on a
-    // publisher revision (issue #74) so the next visit re-extracts. The upsert path
-    // explicitly deletes the orphan via `modelContext.delete(staleContent)` before
-    // nilling the relationship — see the comment in `upsertArticles` — but the cascade
-    // rule remains the safety net for the more common case of deleting the parent row
-    // (article retention cleanup, feed deletion). Changing this to `.nullify` would
-    // orphan rows in both paths.
+    // RATIONALE: `deleteRule: .cascade` is the safety net for article deletion
+    // (retention cleanup, feed deletion) so the associated content row is never
+    // orphaned when the parent row is removed. The upsert update-detection path
+    // (issue #74) no longer eagerly deletes this row on a publisher revision
+    // (issue #398); instead it preserves the stale content and lets consumers
+    // detect staleness via `isContentStale`. Changing this to `.nullify` would
+    // orphan rows whenever the parent article is deleted.
     @Relationship(deleteRule: .cascade, inverse: \PersistentArticleContent.article)
     var content: PersistentArticleContent?
 
@@ -237,6 +237,25 @@ final class PersistentArticle {
     /// properties — Swift requires `var` for any computed property regardless.
     var displayedPublishedDate: Date {
         min(publishedDate ?? fetchedDate, fetchedDate)
+    }
+
+    /// Whether the cached `PersistentArticleContent` was extracted before the
+    /// publisher's most recent revision and therefore may not reflect the current
+    /// article body (issue #398).
+    ///
+    /// Returns `false` when `content` is `nil` — there is nothing stale if there
+    /// is no cached content. Returns `false` when `updatedDate` is `nil` — without
+    /// a publisher-supplied update timestamp there is no signal to compare against.
+    /// Uses strict less-than so content extracted at the exact same instant as the
+    /// update timestamp is treated as fresh (conservative; both timestamps are
+    /// machine-generated so exact equality is a reasonable tie-break).
+    ///
+    /// This is a computed property (no backing storage) used by
+    /// `ArticleSummaryViewModel` to show a staleness banner when opening an article
+    /// whose cached body pre-dates a detected publisher revision.
+    var isContentStale: Bool {
+        guard let content, let updatedDate else { return false }
+        return content.extractedDate < updatedDate
     }
 
     /// Whether row UI should display the "Updated [date]" suffix alongside the

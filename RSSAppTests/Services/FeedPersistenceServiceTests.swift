@@ -558,28 +558,37 @@ struct FeedPersistenceServiceTests {
         #expect(afterRefetch[0].wasUpdated == true)
     }
 
-    @Test("Update detection deletes the cached PersistentArticleContent row from the store")
+    @Test("Update detection preserves the cached PersistentArticleContent row in the store")
     @MainActor
-    func upsertArticlesDropsCachedContentOnUpdate() throws {
+    func upsertArticlesPreservesCachedContentOnUpdate() throws {
         let (service, container) = try makeService()
         withExtendedLifetime(container) { }
         let feed = TestFixtures.makePersistentFeed()
         try service.addFeed(feed)
 
         let baseline = Date(timeIntervalSince1970: 1_700_000_000)
+        let newerUpdate = baseline.addingTimeInterval(3600)
+        // extractionTime is between the two updatedDate values so that, after the
+        // upsert sets updatedDate = newerUpdate, the cached content is considered
+        // stale (extractedDate < updatedDate). Using a wall-clock Date() would be
+        // years after newerUpdate and would make isContentStale return false.
+        let extractionTime = baseline.addingTimeInterval(60)
         try service.upsertArticles(
             [TestFixtures.makeArticle(id: "with-content", updatedDate: baseline)],
             for: feed
         )
 
-        // Cache extracted content for the article.
+        // Cache extracted content for the article — simulates a prior article open.
+        // Use an explicit extractedDate so the test is not sensitive to wall-clock time.
         let inserted = try service.articles(for: feed)[0]
-        let extracted = TestFixtures.makeArticleContent(
+        let staleContent = PersistentArticleContent(
             title: "Extracted Title",
             htmlContent: "<p>Extracted body</p>",
-            textContent: "Extracted body"
+            textContent: "Extracted body",
+            extractedDate: extractionTime
         )
-        try service.cacheContent(extracted, for: inserted)
+        staleContent.article = inserted
+        inserted.content = staleContent
         try service.save()
 
         // Pre-condition: cached content is present both via the relationship pointer
@@ -588,26 +597,23 @@ struct FeedPersistenceServiceTests {
         let contentBefore = try container.mainContext.fetch(FetchDescriptor<PersistentArticleContent>())
         #expect(contentBefore.count == 1)
 
-        // Re-fetch with a strictly newer updatedDate — should drop the cached content.
+        // Re-fetch with a strictly newer updatedDate — content should be preserved
+        // (not deleted) so consumers have stale-but-present full-body content (issue #398).
         try service.upsertArticles(
-            [TestFixtures.makeArticle(
-                id: "with-content",
-                updatedDate: baseline.addingTimeInterval(3600)
-            )],
+            [TestFixtures.makeArticle(id: "with-content", updatedDate: newerUpdate)],
             for: feed
         )
         try service.save()
 
         let afterRefetch = try service.articles(for: feed)[0]
         #expect(afterRefetch.wasUpdated == true)
-        // Relationship pointer cleared on the article side.
-        #expect(afterRefetch.content == nil)
-        // AND the underlying PersistentArticleContent row is actually gone from the
-        // store — not just orphaned. This is what `cachedContent(for:)` couldn't
-        // distinguish: that helper just reads the relationship, which would return
-        // nil even if the row were leaking. Direct fetch is the only honest check.
+        // Relationship pointer is still populated — content preserved, not dropped.
+        #expect(afterRefetch.content != nil)
+        // The underlying PersistentArticleContent row is still in the store.
         let contentAfter = try container.mainContext.fetch(FetchDescriptor<PersistentArticleContent>())
-        #expect(contentAfter.isEmpty)
+        #expect(contentAfter.count == 1)
+        // The article reports stale content because extractedDate < updatedDate.
+        #expect(afterRefetch.isContentStale == true)
     }
 
     @Test("Re-fetch when both existing baselines are nil — skip detection rather than oscillate")
@@ -2318,5 +2324,130 @@ struct FeedPersistenceServiceTests {
         #expect(page1.map(\.articleID) == ["a", "b"])
         #expect(page2.map(\.articleID) == ["c", "d"])
         #expect(page3.map(\.articleID) == ["e"])
+    }
+
+    // MARK: - isContentStale Tests
+
+    @Test("isContentStale returns false when content is nil")
+    @MainActor
+    func isContentStaleFalseWhenContentNil() throws {
+        let article = TestFixtures.makePersistentArticle(
+            updatedDate: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+        // No content cached — nothing is stale.
+        #expect(article.content == nil)
+        #expect(article.isContentStale == false)
+    }
+
+    @Test("isContentStale returns false when updatedDate is nil")
+    @MainActor
+    func isContentStaleFalseWhenUpdatedDateNil() throws {
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+
+        // Insert article with no updatedDate.
+        try service.upsertArticles(
+            [TestFixtures.makeArticle(id: "no-updated", updatedDate: nil)],
+            for: feed
+        )
+        let article = try service.articles(for: feed)[0]
+
+        // Cache some content.
+        try service.cacheContent(TestFixtures.makeArticleContent(), for: article)
+
+        // Without an updatedDate there is no signal to compare against — not stale.
+        #expect(article.updatedDate == nil)
+        #expect(article.isContentStale == false)
+    }
+
+    @Test("isContentStale returns false when content was extracted after the update")
+    @MainActor
+    func isContentStaleFalseWhenExtractedAfterUpdate() throws {
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+
+        let updateTime = Date(timeIntervalSince1970: 1_700_000_000)
+        try service.upsertArticles(
+            [TestFixtures.makeArticle(id: "fresh-content", updatedDate: updateTime)],
+            for: feed
+        )
+        let article = try service.articles(for: feed)[0]
+
+        // Cache content with an extractedDate strictly after the updatedDate.
+        let freshContent = PersistentArticleContent(
+            title: "Fresh",
+            htmlContent: "<p>Fresh</p>",
+            textContent: "Fresh",
+            extractedDate: updateTime.addingTimeInterval(60)
+        )
+        freshContent.article = article
+        article.content = freshContent
+
+        #expect(article.isContentStale == false)
+    }
+
+    @Test("isContentStale returns true when content was extracted before the update")
+    @MainActor
+    func isContentStaleWhenExtractedBeforeUpdate() throws {
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+
+        let extractTime = Date(timeIntervalSince1970: 1_700_000_000)
+        let updateTime  = extractTime.addingTimeInterval(3600)
+
+        try service.upsertArticles(
+            [TestFixtures.makeArticle(id: "stale-content", updatedDate: updateTime)],
+            for: feed
+        )
+        let article = try service.articles(for: feed)[0]
+
+        // Cache content with an extractedDate strictly before the updatedDate.
+        let staleContent = PersistentArticleContent(
+            title: "Stale",
+            htmlContent: "<p>Stale</p>",
+            textContent: "Stale",
+            extractedDate: extractTime
+        )
+        staleContent.article = article
+        article.content = staleContent
+
+        #expect(article.isContentStale == true)
+    }
+
+    @Test("Update detection keeps the content row count at 1 after a publisher revision")
+    @MainActor
+    func upsertArticlesPreservesContentRowCount() throws {
+        let (service, container) = try makeService()
+        withExtendedLifetime(container) { }
+        let feed = TestFixtures.makePersistentFeed()
+        try service.addFeed(feed)
+
+        let baseline = Date(timeIntervalSince1970: 1_700_000_000)
+        try service.upsertArticles(
+            [TestFixtures.makeArticle(id: "row-count", updatedDate: baseline)],
+            for: feed
+        )
+        let article = try service.articles(for: feed)[0]
+        try service.cacheContent(TestFixtures.makeArticleContent(), for: article)
+        try service.save()
+
+        let before = try container.mainContext.fetch(FetchDescriptor<PersistentArticleContent>())
+        #expect(before.count == 1)
+
+        // Trigger update detection — row must be preserved, not deleted and re-created.
+        try service.upsertArticles(
+            [TestFixtures.makeArticle(id: "row-count", updatedDate: baseline.addingTimeInterval(3600))],
+            for: feed
+        )
+        try service.save()
+
+        let after = try container.mainContext.fetch(FetchDescriptor<PersistentArticleContent>())
+        #expect(after.count == 1)
     }
 }
