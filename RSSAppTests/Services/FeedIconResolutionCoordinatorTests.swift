@@ -225,6 +225,95 @@ struct FeedIconResolutionCoordinatorTests {
         #expect(results[2] == true, "Task C (coalesced awaiter) should receive CancellationError, not nil")
     }
 
+    @Test("Cancelled coalesced awaiter throws CancellationError instead of returning resolved value")
+    func cancelledCoalescedAwaiterThrowsCancellationError() async throws {
+        let coordinator = FeedIconResolutionCoordinator()
+        let feedID = UUID()
+        let expectedURL = URL(string: "https://example.com/icon.png")!
+        let expectedStyle = FeedIconBackgroundStyle.light
+
+        // Gate: let the test cancel task B only after the shared task is in flight.
+        let gate = Gate()
+
+        // Task A owns the work, signals the gate, then completes normally.
+        let taskA = Task {
+            try await coordinator.coalesce(feedID: feedID) {
+                await gate.signal()
+                try? await Task.sleep(for: .milliseconds(100))
+                return (url: expectedURL, backgroundStyle: expectedStyle)
+            }
+        }
+
+        // Wait until the work is running so task B will coalesce (not start fresh).
+        await gate.wait()
+
+        // Task B: coalesced caller — cancelled before the shared task finishes.
+        // After the fix, returning from `await existing.value.get()` must trigger
+        // `Task.checkCancellation()`, surfacing CancellationError to the caller.
+        actor OutcomeStore {
+            private(set) var threwCancellation = false
+            func record(_ threw: Bool) { threwCancellation = threw }
+        }
+        let outcome = OutcomeStore()
+        let taskB = Task<Void, Never> {
+            do {
+                _ = try await coordinator.coalesce(feedID: feedID) { nil }
+                await outcome.record(false)
+            } catch {
+                await outcome.record(error is CancellationError)
+            }
+        }
+        taskB.cancel()
+
+        _ = try await taskA.value
+        _ = await taskB.value
+
+        let threwCancellation = await outcome.threwCancellation
+        #expect(threwCancellation, "A cancelled coalesced awaiter should throw CancellationError, not return the resolved value")
+    }
+
+    @Test("Cancelled work-owning caller throws CancellationError instead of returning resolved value")
+    func cancelledWorkOwnerThrowsCancellationError() async throws {
+        let coordinator = FeedIconResolutionCoordinator()
+        let feedID = UUID()
+        let expectedURL = URL(string: "https://example.com/icon.png")!
+        let expectedStyle = FeedIconBackgroundStyle.light
+
+        // Gate: signals once the work closure has started, so we can cancel the
+        // work-owning task while it is still suspended at `await task.value`.
+        let gate = Gate()
+
+        actor OutcomeStore {
+            private(set) var threwCancellation = false
+            func record(_ threw: Bool) { threwCancellation = threw }
+        }
+        let outcome = OutcomeStore()
+
+        // Task A is the sole caller (work-owning path). It is cancelled mid-work.
+        // After the fix, `Task.checkCancellation()` after `await task.value` must
+        // surface CancellationError to task A even though the inner unstructured
+        // Task completed successfully.
+        let taskA = Task<Void, Never> {
+            do {
+                _ = try await coordinator.coalesce(feedID: feedID) {
+                    await gate.signal()
+                    try? await Task.sleep(for: .milliseconds(100))
+                    return (url: expectedURL, backgroundStyle: expectedStyle)
+                }
+                await outcome.record(false)
+            } catch {
+                await outcome.record(error is CancellationError)
+            }
+        }
+
+        await gate.wait()
+        taskA.cancel()
+        _ = await taskA.value
+
+        let threwCancellation = await outcome.threwCancellation
+        #expect(threwCancellation, "A cancelled work-owning caller should throw CancellationError after the shared task completes")
+    }
+
     @Test("Completed entry is removed, allowing a fresh resolution on the next call")
     func completedEntryRemovedAllowsFreshResolution() async throws {
         let coordinator = FeedIconResolutionCoordinator()

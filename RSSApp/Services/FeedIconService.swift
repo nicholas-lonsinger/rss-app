@@ -176,7 +176,9 @@ actor FeedIconResolutionCoordinator {
             Self.logger.debug(
                 "Coalescing icon resolution for feed \(feedID.uuidString, privacy: .public) — awaiting in-flight task"
             )
-            return try await existing.value.get()
+            let result = try await existing.value.get()
+            if Task.isCancelled { throw CancellationError() }
+            return result
         }
 
         // RATIONALE: The inner `do/catch` is typed with `throws(CancellationError)` so the
@@ -193,6 +195,7 @@ actor FeedIconResolutionCoordinator {
         inFlight[feedID] = task
         let taskResult = await task.value
         inFlight.removeValue(forKey: feedID)
+        if Task.isCancelled { throw CancellationError() }
         return try taskResult.get()
     }
 }
