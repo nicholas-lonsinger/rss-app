@@ -458,9 +458,9 @@ struct HomeViewModelTests {
         let mockPersistence = MockFeedPersistenceService()
         mockPersistence.feeds = [feed]
 
-        // Isolate from any ambient sort preference. The saved list now honors
-        // the global sort toggle (sorted by sortDate with the stored direction)
-        // so leaving the pref set from a previous test would flip ordering.
+        // Use an isolated UserDefaults suite so sort state does not bleed across
+        // tests. The saved list honors the sort toggle (sorted by sortDate with
+        // the stored direction), so a stale pref from another test would flip ordering.
         let defaults = UserDefaults(suiteName: UUID().uuidString)!
 
         // Three saved articles, one already read, two unread. publishedDate is

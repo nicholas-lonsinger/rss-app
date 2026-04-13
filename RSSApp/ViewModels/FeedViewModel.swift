@@ -7,7 +7,7 @@ final class FeedViewModel {
 
     private static let logger = Logger(category: "FeedViewModel")
 
-    /// UserDefaults key for the global sort order preference.
+    /// UserDefaults key for the app-wide sort order preference.
     static let sortAscendingKey = "articleSortAscending"
 
     /// Number of articles to fetch per page.
@@ -29,6 +29,11 @@ final class FeedViewModel {
         }
     }
 
+    // RATIONALE: sortAscending is a computed property backed by UserDefaults, so @Observable
+    // does not track it automatically. UI correctness is preserved because the setter calls
+    // reloadArticles(), which mutates the tracked `articles` array and drives SwiftUI updates.
+    // A Toggle bound to this property works fine: the setter fires on user interaction, and
+    // the resulting articles mutation triggers the necessary re-render.
     /// Current sort order — reads from the injected UserDefaults instance.
     var sortAscending: Bool {
         get { userDefaults.bool(forKey: Self.sortAscendingKey) }

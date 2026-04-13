@@ -311,7 +311,7 @@ struct FeedViewModelTests {
 
     /// Creates a loaded FeedViewModel with two articles for snapshot tests.
     /// Uses a fresh isolated UserDefaults suite so sort state does not bleed
-    /// across tests running in parallel on different suites.
+    /// across tests running in parallel.
     @MainActor
     private static func makeSnapshotFixture() async -> (
         viewModel: FeedViewModel,
