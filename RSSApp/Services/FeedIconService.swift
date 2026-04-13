@@ -137,8 +137,10 @@ struct FeedIconService: FeedIconResolving {
     private static let htmlFetchTimeout: TimeInterval = 10
     private static let iconFetchTimeout: TimeInterval = 15
 
-    /// The icon-related meta tags are in the `<head>`, so we only need the first portion of the page.
-    private static let htmlHeadMaxBytes = 51_200 // 50 KB
+    /// Safety cap for the HTML `<head>` read. We stream bytes until we find
+    /// `</head>` (case-insensitive), but stop at this limit if the closing tag
+    /// is absent or the head is abnormally large.
+    private static let htmlHeadMaxBytes = 512_000 // 500 KB
     private static let maxIconDimension: CGFloat = 128
 
     /// Maximum number of candidates downloaded concurrently and scored for suitability.
@@ -528,12 +530,48 @@ struct FeedIconService: FeedIconResolving {
             // Use the final URL (after redirects) as the base for resolving relative hrefs
             let baseURL = httpResponse.url ?? siteURL
 
-            // Read only the first portion — icon metadata is in <head>, no need for the full body
+            // Read until </head> — icon metadata is in <head>, no need for the full body.
+            // Some sites (e.g. TechCrunch) pack >100 KB of inline CSS/preloads before
+            // their icon <link> tags, so a small fixed cutoff misses them. We stream
+            // bytes and check for the closing tag in a trailing window to avoid
+            // downloading the entire page. A safety cap prevents runaway reads on
+            // pages that lack a closing </head>.
             var collected = Data()
-            collected.reserveCapacity(Self.htmlHeadMaxBytes)
+            collected.reserveCapacity(min(Self.htmlHeadMaxBytes, 65_536))
+            let closingTag: [UInt8] = Array("</head>".utf8)
+            // Ring buffer for the trailing bytes to match against </head>.
+            // Sized to closingTag.count so it always holds exactly the last 7 bytes for comparison.
+            var tailBuffer = [UInt8](repeating: 0, count: closingTag.count)
+            var tailIndex = 0
+            var foundClosingTag = false
             for try await byte in bytes {
                 collected.append(byte)
+                let lowerByte = byte | 0x20 // ASCII-lowercase letters; safe for </head> match
+                tailBuffer[tailIndex % closingTag.count] = lowerByte
+                tailIndex += 1
+                // Only check for a full match when the current byte could be '>'
+                // (the final character of </head>), skipping the inner loop for ~99% of bytes.
+                if lowerByte == 0x3E && tailIndex >= closingTag.count {
+                    var match = true
+                    for j in 0..<closingTag.count {
+                        if tailBuffer[(tailIndex - closingTag.count + j) % closingTag.count] != closingTag[j] {
+                            match = false
+                            break
+                        }
+                    }
+                    if match {
+                        foundClosingTag = true
+                        break
+                    }
+                }
                 if collected.count >= Self.htmlHeadMaxBytes { break }
+            }
+            if !foundClosingTag {
+                if collected.count >= Self.htmlHeadMaxBytes {
+                    Self.logger.debug("resolveFromHTML: safety cap (\(Self.htmlHeadMaxBytes, privacy: .public) bytes) reached without </head> for \(siteURL.absoluteString, privacy: .public) — parsing what was collected")
+                } else {
+                    Self.logger.debug("resolveFromHTML: stream ended at \(collected.count, privacy: .public) bytes without </head> for \(siteURL.absoluteString, privacy: .public) — parsing what was collected")
+                }
             }
 
             guard let html = String(data: collected, encoding: .utf8) else {

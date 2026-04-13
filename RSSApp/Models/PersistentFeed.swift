@@ -42,6 +42,17 @@ final class PersistentFeed {
 
     // MARK: - Icon
 
+    /// The image URL declared in the feed's XML (`<image><url>` in RSS,
+    /// `<logo>` / `<icon>` in Atom). Persisted so the on-view icon resolution
+    /// path can use it as a candidate even when the background refresh path
+    /// was skipped (e.g. WiFi-only download setting on cellular). `nil` for
+    /// feeds that predate this field or whose XML declares no image.
+    var feedImageURL: URL?
+
+    /// The URL of the successfully resolved and cached icon. Set after
+    /// `FeedIconService.resolveAndCacheIcon` finds and caches a suitable icon.
+    /// Distinct from `feedImageURL` (the feed's declared source) — this is the
+    /// winning candidate's URL after download, scoring, and caching.
     var iconURL: URL?
 
     /// Raw-value storage for `iconBackgroundStyle`. Access the enum via the
@@ -95,6 +106,7 @@ final class PersistentFeed {
         lastRefreshDate: Date? = nil,
         etag: String? = nil,
         lastModifiedHeader: String? = nil,
+        feedImageURL: URL? = nil,
         iconURL: URL? = nil,
         iconBackgroundStyleRaw: String? = nil,
         lastFetchError: String? = nil,
@@ -111,6 +123,7 @@ final class PersistentFeed {
         self.lastRefreshDate = lastRefreshDate
         self.etag = etag
         self.lastModifiedHeader = lastModifiedHeader
+        self.feedImageURL = feedImageURL
         self.iconURL = iconURL
         self.iconBackgroundStyleRaw = iconBackgroundStyleRaw
         self.lastFetchError = lastFetchError

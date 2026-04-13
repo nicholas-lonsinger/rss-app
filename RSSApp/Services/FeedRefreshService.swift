@@ -505,7 +505,7 @@ final class FeedRefreshService {
                             await self.resolveAndCacheIconIfNeeded(
                                 for: feed,
                                 siteURL: feed.feedURL.siteRoot,
-                                feedImageURL: feed.iconURL
+                                feedImageURL: feed.feedImageURL
                             )
                         }
                         pendingIconTasks.append(iconTask)
@@ -521,7 +521,7 @@ final class FeedRefreshService {
                 // articles rather than receiving a 304 Not Modified for data that
                 // was never persisted.
                 do {
-                    try persistence.updateFeedMetadata(feed, title: fetchResult.feed.title, description: fetchResult.feed.feedDescription)
+                    try persistence.updateFeedMetadata(feed, title: fetchResult.feed.title, description: fetchResult.feed.feedDescription, feedImageURL: fetchResult.feed.imageURL)
                 } catch {
                     // Cosmetic — does not increment failureCount. Title/description
                     // remain stale but articles and cache headers still proceed.

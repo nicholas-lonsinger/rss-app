@@ -107,6 +107,7 @@ struct ArticleRowView: View {
                 FeedIconView(
                     feedID: feed.id,
                     feedURL: feed.feedURL,
+                    feedImageURL: feed.feedImageURL,
                     iconURL: feed.iconURL,
                     iconBackgroundStyle: feed.iconBackgroundStyle,
                     iconService: iconService,

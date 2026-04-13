@@ -226,6 +226,7 @@ struct AddFeedViewModelTests {
         // End-to-end: resolved style must round-trip into the persisted feed
         // so a refactor that drops the backgroundStyle argument is caught.
         let persistedFeed = mockPersistence.feeds.first
+        #expect(persistedFeed?.feedImageURL == URL(string: "https://example.com/logo.png"))
         #expect(persistedFeed?.iconBackgroundStyleRaw == "light")
     }
 
