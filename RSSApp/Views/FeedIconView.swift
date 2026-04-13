@@ -33,8 +33,8 @@ struct FeedIconView: View {
     let iconService: FeedIconResolving
     var style: Style = .standard
     /// Called after successful on-view icon resolution so the caller can
-    /// persist the background style to the model. Both the refresh path and
-    /// the on-view path write to the same store; the view reads only from
+    /// persist the background style to the model. Both paths ultimately mutate
+    /// `PersistentFeed.iconBackgroundStyle`; the view reads only from
     /// `iconBackgroundStyle` (the model parameter), eliminating the ephemeral
     /// `@State` bridge that caused backgrounds to revert to black on
     /// scroll-back (issue #411).
@@ -168,8 +168,8 @@ struct FeedIconView: View {
         // Persist the background style to the model so it survives view
         // destruction across scroll cycles. The refresh path persists via
         // applyIconResolution(); this is the on-view equivalent. Image is
-        // set first so the view is fully populated before the model update
-        // triggers a re-render.
+        // set first so the view's local state is consistent before the
+        // caller persists the background style to the model.
         onBackgroundStyleResolved?(resolved.backgroundStyle)
     }
 }
