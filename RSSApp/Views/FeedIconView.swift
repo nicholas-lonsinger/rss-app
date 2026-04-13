@@ -155,7 +155,10 @@ struct FeedIconView: View {
             // are not genuine resolution failures and should not suppress future
             // icon load attempts (e.g. during rapid scrolling, which triggers many
             // cancellations via .task(id:) teardown).
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled else {
+                Self.logger.debug("Skipping backoff recording for feed \(feedID.uuidString, privacy: .public) — caller task cancelled")
+                return
+            }
             ImageLoadBackoffTracker.feedIcons.recordFailure(for: backoffKey)
             iconImage = nil
             return
