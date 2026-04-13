@@ -166,8 +166,9 @@ actor FeedIconResolutionCoordinator {
     /// entry before the first task completes. Callers that arrive after the task
     /// finishes (and the entry is removed) start a fresh resolution.
     ///
-    /// Throws `CancellationError` if the underlying work threw one, propagating
-    /// cancellation structurally to all callers awaiting the same in-flight task.
+    /// Throws `CancellationError` if the underlying work threw one (propagating
+    /// cancellation to all callers awaiting the same in-flight task), or if the
+    /// calling task itself was cancelled during the await.
     func coalesce(
         feedID: UUID,
         work: @Sendable @escaping () async throws(CancellationError) -> (url: URL, backgroundStyle: FeedIconBackgroundStyle)?
