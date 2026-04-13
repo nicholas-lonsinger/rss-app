@@ -353,6 +353,10 @@ struct FeedIconService: FeedIconResolving {
         }
 
         guard !downloadedCandidates.isEmpty else {
+            guard !Task.isCancelled else {
+                Self.logger.debug("Skipping miss recording for feed \(feedID.uuidString, privacy: .public) — task cancelled (no candidates downloaded)")
+                return nil
+            }
             let missCount = await missTracker.recordMiss(for: feedID)
             if missCount == FeedIconMissTracker.missThreshold {
                 Self.logger.warning(
@@ -406,6 +410,10 @@ struct FeedIconService: FeedIconResolving {
             }
         }
 
+        guard !Task.isCancelled else {
+            Self.logger.debug("Skipping miss recording for feed \(feedID.uuidString, privacy: .public) — task cancelled (all candidates failed)")
+            return nil
+        }
         let missCount = await missTracker.recordMiss(for: feedID)
         if missCount == FeedIconMissTracker.missThreshold {
             Self.logger.warning(
