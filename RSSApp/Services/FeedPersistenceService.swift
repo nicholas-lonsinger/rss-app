@@ -542,16 +542,14 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
                 existing.articleDescription = article.articleDescription
                 existing.snippet = article.snippet
                 existing.sortDate = PersistentArticle.clampedSortDate(publishedDate: now, now: now)
-                // Drop the cached extracted content so ArticleSummaryViewModel.loadContent()
-                // re-extracts on next visit. The `@Relationship(deleteRule: .cascade)` on
-                // `PersistentArticle.content` cascades on parent-row delete, NOT on
-                // relationship-nullify, so we delete the content row explicitly here to
-                // guarantee the orphan is removed from the store regardless of how
-                // SwiftData treats nullification across releases.
-                if let staleContent = existing.content {
-                    modelContext.delete(staleContent)
-                }
-                existing.content = nil
+                // Preserve any cached PersistentArticleContent rather than deleting it
+                // eagerly (issue #398). Stale full-body content is more useful than no
+                // content for offline reading, AI discussion, and future on-device AI
+                // features. Staleness is detected at read time via
+                // `PersistentArticle.isContentStale`, which compares
+                // `content.extractedDate` against the newly-written `updatedDate`.
+                // `ArticleSummaryViewModel` shows the stale body immediately with a
+                // banner offering an explicit user-triggered re-extraction.
 
                 if let previousReadDate {
                     Self.logger.notice(

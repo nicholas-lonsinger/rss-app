@@ -25,6 +25,11 @@ final class ArticleSummaryViewModel {
     /// Set once extraction completes; used by the discussion sheet.
     private(set) var extractedContent: ArticleContent?
 
+    /// `true` when the currently displayed content was extracted before the
+    /// publisher's most recent revision (issue #398). The view shows a banner
+    /// and lets the user trigger `refreshContent()` to re-extract.
+    private(set) var isContentStale: Bool = false
+
     private let article: Article
     private let extractor: any ArticleExtracting
     private let persistentArticle: PersistentArticle?
@@ -64,9 +69,15 @@ final class ArticleSummaryViewModel {
                 }
 
                 if let cached = cachedContent {
-                    Self.logger.debug("Using cached content for '\(self.article.title, privacy: .public)'")
+                    let stale = persistentArticle.isContentStale
+                    if stale {
+                        Self.logger.notice("Using stale cached content for '\(self.article.title, privacy: .public)' — publisher has a newer revision")
+                    } else {
+                        Self.logger.debug("Using cached content for '\(self.article.title, privacy: .public)'")
+                    }
                     content = cached.toArticleContent()
                     extractedContent = content
+                    isContentStale = stale
                 } else {
                     content = try await extractArticle()
                 }
@@ -81,6 +92,36 @@ final class ArticleSummaryViewModel {
         } catch {
             Self.logger.error("Content loading failed: \(error, privacy: .public)")
             state = .failed(error.localizedDescription)
+        }
+    }
+
+    // MARK: - Stale Content Refresh
+
+    /// User-triggered re-extraction when `isContentStale` is `true` (issue #398).
+    ///
+    /// Shows the stale body immediately (no spinner) and lets the user opt in to
+    /// seeing the fresh version. On success the cached `PersistentArticleContent`
+    /// row is updated in-place by `cacheContent()`, which also sets
+    /// `extractedDate = Date()`, making `PersistentArticle.isContentStale` return
+    /// `false` on subsequent reads. On failure the stale content remains visible
+    /// and the banner stays so the user can retry.
+    func refreshContent() async {
+        // Snapshot the current state so we can restore it if extraction fails.
+        // `extractArticle()` sets `state = .extracting` as a side effect; we must
+        // not leave the view in `.extracting` if the re-extraction ultimately fails.
+        let stateBeforeRefresh = state
+        do {
+            let fresh = try await extractArticle()
+            state = .ready(fresh)
+            isContentStale = false
+        } catch is CancellationError {
+            Self.logger.debug("Content refresh cancelled")
+            state = stateBeforeRefresh
+        } catch {
+            Self.logger.warning("Content refresh failed for '\(self.article.title, privacy: .public)': \(error, privacy: .public)")
+            // Restore the previous .ready(staleContent) state so the user continues
+            // to see the stale body rather than a loading spinner or error screen.
+            state = stateBeforeRefresh
         }
     }
 
