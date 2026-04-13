@@ -449,6 +449,8 @@ struct FeedIconService: FeedIconResolving {
                 // When the site URL is served at its own domain (including CNAME-based
                 // platform hosting like Medium custom domains), the og:image is
                 // publication-specific branding and is worth trying as a candidate.
+                // CNAME hosting doesn't trigger an HTTP redirect, so redirectedHost
+                // stays nil and we land here (unlike an HTTP redirect to medium.com).
                 if let ogImageURL = htmlResult.ogImageURL {
                     candidates.append(IconCandidate(url: ogImageURL, type: .ogImage))
                 }
@@ -464,26 +466,29 @@ struct FeedIconService: FeedIconResolving {
                 // and the reduced type bonus lets a publication-specific og:image win.
                 let appleTouchIconURLs = Set(htmlResult.appleTouchIconURLs)
                 for linkURL in htmlResult.linkIcons {
-                    let iconIsFromSameHost = siteHost == nil || linkURL.host(percentEncoded: false) == siteHost
+                    // Normalize hosts by stripping www. so that icons served from
+                    // www.example.com are treated as same-host for example.com.
+                    // When siteHost is nil (no feed site URL), default to cross-domain
+                    // (the conservative choice) rather than granting same-host status.
+                    let iconHost = linkURL.host(percentEncoded: false)
+                    let iconIsFromSameHost = siteHost != nil &&
+                        iconHost?.strippingWWWPrefix() == siteHost?.strippingWWWPrefix()
                     let isAppleTouchIcon = appleTouchIconURLs.contains(linkURL)
-                    let candidateType: IconCandidateType
-                    if isAppleTouchIcon && iconIsFromSameHost {
-                        candidateType = .appleTouchIcon
-                    } else if isAppleTouchIcon {
-                        // Cross-domain apple-touch-icon: likely a platform CDN icon (Medium, Substack, etc.)
-                        // that does not represent the blog's branding — use the lower linkIcon bonus.
-                        candidateType = .linkIcon
-                    } else {
-                        candidateType = .linkIcon
-                    }
+                    // Cross-domain apple-touch-icons (e.g., Medium CDN URLs for a
+                    // CNAME-hosted blog) are downgraded to .linkIcon — they carry
+                    // platform branding, not the blog's own.
+                    let candidateType: IconCandidateType = isAppleTouchIcon && iconIsFromSameHost
+                        ? .appleTouchIcon
+                        : .linkIcon
                     candidates.append(IconCandidate(url: linkURL, type: candidateType))
                 }
             }
         }
 
         // Priority 4: /favicon.ico fallback from the original site host.
-        // For platform-redirected blogs this is a first-resort rather than a fallback:
-        // it probes the original domain directly, bypassing the platform redirect.
+        // When a platform redirect is detected and all HTML icons are skipped, this
+        // becomes the first non-feed-XML candidate tried, since it targets the original
+        // domain rather than the redirect destination.
         if let siteURL = feedSiteURL,
            let host = siteHost,
            !host.isEmpty,
@@ -492,7 +497,7 @@ struct FeedIconService: FeedIconResolving {
         }
 
         // Priority 5: When a cross-domain redirect occurred (e.g., bothsidesofthetable.com
-        // → medium.com), also try the redirected host's /favicon.ico as a last resort
+        // → medium.com), also try the redirected host's /favicon.ico as a last resort.
         // RATIONALE: The host inequality check is redundant with HTMLIconResult's own guard,
         // but kept as a defensive safety net in case the struct's construction logic changes.
         if let redirectedHost = htmlResult?.redirectedHost,
@@ -541,12 +546,15 @@ struct FeedIconService: FeedIconResolving {
             let linkIcons = extractedIcons.appleTouchIcons + extractedIcons.linkIcons
             let ogImageURL = HTMLUtilities.extractOGImageURL(from: html, baseURL: baseURL)
 
-            // Detect cross-domain redirects (e.g., bothsidesofthetable.com → medium.com)
+            // Detect cross-domain redirects (e.g., bothsidesofthetable.com → medium.com).
+            // Normalize hosts by stripping the www. prefix before comparing so that a common
+            // www-redirect (example.com → www.example.com) is not treated as a platform redirect.
             let originalHost = siteURL.host(percentEncoded: false)
             let finalHost = baseURL.host(percentEncoded: false)
             let redirectedHost: String?
-            if let originalHost, let finalHost, originalHost != finalHost {
-                Self.logger.debug("Cross-domain redirect detected: \(originalHost, privacy: .public) → \(finalHost, privacy: .public)")
+            if let originalHost, let finalHost,
+               originalHost.strippingWWWPrefix() != finalHost.strippingWWWPrefix() {
+                Self.logger.info("Cross-domain redirect detected: \(originalHost, privacy: .public) → \(finalHost, privacy: .public)")
                 redirectedHost = finalHost
             } else {
                 redirectedHost = nil
@@ -959,5 +967,20 @@ struct FeedIconService: FeedIconResolving {
             at: cacheDirectory,
             withIntermediateDirectories: true
         )
+    }
+}
+
+// MARK: - Private helpers
+
+private extension String {
+    /// Returns the string with a leading "www." prefix removed (case-insensitive).
+    /// Used to normalize hostnames before comparing them so that a redirect from
+    /// "example.com" to "www.example.com" (or vice versa) is not treated as a
+    /// cross-domain platform redirect.
+    func strippingWWWPrefix() -> String {
+        if lowercased().hasPrefix("www.") {
+            return String(dropFirst(4))
+        }
+        return self
     }
 }

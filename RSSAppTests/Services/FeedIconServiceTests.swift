@@ -118,7 +118,6 @@ struct FeedIconServiceTests {
             htmlResult: htmlResult
         )
 
-        // Platform-redirect HTML icons are skipped; only the two favicon.ico fallbacks remain
         #expect(!candidates.contains(ogImage), "Platform og:image should be excluded")
         #expect(!candidates.contains(appleTouchIcon), "Platform apple-touch-icon should be excluded")
         #expect(!candidates.contains(linkIcon), "Platform link icon should be excluded")
@@ -272,6 +271,30 @@ struct FeedIconServiceTests {
         #expect(candidates.isEmpty)
     }
 
+    @Test("www-only redirect is not treated as a platform redirect")
+    func assembleCandidatesWWWRedirectDoesNotSkipHTMLIcons() {
+        // example.com → www.example.com is a same-domain www-redirect, not a
+        // cross-platform redirect; HTML icons should be included as normal.
+        let siteURL = URL(string: "https://example.com")!
+        let ogImage = URL(string: "https://www.example.com/og.png")!
+        let appleTouchIcon = URL(string: "https://www.example.com/apple-touch.png")!
+        let htmlResult = FeedIconService.HTMLIconResult(
+            linkIcons: [appleTouchIcon],
+            appleTouchIconURLs: [appleTouchIcon],
+            ogImageURL: ogImage,
+            redirectedHost: nil  // strippingWWWPrefix normalization keeps redirectedHost nil
+        )
+
+        let candidates = FeedIconService.assembleCandidates(
+            feedSiteURL: siteURL,
+            feedImageURL: nil,
+            htmlResult: htmlResult
+        )
+
+        #expect(candidates.contains(ogImage), "og:image should be included for www-redirect")
+        #expect(candidates.contains(appleTouchIcon), "apple-touch-icon should be included for www-redirect")
+    }
+
     // MARK: - assembleTypedCandidates (source type assignment)
 
     @Test("Feed XML candidate is assigned .feedXML type")
@@ -328,6 +351,28 @@ struct FeedIconServiceTests {
 
         let candidate = candidates.first { $0.url == appleTouchIcon }
         #expect(candidate?.type == .appleTouchIcon)
+    }
+
+    @Test("www-prefixed apple-touch-icon is treated as same-host and keeps .appleTouchIcon type")
+    func assembleTypedCandidatesWWWAppleTouchIconKeptAsSameHost() {
+        // Icons served from www.example.com are same-host for example.com after
+        // www-prefix normalization and should retain the full .appleTouchIcon type bonus.
+        let appleTouchIcon = URL(string: "https://www.example.com/apple-touch.png")!
+        let htmlResult = FeedIconService.HTMLIconResult(
+            linkIcons: [appleTouchIcon],
+            appleTouchIconURLs: [appleTouchIcon],
+            ogImageURL: nil,
+            redirectedHost: nil
+        )
+
+        let candidates = FeedIconService.assembleTypedCandidates(
+            feedSiteURL: URL(string: "https://example.com")!,
+            feedImageURL: nil,
+            htmlResult: htmlResult
+        )
+
+        let candidate = candidates.first { $0.url == appleTouchIcon }
+        #expect(candidate?.type == .appleTouchIcon, "www-prefixed apple-touch-icon should not be downgraded")
     }
 
     @Test("Cross-domain apple-touch-icon is downgraded to .linkIcon type")
