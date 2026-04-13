@@ -682,15 +682,17 @@ final class FeedRefreshService {
             feedImageURL: feedImageURL,
             feedID: feed.id
         )
-        do {
-            try persistence.applyIconResolution(resolved, to: feed)
-            try persistence.save()
-        } catch {
-            // RATIONALE: No error surfaced to the caller. This runs inside a fire-and-forget
-            // Task spawned by performRefresh(), so mutating the caller's errorMessage would
-            // race with the post-refresh error state assignment. Icon persistence failure is
-            // also cosmetic and self-healing — the icon is re-resolved on the next refresh.
-            Self.logger.error("Failed to persist icon resolution for '\(feed.title, privacy: .public)': \(error, privacy: .public)")
+        if let resolved {
+            do {
+                try persistence.applyIconResolution(resolved, to: feed)
+                try persistence.save()
+            } catch {
+                // RATIONALE: No error surfaced to the caller. This runs inside a fire-and-forget
+                // Task spawned by performRefresh(), so mutating the caller's errorMessage would
+                // race with the post-refresh error state assignment. Icon persistence failure is
+                // also cosmetic and self-healing — the icon is re-resolved on the next refresh.
+                Self.logger.error("Failed to persist icon resolution for '\(feed.title, privacy: .public)': \(error, privacy: .public)")
+            }
         }
     }
 

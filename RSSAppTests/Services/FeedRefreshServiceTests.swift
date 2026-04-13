@@ -452,13 +452,13 @@ struct FeedRefreshServiceTests {
             feedIconService: mockIconService
         )
 
-        let saveCountBefore = mockPersistence.saveCallCount
         await service.refreshAllFeeds()
-        for _ in 0..<10 { await Task.yield() }
+        let saveCountAfterRefresh = mockPersistence.saveCallCount
+        await service.awaitPendingWork()
 
-        // The fire-and-forget icon task must call save() so the
-        // backgroundStyle actually reaches the database.
-        #expect(mockPersistence.saveCallCount > saveCountBefore)
+        // The icon task must call save() beyond the main refresh save
+        // so the backgroundStyle actually reaches the database.
+        #expect(mockPersistence.saveCallCount > saveCountAfterRefresh)
         #expect(feed.iconBackgroundStyleRaw == "light")
     }
 
@@ -484,14 +484,14 @@ struct FeedRefreshServiceTests {
             feedIconService: mockIconService
         )
 
-        let saveCountBefore = mockPersistence.saveCallCount
         await service.refreshAllFeeds()
-        for _ in 0..<10 { await Task.yield() }
+        let saveCountAfterRefresh = mockPersistence.saveCallCount
+        await service.awaitPendingWork()
 
         #expect(mockIconService.classifyCachedIconCallCount == 1)
         #expect(feed.iconBackgroundStyleRaw == "light")
-        // The back-fill must call save() so the classification persists.
-        #expect(mockPersistence.saveCallCount > saveCountBefore)
+        // The back-fill must call save() beyond the main refresh save.
+        #expect(mockPersistence.saveCallCount > saveCountAfterRefresh)
     }
 
     @Test("refreshAllFeeds skips icon resolution when icon already cached")
