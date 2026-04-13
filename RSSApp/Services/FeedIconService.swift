@@ -166,8 +166,9 @@ actor FeedIconResolutionCoordinator {
     /// entry before the first task completes. Callers that arrive after the task
     /// finishes (and the entry is removed) start a fresh resolution.
     ///
-    /// Throws `CancellationError` if the underlying work threw one, propagating
-    /// cancellation structurally to all callers awaiting the same in-flight task.
+    /// Throws `CancellationError` if the underlying work threw one (propagating
+    /// cancellation to all callers awaiting the same in-flight task), or if the
+    /// calling task itself was cancelled during the await.
     func coalesce(
         feedID: UUID,
         work: @Sendable @escaping () async throws(CancellationError) -> (url: URL, backgroundStyle: FeedIconBackgroundStyle)?
@@ -176,7 +177,9 @@ actor FeedIconResolutionCoordinator {
             Self.logger.debug(
                 "Coalescing icon resolution for feed \(feedID.uuidString, privacy: .public) — awaiting in-flight task"
             )
-            return try await existing.value.get()
+            let result = try await existing.value.get()
+            if Task.isCancelled { throw CancellationError() }
+            return result
         }
 
         // RATIONALE: The inner `do/catch` is typed with `throws(CancellationError)` so the
@@ -193,6 +196,7 @@ actor FeedIconResolutionCoordinator {
         inFlight[feedID] = task
         let taskResult = await task.value
         inFlight.removeValue(forKey: feedID)
+        if Task.isCancelled { throw CancellationError() }
         return try taskResult.get()
     }
 }
