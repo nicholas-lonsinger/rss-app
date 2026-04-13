@@ -148,7 +148,7 @@ actor FeedIconResolutionCoordinator {
 
     // RATIONALE: The task stores a `Result` so cancellation and failure are structurally
     // distinct at the type level without requiring `Task<_, CancellationError>` typed-error
-    // tasks, which Swift 6.3 does not support in the unstructured `Task {}` initializer.
+    // tasks, which (as of Swift 6.3) the unstructured `Task {}` initializer does not support.
     // `.failure(CancellationError())` propagates via `get()` so all awaiting callers receive
     // the throw, while `.success(nil)` represents a genuine resolution failure (no icon found).
     private var inFlight: [UUID: Task<Result<(url: URL, backgroundStyle: FeedIconBackgroundStyle)?, CancellationError>, Never>] = [:]
@@ -182,7 +182,7 @@ actor FeedIconResolutionCoordinator {
         // RATIONALE: The inner `do/catch` is typed with `throws(CancellationError)` so the
         // compiler narrows `e` to `CancellationError` at the call site, avoiding an `as!`
         // cast. This works because `work` is declared `throws(CancellationError)` and the
-        // Swift 6.3 typed-throws rule guarantees the catch block only executes for that type.
+        // typed-throws rule (as of Swift 6.3) guarantees the catch block only executes for that type.
         let task = Task<Result<(url: URL, backgroundStyle: FeedIconBackgroundStyle)?, CancellationError>, Never> {
             do throws(CancellationError) {
                 return .success(try await work())
