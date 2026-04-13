@@ -770,13 +770,15 @@ enum TestFixtures {
         title: String = "Test Feed",
         feedURL: URL = URL(string: "https://example.com/feed")!,
         siteURL: URL? = URL(string: "https://example.com"),
-        description: String = "A test feed"
+        description: String = "A test feed",
+        groupName: String? = nil
     ) -> OPMLFeedEntry {
         OPMLFeedEntry(
             title: title,
             feedURL: feedURL,
             siteURL: siteURL,
-            description: description
+            description: description,
+            groupName: groupName
         )
     }
 
