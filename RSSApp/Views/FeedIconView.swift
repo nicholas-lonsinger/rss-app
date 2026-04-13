@@ -67,8 +67,10 @@ struct FeedIconView: View {
         resolvedBackgroundStyle ?? iconBackgroundStyle
     }
 
-    /// The tile color that best contrasts against the cached icon (issue #342).
-    /// `nil` → legacy black tile for feeds that predate the classifier.
+    /// The tile color that best contrasts against a loaded icon (issue #342).
+    /// Only applied when `iconImage` is non-nil; the placeholder always
+    /// uses a white tile (see `body`). `nil` → legacy black for feeds
+    /// that predate the classifier.
     private var backgroundColor: Color {
         switch effectiveBackgroundStyle {
         case .light: return .white
@@ -89,8 +91,8 @@ struct FeedIconView: View {
             } else {
                 // Placeholder globe while the icon resolves (or if the feed
                 // has no icon at all). Always on a white tile so the dark
-                // globe is legible and visually consistent regardless of
-                // whether icon resolution failed or succeeded-but-invalid.
+                // globe is legible and visually consistent. Sized at 60%
+                // of the icon frame so it scales with Dynamic Type.
                 Image(systemName: "globe")
                     .font(.system(size: iconSize * 0.6))
                     .foregroundStyle(.black.opacity(0.4))
