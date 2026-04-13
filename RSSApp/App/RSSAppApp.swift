@@ -1,3 +1,4 @@
+import BackgroundTasks
 import SwiftUI
 import SwiftData
 import os
@@ -96,6 +97,10 @@ struct RSSAppApp: App {
             // (which does surface failures).
             do {
                 try BackgroundRefreshScheduler.scheduleNextRefresh()
+            } catch let error as BGTaskScheduler.Error where error.code == .unavailable {
+                // .unavailable is expected on Simulator and when Background App
+                // Refresh is disabled in Settings. Log at .debug — not a bug.
+                Self.logger.debug("Background refresh unavailable at launch (Simulator or Background App Refresh disabled): \(error, privacy: .public)")
             } catch {
                 Self.logger.error("Failed to seed background refresh at launch: \(error, privacy: .public)")
             }

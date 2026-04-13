@@ -82,12 +82,27 @@ enum BackgroundRefreshScheduler {
         }
 
         if !appRefreshRegistered {
+            // RATIONALE: BGTaskScheduler.register always returns false on Simulator
+            // (Apple does not support BGTaskScheduler there). assertionFailure is
+            // suppressed on Simulator to avoid crashing every debug launch for an
+            // expected, non-actionable condition; the .fault log is downgraded to
+            // .debug so it remains visible when streaming but doesn't pollute the
+            // console on routine runs.
+            #if targetEnvironment(simulator)
+            logger.debug("BGAppRefreshTask registration returned false on Simulator (expected — BGTaskScheduler is unavailable on Simulator)")
+            #else
             logger.fault("Failed to register BGAppRefreshTask identifier '\(appRefreshTaskIdentifier, privacy: .public)' — check Info.plist BGTaskSchedulerPermittedIdentifiers")
             assertionFailure("Failed to register BGAppRefreshTask identifier '\(appRefreshTaskIdentifier)': check Info.plist BGTaskSchedulerPermittedIdentifiers")
+            #endif
         }
         if !processingRegistered {
+            // RATIONALE: Same as appRefreshRegistered above — expected false on Simulator.
+            #if targetEnvironment(simulator)
+            logger.debug("BGProcessingTask registration returned false on Simulator (expected — BGTaskScheduler is unavailable on Simulator)")
+            #else
             logger.fault("Failed to register BGProcessingTask identifier '\(processingTaskIdentifier, privacy: .public)' — check Info.plist BGTaskSchedulerPermittedIdentifiers")
             assertionFailure("Failed to register BGProcessingTask identifier '\(processingTaskIdentifier)': check Info.plist BGTaskSchedulerPermittedIdentifiers")
+            #endif
         }
         logger.notice("Background task launch handlers registered")
     }
@@ -185,6 +200,13 @@ enum BackgroundRefreshScheduler {
         do {
             try BGTaskScheduler.shared.submit(request)
             logger.notice("Submitted background refresh request '\(request.identifier, privacy: .public)' earliestBeginDate=\(request.earliestBeginDate?.description ?? "nil", privacy: .public)")
+        } catch let error as BGTaskScheduler.Error where error.code == .unavailable {
+            // .unavailable is expected on Simulator and when the user has disabled
+            // Background App Refresh in Settings — neither is a bug. Log at .debug
+            // so it's visible when actively streaming logs but doesn't surface as
+            // an error in routine operation.
+            logger.debug("Background refresh submission unavailable for '\(request.identifier, privacy: .public)' (Simulator or Background App Refresh disabled in Settings): \(error, privacy: .public)")
+            throw error
         } catch {
             logger.error("Failed to submit background refresh request '\(request.identifier, privacy: .public)': \(error, privacy: .public)")
             throw error
