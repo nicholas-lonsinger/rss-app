@@ -604,6 +604,12 @@ struct FeedIconService: FeedIconResolving {
                 ogImageURL: ogImageURL,
                 redirectedHost: redirectedHost
             )
+        } catch is CancellationError {
+            Self.logger.debug("resolveFromHTML cancelled for \(siteURL.absoluteString, privacy: .public)")
+            return nil
+        } catch let urlError as URLError where urlError.code == .cancelled {
+            Self.logger.debug("resolveFromHTML cancelled for \(siteURL.absoluteString, privacy: .public)")
+            return nil
         } catch {
             Self.logger.warning("Failed to fetch site HTML from \(siteURL.absoluteString, privacy: .public): \(error, privacy: .public)")
             return nil
@@ -943,6 +949,9 @@ struct FeedIconService: FeedIconResolving {
             }
 
             return (normalized, stats)
+        } catch is CancellationError {
+            Self.logger.debug("downloadAndAnalyze: download cancelled for \(url.absoluteString, privacy: .public)")
+            return nil
         } catch let error as URLError where error.code == .cancelled {
             Self.logger.debug("downloadAndAnalyze: download cancelled for \(url.absoluteString, privacy: .public)")
             return nil
