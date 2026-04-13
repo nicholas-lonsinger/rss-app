@@ -19,7 +19,7 @@ struct FeedIconResolutionCoordinatorTests {
     // MARK: - Tests
 
     @Test("Concurrent calls for the same feedID coalesce to a single work invocation")
-    func concurrentCallsForSameFeedIDCoalesce() async {
+    func concurrentCallsForSameFeedIDCoalesce() async throws {
         let coordinator = FeedIconResolutionCoordinator()
         let counter = CallCounter()
         let feedID = UUID()
@@ -29,10 +29,10 @@ struct FeedIconResolutionCoordinatorTests {
         // Launch 5 tasks simultaneously for the same feedID.
         // The work closure delays 50ms so all callers are guaranteed to arrive
         // before the first task completes, ensuring coalescing is exercised.
-        await withTaskGroup(of: Void.self) { group in
+        try await withThrowingTaskGroup(of: Void.self) { group in
             for _ in 0..<5 {
                 group.addTask {
-                    let result = await coordinator.coalesce(feedID: feedID) {
+                    let result = try await coordinator.coalesce(feedID: feedID) {
                         await counter.increment()
                         try? await Task.sleep(for: .milliseconds(50))
                         return (url: expectedURL, backgroundStyle: expectedStyle)
@@ -48,15 +48,15 @@ struct FeedIconResolutionCoordinatorTests {
     }
 
     @Test("Concurrent calls for different feedIDs proceed independently")
-    func concurrentCallsForDifferentFeedIDsProceedIndependently() async {
+    func concurrentCallsForDifferentFeedIDsProceedIndependently() async throws {
         let coordinator = FeedIconResolutionCoordinator()
         let counter = CallCounter()
         let feedIDs = [UUID(), UUID(), UUID()]
 
-        await withTaskGroup(of: Void.self) { group in
+        try await withThrowingTaskGroup(of: Void.self) { group in
             for feedID in feedIDs {
                 group.addTask {
-                    _ = await coordinator.coalesce(feedID: feedID) {
+                    _ = try await coordinator.coalesce(feedID: feedID) {
                         await counter.increment()
                         return nil
                     }
@@ -103,7 +103,7 @@ struct FeedIconResolutionCoordinatorTests {
         // Task A: first caller — owns the work closure. Signals the gate when it
         // starts so we can cancel task B while the work is still in progress.
         let taskA = Task {
-            await coordinator.coalesce(feedID: feedID) {
+            try? await coordinator.coalesce(feedID: feedID) {
                 await counter.increment()
                 await gate.signal()
                 try? await Task.sleep(for: .milliseconds(100))
@@ -118,7 +118,7 @@ struct FeedIconResolutionCoordinatorTests {
         // It awaits the shared task; cancelling it must not cancel the coordinator's
         // unstructured Task, which is not a child of task B.
         let taskB = Task {
-            await coordinator.coalesce(feedID: feedID) {
+            try? await coordinator.coalesce(feedID: feedID) {
                 // This closure must never run — task B awaits task A's result.
                 await counter.increment()
                 return nil
@@ -128,7 +128,7 @@ struct FeedIconResolutionCoordinatorTests {
 
         // Task C: another concurrent caller that must still receive the correct result.
         let taskC = Task {
-            await coordinator.coalesce(feedID: feedID) {
+            try? await coordinator.coalesce(feedID: feedID) {
                 await counter.increment()
                 return nil
             }
@@ -145,19 +145,19 @@ struct FeedIconResolutionCoordinatorTests {
     }
 
     @Test("Completed entry is removed, allowing a fresh resolution on the next call")
-    func completedEntryRemovedAllowsFreshResolution() async {
+    func completedEntryRemovedAllowsFreshResolution() async throws {
         let coordinator = FeedIconResolutionCoordinator()
         let counter = CallCounter()
         let feedID = UUID()
 
         // First call — completes normally.
-        _ = await coordinator.coalesce(feedID: feedID) {
+        _ = try await coordinator.coalesce(feedID: feedID) {
             await counter.increment()
             return nil
         }
 
         // Second call — must start fresh because the first entry was removed on completion.
-        _ = await coordinator.coalesce(feedID: feedID) {
+        _ = try await coordinator.coalesce(feedID: feedID) {
             await counter.increment()
             return nil
         }

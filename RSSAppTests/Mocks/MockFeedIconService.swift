@@ -55,9 +55,17 @@ final class MockFeedIconService: FeedIconResolving, @unchecked Sendable {
         return loadValidatedIconResult
     }
 
-    func resolveAndCacheIcon(feedSiteURL: URL?, feedImageURL: URL?, feedID: UUID) async -> (url: URL, backgroundStyle: FeedIconBackgroundStyle)? {
+    /// When `simulateCancellation` is `true`, the mock throws `CancellationError`
+    /// instead of returning `resolveAndCacheResult`. Used to test that callers
+    /// handle the typed-throws cancellation path without recording backoff.
+    var simulateCancellation = false
+
+    func resolveAndCacheIcon(feedSiteURL: URL?, feedImageURL: URL?, feedID: UUID) async throws(CancellationError) -> (url: URL, backgroundStyle: FeedIconBackgroundStyle)? {
         resolveAndCacheCallCount += 1
         resolveAndCacheFeedIDs.append(feedID)
+        if simulateCancellation {
+            throw CancellationError()
+        }
         return resolveAndCacheResult
     }
 

@@ -79,7 +79,13 @@ protocol FeedIconResolving: Sendable {
     ///
     /// Returns the remote URL of the cached icon along with the luminance-based
     /// background-style classification, or `nil` when no candidate could be cached.
-    func resolveAndCacheIcon(feedSiteURL: URL?, feedImageURL: URL?, feedID: UUID) async -> (url: URL, backgroundStyle: FeedIconBackgroundStyle)?
+    ///
+    /// Throws `CancellationError` if the current task is cancelled during resolution.
+    /// The `throws(CancellationError)` typed-throws signature compile-time enforces that
+    /// no other error type can escape: all network, HTTP, decode, and filesystem
+    /// failures are surfaced via the `nil` return so callers can distinguish
+    /// cancellation (stop, no retry needed) from genuine failure (record backoff).
+    func resolveAndCacheIcon(feedSiteURL: URL?, feedImageURL: URL?, feedID: UUID) async throws(CancellationError) -> (url: URL, backgroundStyle: FeedIconBackgroundStyle)?
 
     /// Classifies the background style of an already-cached icon without
     /// touching the network. Used to back-fill `FeedIconBackgroundStyle` for
@@ -140,7 +146,12 @@ actor FeedIconResolutionCoordinator {
 
     private static let logger = Logger(category: "FeedIconResolutionCoordinator")
 
-    private var inFlight: [UUID: Task<(url: URL, backgroundStyle: FeedIconBackgroundStyle)?, Never>] = [:]
+    // RATIONALE: The task stores a `Result` so cancellation and failure are structurally
+    // distinct at the type level without requiring `Task<_, CancellationError>` typed-error
+    // tasks, which Swift 6.3 does not support in the unstructured `Task {}` initializer.
+    // `.failure(CancellationError())` propagates via `get()` so all awaiting callers receive
+    // the throw, while `.success(nil)` represents a genuine resolution failure (no icon found).
+    private var inFlight: [UUID: Task<Result<(url: URL, backgroundStyle: FeedIconBackgroundStyle)?, CancellationError>, Never>] = [:]
 
     /// If a resolution for `feedID` is already in progress, awaits and returns
     /// its result. Otherwise starts `work` and shares the result with all
@@ -154,24 +165,35 @@ actor FeedIconResolutionCoordinator {
     /// subsequent callers to enter `coalesce` and find the existing in-flight
     /// entry before the first task completes. Callers that arrive after the task
     /// finishes (and the entry is removed) start a fresh resolution.
+    ///
+    /// Throws `CancellationError` if the underlying work threw one, propagating
+    /// cancellation structurally to all callers awaiting the same in-flight task.
     func coalesce(
         feedID: UUID,
-        work: @Sendable @escaping () async -> (url: URL, backgroundStyle: FeedIconBackgroundStyle)?
-    ) async -> (url: URL, backgroundStyle: FeedIconBackgroundStyle)? {
+        work: @Sendable @escaping () async throws(CancellationError) -> (url: URL, backgroundStyle: FeedIconBackgroundStyle)?
+    ) async throws(CancellationError) -> (url: URL, backgroundStyle: FeedIconBackgroundStyle)? {
         if let existing = inFlight[feedID] {
             Self.logger.debug(
                 "Coalescing icon resolution for feed \(feedID.uuidString, privacy: .public) — awaiting in-flight task"
             )
-            return await existing.value
+            return try await existing.value.get()
         }
 
-        let task = Task<(url: URL, backgroundStyle: FeedIconBackgroundStyle)?, Never> {
-            await work()
+        // RATIONALE: The inner `do/catch` is typed with `throws(CancellationError)` so the
+        // compiler narrows `e` to `CancellationError` at the call site, avoiding an `as!`
+        // cast. This works because `work` is declared `throws(CancellationError)` and the
+        // Swift 6.3 typed-throws rule guarantees the catch block only executes for that type.
+        let task = Task<Result<(url: URL, backgroundStyle: FeedIconBackgroundStyle)?, CancellationError>, Never> {
+            do throws(CancellationError) {
+                return .success(try await work())
+            } catch {
+                return .failure(error)
+            }
         }
         inFlight[feedID] = task
-        let result = await task.value
+        let taskResult = await task.value
         inFlight.removeValue(forKey: feedID)
-        return result
+        return try taskResult.get()
     }
 }
 
@@ -279,9 +301,9 @@ struct FeedIconService: FeedIconResolving {
         }.value
     }
 
-    func resolveAndCacheIcon(feedSiteURL: URL?, feedImageURL: URL?, feedID: UUID) async -> (url: URL, backgroundStyle: FeedIconBackgroundStyle)? {
-        await resolutionCoordinator.coalesce(feedID: feedID) { [self] in
-            await self.performResolveAndCacheIcon(
+    func resolveAndCacheIcon(feedSiteURL: URL?, feedImageURL: URL?, feedID: UUID) async throws(CancellationError) -> (url: URL, backgroundStyle: FeedIconBackgroundStyle)? {
+        try await resolutionCoordinator.coalesce(feedID: feedID) { [self] () async throws(CancellationError) in
+            try await self.performResolveAndCacheIcon(
                 feedSiteURL: feedSiteURL,
                 feedImageURL: feedImageURL,
                 feedID: feedID
@@ -289,7 +311,7 @@ struct FeedIconService: FeedIconResolving {
         }
     }
 
-    private func performResolveAndCacheIcon(feedSiteURL: URL?, feedImageURL: URL?, feedID: UUID) async -> (url: URL, backgroundStyle: FeedIconBackgroundStyle)? {
+    private func performResolveAndCacheIcon(feedSiteURL: URL?, feedImageURL: URL?, feedID: UUID) async throws(CancellationError) -> (url: URL, backgroundStyle: FeedIconBackgroundStyle)? {
         Self.logger.debug("resolveAndCacheIcon() for feed \(feedID.uuidString, privacy: .public)")
 
         // Fetch site HTML to discover link icons
@@ -353,9 +375,9 @@ struct FeedIconService: FeedIconResolving {
         }
 
         guard !downloadedCandidates.isEmpty else {
-            guard !Task.isCancelled else {
+            if Task.isCancelled {
                 Self.logger.debug("Skipping miss recording for feed \(feedID.uuidString, privacy: .public) — task cancelled (no candidates downloaded)")
-                return nil
+                throw CancellationError()
             }
             let missCount = await missTracker.recordMiss(for: feedID)
             if missCount == FeedIconMissTracker.missThreshold {
@@ -410,9 +432,9 @@ struct FeedIconService: FeedIconResolving {
             }
         }
 
-        guard !Task.isCancelled else {
+        if Task.isCancelled {
             Self.logger.debug("Skipping miss recording for feed \(feedID.uuidString, privacy: .public) — task cancelled (all candidates failed)")
-            return nil
+            throw CancellationError()
         }
         let missCount = await missTracker.recordMiss(for: feedID)
         if missCount == FeedIconMissTracker.missThreshold {

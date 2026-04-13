@@ -647,14 +647,14 @@ struct FeedIconServiceTests {
     // MARK: - resolveAndCacheIcon miss-tracker integration
 
     @Test("resolveAndCacheIcon records exactly one miss when all candidates fail")
-    func resolveAndCacheIconRecordsOneMissWhenAllCandidatesFail() async {
+    func resolveAndCacheIconRecordsOneMissWhenAllCandidatesFail() async throws {
         let tracker = FeedIconMissTracker()
         let isolatedService = FeedIconService(cacheDirectoryOverride: cacheDirectory, missTracker: tracker)
         let feedID = UUID()
         // Use a URL under a reserved TLD — guaranteed to fail DNS resolution without touching the network.
         let siteURL = URL(string: "https://example-invalid-no-icon.invalid")!
 
-        _ = await isolatedService.resolveAndCacheIcon(feedSiteURL: siteURL, feedImageURL: nil, feedID: feedID)
+        _ = try await isolatedService.resolveAndCacheIcon(feedSiteURL: siteURL, feedImageURL: nil, feedID: feedID)
 
         // After one resolveAndCacheIcon call with all candidates failing, the tracker
         // should have recorded exactly 1 miss. Calling recordMiss again should return 2.

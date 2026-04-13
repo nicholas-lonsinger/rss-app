@@ -670,11 +670,17 @@ final class FeedRefreshService {
             }
             return
         }
-        let resolved = await feedIconService.resolveAndCacheIcon(
-            feedSiteURL: siteURL,
-            feedImageURL: feedImageURL,
-            feedID: feed.id
-        )
+        let resolved: (url: URL, backgroundStyle: FeedIconBackgroundStyle)?
+        do {
+            resolved = try await feedIconService.resolveAndCacheIcon(
+                feedSiteURL: siteURL,
+                feedImageURL: feedImageURL,
+                feedID: feed.id
+            )
+        } catch {
+            Self.logger.debug("Icon resolution cancelled for '\(feed.title, privacy: .public)'")
+            return
+        }
         if let resolved {
             do {
                 try persistence.applyIconResolution(resolved, to: feed)
