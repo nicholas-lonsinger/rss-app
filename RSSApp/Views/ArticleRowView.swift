@@ -69,9 +69,10 @@ struct ArticleRowView: View {
     ///
     /// The orange "Updated" capsule badge is appended when `wasUpdated` is true,
     /// without an `isRead` gate. `upsertArticles` sets `wasUpdated = true` while
-    /// the article is unread; `markRead` clears `wasUpdated` before setting
-    /// `isRead = true`, so the badge is only ever visible on unread articles —
-    /// suppressing it behind `isRead` would make it permanently invisible.
+    /// the article is unread; all mark-read transitions clear `wasUpdated` before
+    /// setting `isRead = true`, so the badge is only ever visible on unread
+    /// articles — suppressing it behind `isRead` would make it permanently
+    /// invisible.
     @ViewBuilder
     private var metadataFooter: some View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
