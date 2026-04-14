@@ -68,6 +68,11 @@ struct ArticleReaderWebView: UIViewRepresentable {
         private let contentExtractor: any ContentExtracting
 
         /// Tracks whether early extraction already succeeded, so `didFinish` can skip redundant work.
+        // RATIONALE: Reset implicitly on article navigation because ArticleReaderView applies
+        // .id(article.articleID) to the ArticleReaderWebView subtree, causing SwiftUI to tear
+        // down and recreate the Coordinator (and this flag) on every article change. Removing
+        // that .id modifier would leave this flag stale across navigations, causing extraction
+        // to be skipped for subsequent articles and the spinner to get stuck.
         private var earlyExtractionSucceeded = false
 
         init(
