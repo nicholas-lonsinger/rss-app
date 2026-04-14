@@ -10,8 +10,9 @@ struct GroupArticleSourceTests {
     @MainActor
     private static func makeFixture(
         articleCount: Int = 3,
-        feedCount: Int = 1
-    ) -> (source: GroupArticleSource, mock: MockFeedPersistenceService, group: PersistentFeedGroup) {
+        feedCount: Int = 1,
+        readCount: Int = 0
+    ) -> (source: GroupArticleSource, mock: MockFeedPersistenceService, group: PersistentFeedGroup, defaults: UserDefaults) {
         let mock = MockFeedPersistenceService()
         let group = PersistentFeedGroup(name: "Test Group")
         mock.groups = [group]
@@ -30,9 +31,10 @@ struct GroupArticleSourceTests {
             var articles: [PersistentArticle] = []
             for j in 0..<articleCount {
                 let sortDate = Date(timeIntervalSince1970: Double(1_000_000 - (i * articleCount + j) * 100))
+                let globalIndex = i * articleCount + j
                 let article = TestFixtures.makePersistentArticle(
                     articleID: "feed\(i)-article\(j)",
-                    isRead: false,
+                    isRead: globalIndex < readCount,
                     sortDate: sortDate
                 )
                 article.feed = feed
@@ -41,12 +43,12 @@ struct GroupArticleSourceTests {
             mock.articlesByFeedID[feed.id] = articles
         }
 
-        // Use an isolated UserDefaults suite so sort state changes in one test
+        // Use an isolated UserDefaults suite so sort/filter state changes in one test
         // do not bleed into other tests running in parallel on different suites.
         let defaults = UserDefaults(suiteName: UUID().uuidString)!
         let homeVM = HomeViewModel(persistence: mock, userDefaults: defaults)
-        let source = GroupArticleSource(group: group, persistence: mock, homeViewModel: homeVM)
-        return (source, mock, group)
+        let source = GroupArticleSource(group: group, persistence: mock, homeViewModel: homeVM, userDefaults: defaults)
+        return (source, mock, group, defaults)
     }
 
     // MARK: - Display configuration
@@ -54,16 +56,16 @@ struct GroupArticleSourceTests {
     @Test("title returns group name")
     @MainActor
     func titleIsGroupName() {
-        let (source, _, _) = Self.makeFixture()
+        let (source, _, _, _) = Self.makeFixture()
         #expect(source.title == "Test Group")
     }
 
-    @Test("supportsSort is true, supportsUnreadFilter is false")
+    @Test("supportsSort is true, supportsUnreadFilter is true")
     @MainActor
     func displayConfiguration() {
-        let (source, _, _) = Self.makeFixture()
+        let (source, _, _, _) = Self.makeFixture()
         #expect(source.supportsSort == true)
-        #expect(source.supportsUnreadFilter == false)
+        #expect(source.supportsUnreadFilter == true)
     }
 
     // MARK: - reload
@@ -71,7 +73,7 @@ struct GroupArticleSourceTests {
     @Test("reload loads articles from group feeds")
     @MainActor
     func reloadLoadsArticles() {
-        let (source, _, _) = Self.makeFixture(articleCount: 3, feedCount: 2)
+        let (source, _, _, _) = Self.makeFixture(articleCount: 3, feedCount: 2)
         source.reload()
 
         #expect(source.articles.count == 6)
@@ -97,7 +99,7 @@ struct GroupArticleSourceTests {
     @MainActor
     func multiPageCursorProgression() {
         // 60 articles across 2 feeds (30 each) exceeds pageSize (50), spanning 2 pages.
-        let (source, _, _) = Self.makeFixture(articleCount: 30, feedCount: 2)
+        let (source, _, _, _) = Self.makeFixture(articleCount: 30, feedCount: 2)
         source.reload()
 
         let firstPageCount = source.articles.count
@@ -121,7 +123,7 @@ struct GroupArticleSourceTests {
     @Test("markAsRead delegates to homeViewModel and returns true")
     @MainActor
     func markAsReadDelegates() {
-        let (source, _, _) = Self.makeFixture()
+        let (source, _, _, _) = Self.makeFixture()
         source.reload()
 
         let article = source.articles[0]
@@ -134,7 +136,7 @@ struct GroupArticleSourceTests {
     @Test("toggleReadStatus toggles article read state")
     @MainActor
     func toggleReadStatus() {
-        let (source, _, _) = Self.makeFixture()
+        let (source, _, _, _) = Self.makeFixture()
         source.reload()
 
         let article = source.articles[0]
@@ -150,7 +152,7 @@ struct GroupArticleSourceTests {
     @Test("toggleSaved toggles article saved state")
     @MainActor
     func toggleSaved() {
-        let (source, _, _) = Self.makeFixture()
+        let (source, _, _, _) = Self.makeFixture()
         source.reload()
 
         let article = source.articles[0]
@@ -192,7 +194,7 @@ struct GroupArticleSourceTests {
     @Test("reload preserves previous articles on error")
     @MainActor
     func reloadPreservesOnError() {
-        let (source, mock, _) = Self.makeFixture(articleCount: 2)
+        let (source, mock, _, _) = Self.makeFixture(articleCount: 2)
         source.reload()
         #expect(source.articles.count == 2)
 
@@ -207,7 +209,7 @@ struct GroupArticleSourceTests {
     @MainActor
     func reloadPreservesCursorOnError() {
         // Load enough articles to leave hasMore true (page size is 50, load 60).
-        let (source, mock, _) = Self.makeFixture(articleCount: 30, feedCount: 2)
+        let (source, mock, _, _) = Self.makeFixture(articleCount: 30, feedCount: 2)
         source.reload()
         #expect(source.articles.count == 50)
 
@@ -226,7 +228,7 @@ struct GroupArticleSourceTests {
     @Test("clearError clears errorMessage")
     @MainActor
     func clearError() {
-        let (source, mock, _) = Self.makeFixture()
+        let (source, mock, _, _) = Self.makeFixture()
         mock.groupError = NSError(domain: "test", code: 1)
         source.reload()
         #expect(source.errorMessage != nil)
@@ -240,7 +242,7 @@ struct GroupArticleSourceTests {
     @Test("sortAscending toggle reloads articles in new order")
     @MainActor
     func sortAscendingToggle() {
-        let (source, _, _) = Self.makeFixture(articleCount: 3)
+        let (source, _, _, _) = Self.makeFixture(articleCount: 3)
         source.reload()
 
         let firstDescending = source.articles.first?.articleID
@@ -249,5 +251,111 @@ struct GroupArticleSourceTests {
         let firstAscending = source.articles.first?.articleID
 
         #expect(firstDescending != firstAscending)
+    }
+
+    // MARK: - Unread filter
+
+    @Test("showUnreadOnly filters to unread articles only")
+    @MainActor
+    func showUnreadOnlyFilters() {
+        // 3 articles, first 1 is read, remaining 2 are unread.
+        let (source, _, _, _) = Self.makeFixture(articleCount: 3, readCount: 1)
+        source.reload()
+        #expect(source.articles.count == 3)
+
+        source.showUnreadOnly = true
+        #expect(source.articles.count == 2)
+        #expect(source.articles.allSatisfy { !$0.isRead })
+    }
+
+    @Test("showUnreadOnly persists to UserDefaults")
+    @MainActor
+    func showUnreadOnlyPersistsToDefaults() {
+        let (source, _, _, defaults) = Self.makeFixture()
+
+        #expect(defaults.bool(forKey: FeedViewModel.showUnreadOnlyKey) == false)
+        source.showUnreadOnly = true
+        #expect(defaults.bool(forKey: FeedViewModel.showUnreadOnlyKey) == true)
+        source.showUnreadOnly = false
+        #expect(defaults.bool(forKey: FeedViewModel.showUnreadOnlyKey) == false)
+    }
+
+    @Test("showUnreadOnly reads from the global UserDefaults key")
+    @MainActor
+    func showUnreadOnlyReadsFromDefaults() {
+        let (source, _, _, defaults) = Self.makeFixture()
+        #expect(source.showUnreadOnly == false)
+
+        defaults.set(true, forKey: FeedViewModel.showUnreadOnlyKey)
+        #expect(source.showUnreadOnly == true)
+    }
+
+    @Test("showUnreadOnly toggling to same value is a no-op")
+    @MainActor
+    func showUnreadOnlyNoOpOnSameValue() {
+        let (source, _, _, _) = Self.makeFixture(articleCount: 3, readCount: 1)
+        source.reload()
+        let countBefore = source.articles.count
+
+        // Setting the same value (false → false) must not reload.
+        source.showUnreadOnly = false
+        #expect(source.articles.count == countBefore)
+    }
+
+    @Test("showUnreadOnly stable: marking article read does not remove it from the list")
+    @MainActor
+    func showUnreadOnlyStableList() {
+        // 3 unread articles.
+        let (source, _, _, _) = Self.makeFixture(articleCount: 3, readCount: 0)
+        source.reload()
+        source.showUnreadOnly = true
+        #expect(source.articles.count == 3)
+
+        // Marking an article read (snapshot-stable mutation) must NOT shrink the list.
+        let article = source.articles[0]
+        source.markAsRead(article)
+
+        #expect(article.isRead == true)
+        #expect(source.articles.count == 3)
+    }
+
+    @Test("showUnreadOnly: toggling off shows all articles including newly read ones")
+    @MainActor
+    func showUnreadOnlyToggleOffShowsAll() {
+        // 3 articles, 2 unread.
+        let (source, _, _, _) = Self.makeFixture(articleCount: 3, readCount: 1)
+        source.showUnreadOnly = true
+        source.reload()
+        #expect(source.articles.count == 2)
+
+        // Toggle off re-queries the full set.
+        source.showUnreadOnly = false
+        #expect(source.articles.count == 3)
+    }
+
+    @Test("showUnreadOnly with paginated group fetches only unread across pages")
+    @MainActor
+    func showUnreadOnlyPaginated() {
+        // 120 articles across 2 feeds (60 each), first 10 are read, 110 unread — well exceeds pageSize.
+        let (source, _, _, _) = Self.makeFixture(articleCount: 60, feedCount: 2, readCount: 10)
+        source.showUnreadOnly = true
+        source.reload()
+
+        let firstPageCount = source.articles.count
+        // First page: 50 unread articles (pageSize).
+        #expect(firstPageCount == 50)
+        #expect(source.hasMore == true)
+        #expect(source.articles.allSatisfy { !$0.isRead })
+
+        let result = source.loadMoreAndReport()
+        // Second page has more unread articles (110 - 50 = 60 remain).
+        #expect(result == .loaded)
+        #expect(source.articles.count == 100)
+        #expect(source.hasMore == true)
+        #expect(source.articles.allSatisfy { !$0.isRead })
+
+        // No duplicates.
+        let ids = source.articles.map(\.articleID)
+        #expect(Set(ids).count == ids.count)
     }
 }

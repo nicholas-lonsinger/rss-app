@@ -460,6 +460,30 @@ final class MockFeedPersistenceService: FeedPersisting {
         return Array(all.prefix(limit))
     }
 
+    func unreadArticles(in group: PersistentFeedGroup, cursor: ArticlePaginationCursor?, limit: Int, ascending: Bool = false) throws -> [PersistentArticle] {
+        if let error = groupError ?? errorToThrow { throw error }
+        let feedIDs = Set(memberships.filter { $0.group?.id == group.id }.compactMap { $0.feed?.id })
+        var all = articlesByFeedID
+            .filter { feedIDs.contains($0.key) }
+            .values.flatMap { $0 }
+            .filter { !$0.isRead }
+            .sorted(by: ascending ? Self.sortAscending : Self.sortDescending)
+
+        if let cursor {
+            all = all.filter { article in
+                if ascending {
+                    return article.sortDate > cursor.sortDate ||
+                        (article.sortDate == cursor.sortDate && article.articleID > cursor.articleID)
+                } else {
+                    return article.sortDate < cursor.sortDate ||
+                        (article.sortDate == cursor.sortDate && article.articleID > cursor.articleID)
+                }
+            }
+        }
+
+        return Array(all.prefix(limit))
+    }
+
     func unreadCount(in group: PersistentFeedGroup) throws -> Int {
         if let error = groupError ?? errorToThrow { throw error }
         let feedIDs = Set(memberships.filter { $0.group?.id == group.id }.compactMap { $0.feed?.id })

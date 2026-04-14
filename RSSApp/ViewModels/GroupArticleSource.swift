@@ -19,6 +19,7 @@ final class GroupArticleSource: ArticleListSource {
     private let group: PersistentFeedGroup
     private let persistence: FeedPersisting
     private let homeViewModel: HomeViewModel
+    private let userDefaults: UserDefaults
 
     private(set) var articles: [PersistentArticle] = []
     private(set) var hasMore = true
@@ -34,8 +35,13 @@ final class GroupArticleSource: ArticleListSource {
         )
     }
     var supportsSort: Bool { true }
-    var supportsUnreadFilter: Bool { false }
+    var supportsUnreadFilter: Bool { true }
 
+    // RATIONALE: sortAscending delegates to homeViewModel.sortAscending, which is itself
+    // backed by the same global UserDefaults key used by FeedViewModel. @Observable does
+    // not track UserDefaults reads automatically; UI correctness is preserved because the
+    // setter calls loadArticles(), which mutates the tracked `articles` array and drives
+    // SwiftUI updates.
     var sortAscending: Bool {
         get { homeViewModel.sortAscending }
         set {
@@ -43,19 +49,32 @@ final class GroupArticleSource: ArticleListSource {
             loadArticles()
         }
     }
+
+    // RATIONALE: showUnreadOnly is backed by the same global UserDefaults key as
+    // FeedViewModel.showUnreadOnly so that the toggle state is shared across all feed
+    // and group article lists. @Observable does not track UserDefaults reads automatically;
+    // UI correctness is preserved because the setter calls loadArticles(), which mutates
+    // the tracked `articles` array and drives SwiftUI updates.
     var showUnreadOnly: Bool {
-        get { false }
-        set { /* no-op — not supported for group lists */ }
+        get { userDefaults.bool(forKey: FeedViewModel.showUnreadOnlyKey) }
+        set {
+            guard userDefaults.bool(forKey: FeedViewModel.showUnreadOnlyKey) != newValue else { return }
+            userDefaults.set(newValue, forKey: FeedViewModel.showUnreadOnlyKey)
+            Self.logger.debug("showUnreadOnly changed to \(newValue, privacy: .public)")
+            loadArticles()
+        }
     }
 
     init(
         group: PersistentFeedGroup,
         persistence: FeedPersisting,
-        homeViewModel: HomeViewModel
+        homeViewModel: HomeViewModel,
+        userDefaults: UserDefaults = .standard
     ) {
         self.group = group
         self.persistence = persistence
         self.homeViewModel = homeViewModel
+        self.userDefaults = userDefaults
     }
 
     // MARK: - Lifecycle
@@ -127,6 +146,7 @@ final class GroupArticleSource: ArticleListSource {
     private func loadArticles() {
         let previous = articles
         let previousCursor = paginationCursor
+        let previousHasMore = hasMore
         articles = []
         paginationCursor = nil
         hasMore = true
@@ -134,6 +154,7 @@ final class GroupArticleSource: ArticleListSource {
         if articles.isEmpty && errorMessage != nil {
             articles = previous
             paginationCursor = previousCursor
+            hasMore = previousHasMore
         }
     }
 
@@ -141,13 +162,21 @@ final class GroupArticleSource: ArticleListSource {
     private func loadMore() -> LoadMoreResult {
         guard hasMore else { return .exhausted }
         let ascending = sortAscending
+        let unreadOnly = showUnreadOnly
         do {
-            let page = try persistence.articles(
-                in: group,
-                cursor: paginationCursor,
-                limit: HomeViewModel.pageSize,
-                ascending: ascending
-            )
+            let page = try unreadOnly
+                ? persistence.unreadArticles(
+                    in: group,
+                    cursor: paginationCursor,
+                    limit: HomeViewModel.pageSize,
+                    ascending: ascending
+                )
+                : persistence.articles(
+                    in: group,
+                    cursor: paginationCursor,
+                    limit: HomeViewModel.pageSize,
+                    ascending: ascending
+                )
             let existingIDs = Set(articles.map(\.articleID))
             let newItems = page.filter { !existingIDs.contains($0.articleID) }
             articles.append(contentsOf: newItems)

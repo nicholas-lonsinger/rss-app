@@ -182,6 +182,22 @@ protocol FeedPersisting: Sendable {
     ///   - ascending: When `true`, sorts oldest first; when `false`, sorts newest first.
     func articles(in group: PersistentFeedGroup, cursor: ArticlePaginationCursor?, limit: Int, ascending: Bool) throws -> [PersistentArticle]
 
+    /// Returns a page of unread articles from all feeds in the group, sorted by `sortDate`,
+    /// using cursor-based pagination. Parallel to `articles(in:cursor:limit:ascending:)` but
+    /// filtered to `isRead == false`. Used by `GroupArticleSource` when `showUnreadOnly` is
+    /// active. Implemented as a separate method rather than a `unreadOnly: Bool` parameter
+    /// because SwiftData's `#Predicate` macro does not support composing predicates from
+    /// closures; see the `RATIONALE` comment on the implementation in
+    /// `SwiftDataFeedPersistenceService`.
+    ///
+    /// - Parameters:
+    ///   - group: The feed group whose member feeds' unread articles are queried.
+    ///   - cursor: The last article's `sortDate` and `articleID` from the previous page.
+    ///     Pass `nil` for the first page.
+    ///   - limit: Maximum number of articles to return.
+    ///   - ascending: When `true`, sorts oldest first; when `false`, sorts newest first.
+    func unreadArticles(in group: PersistentFeedGroup, cursor: ArticlePaginationCursor?, limit: Int, ascending: Bool) throws -> [PersistentArticle]
+
     /// Returns the total number of unread articles across all feeds in the group.
     func unreadCount(in group: PersistentFeedGroup) throws -> Int
     /// Marks all articles in all feeds belonging to the group as read.
@@ -1093,6 +1109,68 @@ final class SwiftDataFeedPersistenceService: FeedPersisting {
         // so the merged array may contain up to `feeds.count * limit` articles.
         let page = Array(merged.prefix(limit))
         Self.logger.debug("Fetched \(page.count, privacy: .public) articles in group '\(group.name, privacy: .public)' (cursor: \(cursor?.articleID ?? "nil", privacy: .public), limit: \(limit, privacy: .public), ascending: \(ascending, privacy: .public))")
+        return page
+    }
+
+    // RATIONALE: This mirrors articles(in:cursor:limit:ascending:) exactly, adding
+    // `&& !$0.isRead` to each predicate. The pattern is intentionally repeated rather
+    // than abstracted so each variant can be read and reasoned about independently, and
+    // because SwiftData's #Predicate macro does not support closure-based composition.
+    func unreadArticles(in group: PersistentFeedGroup, cursor: ArticlePaginationCursor?, limit: Int, ascending: Bool = false) throws -> [PersistentArticle] {
+        let feeds = feedsFromMemberships(group.memberships, context: "group '\(group.name)'")
+        guard !feeds.isEmpty else { return [] }
+
+        let sortOrder: SortOrder = ascending ? .forward : .reverse
+        var merged: [PersistentArticle] = []
+        merged.reserveCapacity(limit * feeds.count)
+
+        for feed in feeds {
+            let feedID = feed.persistentModelID
+            let predicate: Predicate<PersistentArticle>
+
+            if let cursor {
+                let cursorDate = cursor.sortDate
+                let cursorArticleID = cursor.articleID
+                if ascending {
+                    predicate = #Predicate {
+                        $0.feed?.persistentModelID == feedID && !$0.isRead && (
+                            $0.sortDate > cursorDate ||
+                            ($0.sortDate == cursorDate && $0.articleID > cursorArticleID)
+                        )
+                    }
+                } else {
+                    predicate = #Predicate {
+                        $0.feed?.persistentModelID == feedID && !$0.isRead && (
+                            $0.sortDate < cursorDate ||
+                            ($0.sortDate == cursorDate && $0.articleID > cursorArticleID)
+                        )
+                    }
+                }
+            } else {
+                predicate = #Predicate { $0.feed?.persistentModelID == feedID && !$0.isRead }
+            }
+
+            var descriptor = FetchDescriptor<PersistentArticle>(
+                predicate: predicate,
+                sortBy: [
+                    SortDescriptor(\.sortDate, order: sortOrder),
+                    SortDescriptor(\.articleID, order: .forward)
+                ]
+            )
+            descriptor.fetchLimit = limit
+            let feedArticles = try modelContext.fetch(descriptor)
+            merged.append(contentsOf: feedArticles)
+        }
+
+        merged.sort {
+            if $0.sortDate != $1.sortDate {
+                return ascending ? $0.sortDate < $1.sortDate : $0.sortDate > $1.sortDate
+            }
+            return $0.articleID < $1.articleID
+        }
+
+        let page = Array(merged.prefix(limit))
+        Self.logger.debug("Fetched \(page.count, privacy: .public) unread articles in group '\(group.name, privacy: .public)' (cursor: \(cursor?.articleID ?? "nil", privacy: .public), limit: \(limit, privacy: .public), ascending: \(ascending, privacy: .public))")
         return page
     }
 
