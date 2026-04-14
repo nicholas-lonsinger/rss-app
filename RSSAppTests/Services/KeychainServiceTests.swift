@@ -128,8 +128,8 @@ struct KeychainAPIKeyConvenienceTests {
 
     @Test("hasActiveAPIKey forwards defaults to AIProvider.active")
     func hasActiveAPIKeyForwardsDefaults() throws {
-        let suiteName = "com.rssapp.test.hasActiveAPIKey"
-        let defaults = UserDefaults(suiteName: suiteName)!
+        let suiteName = "com.rssapp.test.hasActiveAPIKey.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
         let mock = MockKeychainService()
