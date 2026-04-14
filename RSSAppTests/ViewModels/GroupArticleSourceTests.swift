@@ -273,11 +273,11 @@ struct GroupArticleSourceTests {
     func showUnreadOnlyPersistsToDefaults() {
         let (source, _, _, defaults) = Self.makeFixture()
 
-        #expect(defaults.bool(forKey: FeedViewModel.showUnreadOnlyKey) == false)
+        #expect(defaults.bool(forKey: Settings.UserDefaultsKeys.showUnreadOnly) == false)
         source.showUnreadOnly = true
-        #expect(defaults.bool(forKey: FeedViewModel.showUnreadOnlyKey) == true)
+        #expect(defaults.bool(forKey: Settings.UserDefaultsKeys.showUnreadOnly) == true)
         source.showUnreadOnly = false
-        #expect(defaults.bool(forKey: FeedViewModel.showUnreadOnlyKey) == false)
+        #expect(defaults.bool(forKey: Settings.UserDefaultsKeys.showUnreadOnly) == false)
     }
 
     @Test("showUnreadOnly reads from the global UserDefaults key")
@@ -286,7 +286,7 @@ struct GroupArticleSourceTests {
         let (source, _, _, defaults) = Self.makeFixture()
         #expect(source.showUnreadOnly == false)
 
-        defaults.set(true, forKey: FeedViewModel.showUnreadOnlyKey)
+        defaults.set(true, forKey: Settings.UserDefaultsKeys.showUnreadOnly)
         #expect(source.showUnreadOnly == true)
     }
 

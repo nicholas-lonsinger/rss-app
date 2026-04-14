@@ -7,14 +7,6 @@ final class FeedViewModel {
 
     private static let logger = Logger(category: "FeedViewModel")
 
-    /// UserDefaults key for the app-wide sort order preference.
-    static let sortAscendingKey = "articleSortAscending"
-
-    /// UserDefaults key for the app-wide unread-only filter preference.
-    /// Shared across all feed and group article lists so the toggle state
-    /// is consistent regardless of which list the user is browsing.
-    static let showUnreadOnlyKey = "articleShowUnreadOnly"
-
     /// Number of articles to fetch per page.
     static let pageSize = 50
 
@@ -33,10 +25,10 @@ final class FeedViewModel {
     /// feed and group article lists. Setting the value also calls `reloadArticles()`
     /// to refresh the current list immediately.
     var showUnreadOnly: Bool {
-        get { userDefaults.bool(forKey: Self.showUnreadOnlyKey) }
+        get { userDefaults.bool(forKey: Settings.UserDefaultsKeys.showUnreadOnly) }
         set {
-            guard userDefaults.bool(forKey: Self.showUnreadOnlyKey) != newValue else { return }
-            userDefaults.set(newValue, forKey: Self.showUnreadOnlyKey)
+            guard userDefaults.bool(forKey: Settings.UserDefaultsKeys.showUnreadOnly) != newValue else { return }
+            userDefaults.set(newValue, forKey: Settings.UserDefaultsKeys.showUnreadOnly)
             Self.logger.debug("showUnreadOnly changed to \(newValue, privacy: .public)")
             reloadArticles()
         }
@@ -49,10 +41,10 @@ final class FeedViewModel {
     // the resulting articles mutation triggers the necessary re-render.
     /// Current sort order — reads from the injected UserDefaults instance.
     var sortAscending: Bool {
-        get { userDefaults.bool(forKey: Self.sortAscendingKey) }
+        get { userDefaults.bool(forKey: Settings.UserDefaultsKeys.sortAscending) }
         set {
-            guard userDefaults.bool(forKey: Self.sortAscendingKey) != newValue else { return }
-            userDefaults.set(newValue, forKey: Self.sortAscendingKey)
+            guard userDefaults.bool(forKey: Settings.UserDefaultsKeys.sortAscending) != newValue else { return }
+            userDefaults.set(newValue, forKey: Settings.UserDefaultsKeys.sortAscending)
             Self.logger.debug("sortAscending changed to \(newValue, privacy: .public)")
             reloadArticles()
         }
