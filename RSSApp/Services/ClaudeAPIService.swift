@@ -1,20 +1,6 @@
 import Foundation
 import os
 
-/// Abstracts URLSession's `bytes(for:)` so `ClaudeAPIService` and `GeminiAPIService`
-/// can be tested with controlled SSE line sequences without hitting the network.
-protocol URLSessionBytesProviding: Sendable {
-    func bytes(for request: URLRequest, delegate: (any URLSessionTaskDelegate)?) async throws -> (URLSession.AsyncBytes, URLResponse)
-}
-
-extension URLSessionBytesProviding {
-    func bytes(for request: URLRequest) async throws -> (URLSession.AsyncBytes, URLResponse) {
-        try await bytes(for: request, delegate: nil)
-    }
-}
-
-extension URLSession: URLSessionBytesProviding {}
-
 /// Result of parsing a single SSE data line.
 ///
 /// Distinguishes between successfully extracted text, intentionally skipped

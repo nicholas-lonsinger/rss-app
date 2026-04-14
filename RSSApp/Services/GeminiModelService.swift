@@ -1,16 +1,6 @@
 import Foundation
 import os
 
-// MARK: - URLSessionDataProviding
-
-/// Abstracts URLSession's `data(for:)` so services like `GeminiModelService`
-/// can be tested with controlled response payloads without hitting the network.
-protocol URLSessionDataProviding: Sendable {
-    func data(for request: URLRequest) async throws -> (Data, URLResponse)
-}
-
-extension URLSession: URLSessionDataProviding {}
-
 // MARK: - GeminiModel
 
 struct GeminiModel: Sendable, Identifiable, Hashable {
