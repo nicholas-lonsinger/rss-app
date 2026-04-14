@@ -229,7 +229,12 @@ struct ArticleReaderView: View {
     /// article as read. Invoked from `.onChange(of: article.articleID)` so the same handler
     /// covers normal navigation and the pagination boundary uniformly.
     private func onArticleChanged() {
-        extractionState = ReaderExtractionState()
+        // RATIONALE: Mutate the existing instance rather than replacing it. Replacing would
+        // break the Coordinator's reference: makeCoordinator() captures the current
+        // extractionState before .onChange fires, so the coordinator would write to the
+        // discarded instance and the view would observe a permanently-nil new instance,
+        // leaving the spinner stuck indefinitely.
+        extractionState.content = nil
         showSummary = false
         markCurrentArticleAsRead()
     }
