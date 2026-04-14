@@ -229,7 +229,16 @@ struct ArticleReaderView: View {
     /// article as read. Invoked from `.onChange(of: article.articleID)` so the same handler
     /// covers normal navigation and the pagination boundary uniformly.
     private func onArticleChanged() {
-        extractionState = ReaderExtractionState()
+        // RATIONALE: Mutate the existing instance rather than replacing it. `makeCoordinator()`
+        // is called once at view creation and permanently stores a reference to the original
+        // `ReaderExtractionState` object. Replacing `extractionState` allocates a new object;
+        // SwiftUI passes it to subsequent renders, but `updateUIView` is a no-op so the
+        // Coordinator never receives the replacement — it continues writing `content` to the
+        // old object while the view reads `isExtracting` from the new (always-nil) one,
+        // leaving the spinner stuck indefinitely. If `ReaderExtractionState` gains additional
+        // properties, each must be explicitly reset here — unlike replacement, mutation does
+        // not auto-reset new fields.
+        extractionState.content = nil
         showSummary = false
         markCurrentArticleAsRead()
     }
