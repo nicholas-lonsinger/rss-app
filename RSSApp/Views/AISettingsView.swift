@@ -7,7 +7,7 @@ struct AISettingsView: View {
 
     // MARK: - State
 
-    @State private var selectedProvider: AIProvider = AIProvider.active
+    @State private var selectedProvider: AIProvider = AIProvider.active()
     @State private var keyInputs: [AIProvider: String] = [:]
     @State private var keyPresence: [AIProvider: Bool] = [:]
     @State private var modelInputs: [AIProvider: String] = [:]
@@ -271,7 +271,7 @@ struct AISettingsView: View {
     // MARK: - Load state
 
     private func loadAllState() {
-        selectedProvider = AIProvider.active
+        selectedProvider = AIProvider.active()
         loadError = nil
 
         for provider in AIProvider.allCases {

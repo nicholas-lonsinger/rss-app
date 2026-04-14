@@ -49,7 +49,7 @@ final class DiscussionViewModel {
         let input = currentInput.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !input.isEmpty, !isGenerating else { return }
 
-        let provider = AIProvider.active
+        let provider = AIProvider.active()
         let apiKey: String
         do {
             guard let key = try keychainService.loadAPIKey(for: provider), !key.isEmpty else {

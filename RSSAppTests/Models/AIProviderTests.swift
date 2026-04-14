@@ -59,33 +59,24 @@ struct AIProviderTests {
 
     @Test("active defaults to .claude when no value stored")
     func activeDefaultsClaude() {
-        // Standard defaults has no value set for this test, so we rely on
-        // AIProvider.active falling back when the rawValue is absent.
-        // We use a fresh defaults suite to avoid cross-test contamination.
         let defaults = makeTestDefaults()
-        // No value written — reading active should return .claude
-        let raw = defaults.string(forKey: "active_ai_provider")
-        #expect(raw == nil)
-        // Verify the static property falls back correctly (reads from standard)
-        // by checking the rawValue-based init:
-        #expect(AIProvider(rawValue: "") == nil)
-        // This confirms the nil-guard in active returns .claude
+        #expect(AIProvider.active(defaults: defaults) == .claude)
     }
 
-    @Test("setActive persists provider to UserDefaults")
+    @Test("setActive persists provider readable by active")
     func setActivePersists() {
         let defaults = makeTestDefaults()
         AIProvider.setActive(.gemini, defaults: defaults)
         #expect(defaults.string(forKey: "active_ai_provider") == "gemini")
+        #expect(AIProvider.active(defaults: defaults) == .gemini)
     }
 
-    @Test("setActive can round-trip all providers")
-    func setActiveRoundTrip() {
+    @Test("active round-trips all providers through setActive")
+    func activeRoundTrip() {
         let defaults = makeTestDefaults()
         for provider in AIProvider.allCases {
             AIProvider.setActive(provider, defaults: defaults)
-            let stored = defaults.string(forKey: "active_ai_provider")
-            #expect(AIProvider(rawValue: stored ?? "") == provider)
+            #expect(AIProvider.active(defaults: defaults) == provider)
         }
     }
 

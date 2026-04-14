@@ -48,7 +48,7 @@ struct DiscussionViewModelTests {
 
     /// Saves and returns the current active provider so tests can restore it after
     /// mutating `AIProvider.active`. Use with `defer { AIProvider.setActive(saved) }`.
-    private func saveActiveProvider() -> AIProvider { AIProvider.active }
+    private func saveActiveProvider() -> AIProvider { AIProvider.active() }
 
     @Test("hasAPIKey reflects keychain state")
     func hasAPIKey() {
