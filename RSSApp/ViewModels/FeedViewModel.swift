@@ -10,6 +10,11 @@ final class FeedViewModel {
     /// UserDefaults key for the app-wide sort order preference.
     static let sortAscendingKey = "articleSortAscending"
 
+    /// UserDefaults key for the app-wide unread-only filter preference.
+    /// Shared across all feed and group article lists so the toggle state
+    /// is consistent regardless of which list the user is browsing.
+    static let showUnreadOnlyKey = "articleShowUnreadOnly"
+
     /// Number of articles to fetch per page.
     static let pageSize = 50
 
@@ -19,12 +24,18 @@ final class FeedViewModel {
     var errorMessage: String?
     private(set) var hasMoreArticles = true
 
-    /// When `true`, only unread articles are shown. Toggled via
-    /// `FeedArticleSource.showUnreadOnly` in `ArticleListScreen`.
-    var showUnreadOnly = false {
-        didSet {
-            guard oldValue != showUnreadOnly else { return }
-            Self.logger.debug("showUnreadOnly changed to \(self.showUnreadOnly, privacy: .public)")
+    // RATIONALE: showUnreadOnly is a computed property backed by UserDefaults, so @Observable
+    // does not track it automatically. UI correctness is preserved because the setter calls
+    // reloadArticles(), which mutates the tracked `articles` array and drives SwiftUI updates.
+    // The global key ensures all feed and group lists share a single persistent toggle state.
+    /// Whether to show only unread articles. Reads from the injected UserDefaults
+    /// instance using a global key shared across all feed and group article lists.
+    var showUnreadOnly: Bool {
+        get { userDefaults.bool(forKey: Self.showUnreadOnlyKey) }
+        set {
+            guard userDefaults.bool(forKey: Self.showUnreadOnlyKey) != newValue else { return }
+            userDefaults.set(newValue, forKey: Self.showUnreadOnlyKey)
+            Self.logger.debug("showUnreadOnly changed to \(newValue, privacy: .public)")
             reloadArticles()
         }
     }
