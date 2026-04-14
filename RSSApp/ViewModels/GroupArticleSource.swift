@@ -38,10 +38,10 @@ final class GroupArticleSource: ArticleListSource {
     var supportsUnreadFilter: Bool { true }
 
     // RATIONALE: sortAscending delegates to homeViewModel.sortAscending, which is itself
-    // backed by the same global UserDefaults key used by FeedViewModel. @Observable does
-    // not track UserDefaults reads automatically; UI correctness is preserved because the
-    // setter calls loadArticles(), which mutates the tracked `articles` array and drives
-    // SwiftUI updates.
+    // backed by Settings.UserDefaultsKeys.sortAscending. @Observable does not track
+    // UserDefaults reads automatically; UI correctness is preserved because the setter
+    // calls loadArticles(), which mutates the tracked `articles` array and drives SwiftUI
+    // updates.
     var sortAscending: Bool {
         get { homeViewModel.sortAscending }
         set {
@@ -50,16 +50,16 @@ final class GroupArticleSource: ArticleListSource {
         }
     }
 
-    // RATIONALE: showUnreadOnly is backed by the same global UserDefaults key as
-    // FeedViewModel.showUnreadOnly so that the toggle state is shared across all feed
-    // and group article lists. @Observable does not track UserDefaults reads automatically;
-    // UI correctness is preserved because the setter calls loadArticles(), which mutates
-    // the tracked `articles` array and drives SwiftUI updates.
+    // RATIONALE: showUnreadOnly is backed by Settings.UserDefaultsKeys.showUnreadOnly, the
+    // same global key used by FeedViewModel.showUnreadOnly, so the toggle state is shared
+    // across all feed and group article lists. @Observable does not track UserDefaults reads
+    // automatically; UI correctness is preserved because the setter calls loadArticles(),
+    // which mutates the tracked `articles` array and drives SwiftUI updates.
     var showUnreadOnly: Bool {
-        get { userDefaults.bool(forKey: FeedViewModel.showUnreadOnlyKey) }
+        get { userDefaults.bool(forKey: Settings.UserDefaultsKeys.showUnreadOnly) }
         set {
-            guard userDefaults.bool(forKey: FeedViewModel.showUnreadOnlyKey) != newValue else { return }
-            userDefaults.set(newValue, forKey: FeedViewModel.showUnreadOnlyKey)
+            guard userDefaults.bool(forKey: Settings.UserDefaultsKeys.showUnreadOnly) != newValue else { return }
+            userDefaults.set(newValue, forKey: Settings.UserDefaultsKeys.showUnreadOnly)
             Self.logger.debug("showUnreadOnly changed to \(newValue, privacy: .public)")
             loadArticles()
         }

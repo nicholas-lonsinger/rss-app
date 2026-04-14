@@ -77,10 +77,10 @@ final class HomeViewModel {
     // loadSavedArticles) for their view.
     /// Current sort order — reads from the injected UserDefaults instance.
     var sortAscending: Bool {
-        get { userDefaults.bool(forKey: FeedViewModel.sortAscendingKey) }
+        get { userDefaults.bool(forKey: Settings.UserDefaultsKeys.sortAscending) }
         set {
-            guard userDefaults.bool(forKey: FeedViewModel.sortAscendingKey) != newValue else { return }
-            userDefaults.set(newValue, forKey: FeedViewModel.sortAscendingKey)
+            guard userDefaults.bool(forKey: Settings.UserDefaultsKeys.sortAscending) != newValue else { return }
+            userDefaults.set(newValue, forKey: Settings.UserDefaultsKeys.sortAscending)
             Self.logger.debug("sortAscending changed to \(newValue, privacy: .public)")
         }
     }

@@ -980,14 +980,14 @@ struct HomeViewModelTests {
 
         viewModel.sortAscending = true
         #expect(viewModel.sortAscending == true)
-        #expect(defaults.bool(forKey: FeedViewModel.sortAscendingKey) == true)
+        #expect(defaults.bool(forKey: Settings.UserDefaultsKeys.sortAscending) == true)
     }
 
     @Test("loadAllArticles respects ascending sort order")
     @MainActor
     func loadAllArticlesAscending() {
         let defaults = UserDefaults(suiteName: UUID().uuidString)!
-        defaults.set(true, forKey: FeedViewModel.sortAscendingKey)
+        defaults.set(true, forKey: Settings.UserDefaultsKeys.sortAscending)
         let feed = TestFixtures.makePersistentFeed()
         let mockPersistence = MockFeedPersistenceService()
         mockPersistence.feeds = [feed]
@@ -1016,7 +1016,7 @@ struct HomeViewModelTests {
     @MainActor
     func loadUnreadArticlesAscending() {
         let defaults = UserDefaults(suiteName: UUID().uuidString)!
-        defaults.set(true, forKey: FeedViewModel.sortAscendingKey)
+        defaults.set(true, forKey: Settings.UserDefaultsKeys.sortAscending)
         let feed = TestFixtures.makePersistentFeed()
         let mockPersistence = MockFeedPersistenceService()
         mockPersistence.feeds = [feed]
@@ -1047,7 +1047,7 @@ struct HomeViewModelTests {
     @MainActor
     func loadSavedArticlesAscending() {
         let defaults = UserDefaults(suiteName: UUID().uuidString)!
-        defaults.set(true, forKey: FeedViewModel.sortAscendingKey)
+        defaults.set(true, forKey: Settings.UserDefaultsKeys.sortAscending)
         let feed = TestFixtures.makePersistentFeed()
         let mockPersistence = MockFeedPersistenceService()
         mockPersistence.feeds = [feed]
