@@ -43,7 +43,7 @@ struct ArticleRowView: View {
 
                 Text(article.snippet)
                     .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(article.isRead ? .tertiary : .secondary)
                     .lineLimit(2)
 
                 metadataFooter
@@ -98,7 +98,7 @@ struct ArticleRowView: View {
             savedIndicator
         }
         .font(.caption)
-        .foregroundStyle(.secondary)
+        .foregroundStyle(article.isRead ? .tertiary : .secondary)
     }
 
     @ViewBuilder
