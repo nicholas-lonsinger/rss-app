@@ -253,7 +253,42 @@ struct GroupArticleSourceTests {
         #expect(firstDescending != firstAscending)
     }
 
+    @Test("sortAscending toggle preserves scroll depth when multi-page list is loaded")
+    @MainActor
+    func sortAscendingTogglePreservesScrollDepth() {
+        // 60 articles across 2 feeds — exceeds pageSize (50), so two pages must be loaded first.
+        let (source, _, _, _) = Self.makeFixture(articleCount: 30, feedCount: 2)
+        source.reload()
+        #expect(source.articles.count == 50)
+        _ = source.loadMoreAndReport()
+        #expect(source.articles.count == 60)
+
+        // Toggling sort should reload up to the current depth (60), not collapse to one page (50).
+        source.sortAscending = true
+        #expect(source.articles.count == 60)
+        #expect(source.articles.allSatisfy { _ in true }) // no duplicates check below
+        let ids = source.articles.map(\.articleID)
+        #expect(Set(ids).count == ids.count)
+    }
+
     // MARK: - Unread filter
+
+    @Test("showUnreadOnly toggle preserves scroll depth when multi-page list is loaded")
+    @MainActor
+    func showUnreadOnlyTogglePreservesScrollDepth() {
+        // 120 unread articles across 2 feeds — exceeds pageSize (50), so two pages must be loaded first.
+        let (source, _, _, _) = Self.makeFixture(articleCount: 60, feedCount: 2, readCount: 0)
+        source.reload()
+        #expect(source.articles.count == 50)
+        _ = source.loadMoreAndReport()
+        #expect(source.articles.count == 100)
+
+        // Toggling showUnreadOnly on should reload up to the current depth (100), not collapse to one page.
+        source.showUnreadOnly = true
+        #expect(source.articles.count == 100)
+        let ids = source.articles.map(\.articleID)
+        #expect(Set(ids).count == ids.count)
+    }
 
     @Test("showUnreadOnly filters to unread articles only")
     @MainActor
