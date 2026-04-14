@@ -101,8 +101,8 @@ enum AIProvider: String, CaseIterable, Sendable {
 
     /// The currently selected AI provider. Defaults to `.claude` when unset, matching
     /// the pre-multi-provider behavior so existing users are not disrupted on upgrade.
-    static var active: AIProvider {
-        guard let raw = UserDefaults.standard.string(forKey: activeProviderKey),
+    static func active(defaults: UserDefaults = .standard) -> AIProvider {
+        guard let raw = defaults.string(forKey: activeProviderKey),
               let provider = AIProvider(rawValue: raw) else {
             return .claude
         }

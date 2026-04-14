@@ -140,7 +140,7 @@ extension KeychainServicing {
 
     /// Whether the currently active provider has a non-empty API key stored.
     func hasActiveAPIKey() throws -> Bool {
-        try hasAPIKey(for: AIProvider.active)
+        try hasAPIKey(for: AIProvider.active())
     }
 
     // MARK: Legacy single-provider methods (Claude / Anthropic)

@@ -17,7 +17,7 @@ struct DiscussionViewModelTests {
 
     /// Creates a `DiscussionViewModel` with a mock AI service and mock Keychain.
     ///
-    /// Callers are responsible for setting `AIProvider.active` before calling this
+    /// Callers are responsible for calling `AIProvider.setActive(_:)` before calling this
     /// helper and restoring it afterward via `defer { AIProvider.setActive(previous) }`.
     private func makeVM(
         chunks: [String] = ["Hello", " world"],
@@ -47,8 +47,8 @@ struct DiscussionViewModelTests {
     }
 
     /// Saves and returns the current active provider so tests can restore it after
-    /// mutating `AIProvider.active`. Use with `defer { AIProvider.setActive(saved) }`.
-    private func saveActiveProvider() -> AIProvider { AIProvider.active }
+    /// mutating it via `AIProvider.setActive(_:)`. Use with `defer { AIProvider.setActive(saved) }`.
+    private func saveActiveProvider() -> AIProvider { AIProvider.active() }
 
     @Test("hasAPIKey reflects keychain state")
     func hasAPIKey() {
