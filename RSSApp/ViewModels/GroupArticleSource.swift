@@ -40,20 +40,20 @@ final class GroupArticleSource: ArticleListSource {
     // RATIONALE: sortAscending delegates to homeViewModel.sortAscending, which is itself
     // backed by Settings.UserDefaultsKeys.sortAscending. @Observable does not track
     // UserDefaults reads automatically; UI correctness is preserved because the setter
-    // calls loadArticles(), which mutates the tracked `articles` array and drives SwiftUI
+    // calls reloadArticles(), which mutates the tracked `articles` array and drives SwiftUI
     // updates.
     var sortAscending: Bool {
         get { homeViewModel.sortAscending }
         set {
             homeViewModel.sortAscending = newValue
-            loadArticles()
+            reloadArticles()
         }
     }
 
     // RATIONALE: showUnreadOnly is backed by Settings.UserDefaultsKeys.showUnreadOnly, the
     // same global key used by FeedViewModel.showUnreadOnly, so the toggle state is shared
     // across all feed and group article lists. @Observable does not track UserDefaults reads
-    // automatically; UI correctness is preserved because the setter calls loadArticles(),
+    // automatically; UI correctness is preserved because the setter calls reloadArticles(),
     // which mutates the tracked `articles` array and drives SwiftUI updates.
     var showUnreadOnly: Bool {
         get { userDefaults.bool(forKey: Settings.UserDefaultsKeys.showUnreadOnly) }
@@ -61,7 +61,7 @@ final class GroupArticleSource: ArticleListSource {
             guard userDefaults.bool(forKey: Settings.UserDefaultsKeys.showUnreadOnly) != newValue else { return }
             userDefaults.set(newValue, forKey: Settings.UserDefaultsKeys.showUnreadOnly)
             Self.logger.debug("showUnreadOnly changed to \(newValue, privacy: .public)")
-            loadArticles()
+            reloadArticles()
         }
     }
 
@@ -142,6 +142,38 @@ final class GroupArticleSource: ArticleListSource {
     /// cursor-based pagination. Reset to `nil` on full reload (sort change,
     /// refresh) so the first page re-fetches from the start.
     private var paginationCursor: ArticlePaginationCursor?
+
+    /// Reloads the article list from the beginning, preserving the current display depth.
+    /// Fetches `max(articles.count, pageSize)` articles from the start in a single call so
+    /// the user stays near their current scroll position after toggling sort or filter —
+    /// mirroring the behavior of `FeedViewModel.reloadArticles()`.
+    private func reloadArticles() {
+        let reloadLimit = max(articles.count, HomeViewModel.pageSize)
+        let ascending = sortAscending
+        let unreadOnly = showUnreadOnly
+        do {
+            let page = try unreadOnly
+                ? persistence.unreadArticles(
+                    in: group,
+                    cursor: nil,
+                    limit: reloadLimit,
+                    ascending: ascending
+                )
+                : persistence.articles(
+                    in: group,
+                    cursor: nil,
+                    limit: reloadLimit,
+                    ascending: ascending
+                )
+            articles = page
+            paginationCursor = page.last.map(ArticlePaginationCursor.init)
+            hasMore = page.count == reloadLimit
+            Self.logger.debug("Reloaded \(page.count, privacy: .public) articles for group '\(self.group.name, privacy: .public)' (limit: \(reloadLimit, privacy: .public))")
+        } catch {
+            errorMessage = "Unable to reload articles."
+            Self.logger.error("Failed to reload articles for group '\(self.group.name, privacy: .public)': \(error, privacy: .public)")
+        }
+    }
 
     private func loadArticles() {
         let previous = articles
