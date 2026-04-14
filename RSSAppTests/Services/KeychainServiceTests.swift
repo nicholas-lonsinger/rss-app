@@ -125,4 +125,21 @@ struct KeychainAPIKeyConvenienceTests {
             try mock.deleteAPIKey()
         }
     }
+
+    @Test("hasActiveAPIKey forwards defaults to AIProvider.active")
+    func hasActiveAPIKeyForwardsDefaults() throws {
+        let suiteName = "com.rssapp.test.hasActiveAPIKey.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let mock = MockKeychainService()
+        try mock.saveAPIKey("AIzaSy-test", for: .gemini)
+
+        // With no provider set in the isolated defaults, active() falls back to .claude
+        #expect(try mock.hasActiveAPIKey(defaults: defaults) == false)
+
+        // After setting Gemini as active in isolated defaults, the Gemini key is found
+        AIProvider.setActive(.gemini, defaults: defaults)
+        #expect(try mock.hasActiveAPIKey(defaults: defaults) == true)
+    }
 }
