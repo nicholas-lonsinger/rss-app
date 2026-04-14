@@ -28,8 +28,10 @@ final class FeedViewModel {
     // does not track it automatically. UI correctness is preserved because the setter calls
     // reloadArticles(), which mutates the tracked `articles` array and drives SwiftUI updates.
     // The global key ensures all feed and group lists share a single persistent toggle state.
-    /// Whether to show only unread articles. Reads from the injected UserDefaults
-    /// instance using a global key shared across all feed and group article lists.
+    /// Whether to show only unread articles. Reads and writes the global unread-only
+    /// filter preference via the injected `UserDefaults` instance. Shared across all
+    /// feed and group article lists. Setting the value also calls `reloadArticles()`
+    /// to refresh the current list immediately.
     var showUnreadOnly: Bool {
         get { userDefaults.bool(forKey: Self.showUnreadOnlyKey) }
         set {

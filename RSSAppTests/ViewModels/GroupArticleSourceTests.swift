@@ -307,8 +307,8 @@ struct GroupArticleSourceTests {
     func showUnreadOnlyStableList() {
         // 3 unread articles.
         let (source, _, _, _) = Self.makeFixture(articleCount: 3, readCount: 0)
-        source.showUnreadOnly = true
         source.reload()
+        source.showUnreadOnly = true
         #expect(source.articles.count == 3)
 
         // Marking an article read (snapshot-stable mutation) must NOT shrink the list.

@@ -37,6 +37,11 @@ final class GroupArticleSource: ArticleListSource {
     var supportsSort: Bool { true }
     var supportsUnreadFilter: Bool { true }
 
+    // RATIONALE: sortAscending delegates to homeViewModel.sortAscending, which is itself
+    // backed by the same global UserDefaults key used by FeedViewModel. @Observable does
+    // not track UserDefaults reads automatically; UI correctness is preserved because the
+    // setter calls loadArticles(), which mutates the tracked `articles` array and drives
+    // SwiftUI updates.
     var sortAscending: Bool {
         get { homeViewModel.sortAscending }
         set {
@@ -141,6 +146,7 @@ final class GroupArticleSource: ArticleListSource {
     private func loadArticles() {
         let previous = articles
         let previousCursor = paginationCursor
+        let previousHasMore = hasMore
         articles = []
         paginationCursor = nil
         hasMore = true
@@ -148,6 +154,7 @@ final class GroupArticleSource: ArticleListSource {
         if articles.isEmpty && errorMessage != nil {
             articles = previous
             paginationCursor = previousCursor
+            hasMore = previousHasMore
         }
     }
 

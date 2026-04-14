@@ -185,7 +185,10 @@ protocol FeedPersisting: Sendable {
     /// Returns a page of unread articles from all feeds in the group, sorted by `sortDate`,
     /// using cursor-based pagination. Parallel to `articles(in:cursor:limit:ascending:)` but
     /// filtered to `isRead == false`. Used by `GroupArticleSource` when `showUnreadOnly` is
-    /// active.
+    /// active. Implemented as a separate method rather than a `unreadOnly: Bool` parameter
+    /// because SwiftData's `#Predicate` macro does not support composing predicates from
+    /// closures; see the `RATIONALE` comment on the implementation in
+    /// `SwiftDataFeedPersistenceService`.
     ///
     /// - Parameters:
     ///   - group: The feed group whose member feeds' unread articles are queried.
