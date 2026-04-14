@@ -1,6 +1,16 @@
 import Foundation
 import os
 
+// MARK: - URLSessionDataProviding
+
+/// Abstracts URLSession's `data(for:)` so services like `GeminiModelService`
+/// can be tested with controlled response payloads without hitting the network.
+protocol URLSessionDataProviding: Sendable {
+    func data(for request: URLRequest) async throws -> (Data, URLResponse)
+}
+
+extension URLSession: URLSessionDataProviding {}
+
 // MARK: - GeminiModel
 
 struct GeminiModel: Sendable, Identifiable, Hashable {
@@ -23,6 +33,12 @@ struct GeminiModelService: GeminiModelFetching {
     private static let logger = Logger(category: "GeminiModelService")
     private static let listURL = "https://generativelanguage.googleapis.com/v1beta/models"
 
+    private let session: any URLSessionDataProviding
+
+    init(session: any URLSessionDataProviding = URLSession.shared) {
+        self.session = session
+    }
+
     /// Fetches the list of Gemini models that support `generateContent`.
     ///
     /// Strips the `models/` prefix from each name so the returned `id` values are
@@ -38,7 +54,7 @@ struct GeminiModelService: GeminiModelFetching {
         request.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
         request.setValue("application/json", forHTTPHeaderField: "accept")
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await session.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse else {
             throw AIServiceError.httpError(statusCode: 0)
         }
